@@ -45,3 +45,18 @@ type GetGroupMessagesResponse struct {
 	NextCursor *int64                `json:"nextCursor,omitempty"`
 	HasMore    bool                  `json:"hasMore"`
 }
+
+// CreateGroupRequest is the request body for POST /api/chat/groups.
+type CreateGroupRequest struct {
+	Type        string  `json:"type" binding:"required"`
+	Name        string  `json:"name,omitempty"`
+	Description string  `json:"description,omitempty"`
+	MemberIDs   []int64 `json:"memberIds"`
+	MaxMembers  *int    `json:"maxMembers,omitempty"`
+}
+
+// CreateGroupResponse is the response body for POST /api/chat/groups.
+type CreateGroupResponse struct {
+	Group     ChatGroupResponse `json:"group"`
+	IsCreated bool              `json:"isCreated"`
+}

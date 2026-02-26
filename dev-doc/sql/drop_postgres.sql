@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS goat.public.agents CASCADE;
 
 -- Users
 DROP TABLE IF EXISTS goat.public.users_roles CASCADE;
+DROP TABLE IF EXISTS goat.public.roles CASCADE;
 DROP TABLE IF EXISTS goat.public.users CASCADE;
 
 ---- Drop Enums Query ----

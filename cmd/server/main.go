@@ -1,7 +1,7 @@
 // @title Goat-Server
 // @version 1.0.0
 // @description Server for my all Goat application
-// @host localhost:8080
+// @host dev.hiroliang.com
 // @basePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header

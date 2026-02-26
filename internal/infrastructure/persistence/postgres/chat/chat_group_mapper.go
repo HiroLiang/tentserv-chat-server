@@ -1,16 +1,8 @@
 package chat
 
-import (
-	"github.com/HiroLiang/goat-server/internal/domain/chatgroup"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-)
+import "github.com/HiroLiang/goat-server/internal/domain/chatgroup"
 
 func toChatGroupDomain(rec *ChatGroupRecord) (*chatgroup.ChatGroup, error) {
-	var createdBy user.ID
-	if rec.CreatedBy != nil {
-		createdBy = *rec.CreatedBy
-	}
-
 	return &chatgroup.ChatGroup{
 		ID:          rec.ID,
 		Name:        rec.Name,
@@ -21,12 +13,11 @@ func toChatGroupDomain(rec *ChatGroupRecord) (*chatgroup.ChatGroup, error) {
 		IsDeleted:   rec.IsDeleted,
 		CreatedAt:   rec.CreatedAt,
 		UpdatedAt:   rec.UpdatedAt,
-		CreatedBy:   createdBy,
+		CreatedBy:   rec.CreatedBy,
 	}, nil
 }
 
 func toChatGroupRecord(g *chatgroup.ChatGroup) *ChatGroupRecord {
-	createdBy := g.CreatedBy
 	return &ChatGroupRecord{
 		ID:          g.ID,
 		Name:        g.Name,
@@ -37,6 +28,6 @@ func toChatGroupRecord(g *chatgroup.ChatGroup) *ChatGroupRecord {
 		IsDeleted:   g.IsDeleted,
 		CreatedAt:   g.CreatedAt,
 		UpdatedAt:   g.UpdatedAt,
-		CreatedBy:   &createdBy,
+		CreatedBy:   g.CreatedBy,
 	}
 }

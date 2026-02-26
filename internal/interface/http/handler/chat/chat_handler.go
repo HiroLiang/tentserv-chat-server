@@ -4,18 +4,18 @@ import (
 	"net/http"
 	"strconv"
 
-	appchat "github.com/HiroLiang/goat-server/internal/application/chat"
+	appChat "github.com/HiroLiang/goat-server/internal/application/chat"
 	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
 	"github.com/gin-gonic/gin"
 )
 
 // ChatHandler handles REST endpoints for chat groups and messages.
 type ChatHandler struct {
-	chatUseCase *appchat.UseCase
+	chatUseCase *appChat.UseCase
 }
 
 // NewChatHandler creates a new ChatHandler.
-func NewChatHandler(chatUseCase *appchat.UseCase) *ChatHandler {
+func NewChatHandler(chatUseCase *appChat.UseCase) *ChatHandler {
 	return &ChatHandler{chatUseCase: chatUseCase}
 }
 
@@ -23,6 +23,7 @@ func NewChatHandler(chatUseCase *appchat.UseCase) *ChatHandler {
 func (h *ChatHandler) RegisterChatRoutes(r *gin.RouterGroup) {
 	r.GET("/groups", h.getMyGroups)
 	r.GET("/groups/:id/messages", h.getGroupMessages)
+	r.POST("/groups", h.createGroup)
 }
 
 // @Summary List my chat groups
@@ -35,7 +36,7 @@ func (h *ChatHandler) RegisterChatRoutes(r *gin.RouterGroup) {
 // @Failure 500 {object} response.ErrorResponse "Internal Server Error"
 // @Router /api/chat/groups [get]
 func (h *ChatHandler) getMyGroups(c *gin.Context) {
-	output, err := h.chatUseCase.GetMyGroups(c.Request.Context(), adapter.BuildInput(c, appchat.GetMyGroupsInput{}))
+	output, err := h.chatUseCase.GetMyGroups(c.Request.Context(), adapter.BuildInput(c, appChat.GetMyGroupsInput{}))
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -86,7 +87,7 @@ func (h *ChatHandler) getGroupMessages(c *gin.Context) {
 		return
 	}
 
-	data := appchat.GetGroupMessagesInput{GroupID: groupID}
+	data := appChat.GetGroupMessagesInput{GroupID: groupID}
 
 	if beforeStr := c.Query("before"); beforeStr != "" {
 		v, err := strconv.ParseInt(beforeStr, 10, 64)
@@ -134,4 +135,59 @@ func (h *ChatHandler) getGroupMessages(c *gin.Context) {
 		NextCursor: output.NextCursor,
 		HasMore:    output.HasMore,
 	})
+}
+
+// @Summary Create a chat group
+// @Description Creates a new chat group (direct, group, or bot). For direct and bot types, returns the existing group if one already exists with the same participants.
+// @Tags Chat
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateGroupRequest true "Create group request"
+// @Success 201 {object} CreateGroupResponse "Group created"
+// @Success 200 {object} CreateGroupResponse "Group already exists"
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 404 {object} response.ErrorResponse "Not Found"
+// @Failure 409 {object} response.ErrorResponse "Conflict"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/chat/groups [post]
+func (h *ChatHandler) createGroup(c *gin.Context) {
+	var req CreateGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAM", "message": err.Error()})
+		return
+	}
+
+	data := appChat.CreateGroupInput{
+		Type:        req.Type,
+		Name:        req.Name,
+		Description: req.Description,
+		MemberIDs:   req.MemberIDs,
+		MaxMembers:  req.MaxMembers,
+	}
+
+	output, err := h.chatUseCase.CreateGroup(c.Request.Context(), adapter.BuildInput(c, data))
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	resp := CreateGroupResponse{
+		Group: ChatGroupResponse{
+			ID:          output.Group.ID,
+			Type:        output.Group.Type,
+			Name:        output.Group.Name,
+			Description: output.Group.Description,
+			AvatarURL:   output.Group.AvatarURL,
+			UnreadCount: output.Group.UnreadCount,
+			MemberCount: output.Group.MemberCount,
+		},
+		IsCreated: output.IsCreated,
+	}
+
+	if output.IsCreated {
+		c.JSON(http.StatusCreated, resp)
+	} else {
+		c.JSON(http.StatusOK, resp)
+	}
 }

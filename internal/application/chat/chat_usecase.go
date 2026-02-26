@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/HiroLiang/goat-server/internal/application/shared"
@@ -65,7 +66,7 @@ func (u *UseCase) GetMyGroups(
 	for _, m := range members {
 		groupMemberCounts[m.GroupID]++
 	}
-	// Actually we need all members per group, not just the current user's
+	// Actually, we need all members per group, not just the current user's
 	// We'll fetch member count per group separately
 	items := make([]ChatGroupItem, 0, len(members))
 
@@ -167,7 +168,7 @@ func (u *UseCase) GetGroupMessages(
 	if input.Data.BeforeID != nil {
 		messages, err = u.chatMessageRepo.FindByGroupBefore(ctx, groupID, chatmessage.ID(*input.Data.BeforeID), fetchLimit)
 	} else {
-		// No cursor: fetch latest messages (descending then reverse)
+		// No cursor: fetch the latest messages (descending then reverse)
 		raw, fetchErr := u.chatMessageRepo.FindByGroup(ctx, groupID, fetchLimit, 0)
 		if fetchErr != nil {
 			return GetGroupMessagesOutput{}, fetchErr
@@ -186,7 +187,7 @@ func (u *UseCase) GetGroupMessages(
 	hasMore := false
 	if uint64(len(messages)) > limit {
 		hasMore = true
-		// Remove the extra oldest message (it's at front after reversal)
+		// Remove the ancient message (it's at front after reversal)
 		messages = messages[1:]
 	}
 
@@ -239,5 +240,217 @@ func (u *UseCase) GetGroupMessages(
 		Messages:   items,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
+	}, nil
+}
+
+// CreateGroup creates a new chat group of the given type or returns an existing one for direct/bot.
+func (u *UseCase) CreateGroup(
+	ctx context.Context,
+	input shared.UseCaseInput[CreateGroupInput],
+) (CreateGroupOutput, error) {
+	userID, err := user.ToID(input.Base.Auth.UserID)
+	if err != nil {
+		return CreateGroupOutput{}, user.ErrInvalidUser
+	}
+
+	currentParticipant, err := u.participantRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		return CreateGroupOutput{}, participant.ErrNotFound
+	}
+
+	groupType, err := chatgroup.ParseGroupType(input.Data.Type)
+	if err != nil {
+		return CreateGroupOutput{}, chatgroup.ErrInvalidGroupType
+	}
+
+	switch groupType {
+	case chatgroup.Direct:
+		return u.createDirectGroup(ctx, userID, currentParticipant, input.Data)
+	case chatgroup.Group:
+		return u.createRegularGroup(ctx, userID, currentParticipant, input.Data)
+	case chatgroup.Bot:
+		return u.createBotGroup(ctx, currentParticipant, input.Data)
+	default:
+		return CreateGroupOutput{}, chatgroup.ErrInvalidGroupType
+	}
+}
+
+func (u *UseCase) createDirectGroup(
+	ctx context.Context,
+	userID user.ID,
+	currentParticipant *participant.Participant,
+	data CreateGroupInput,
+) (CreateGroupOutput, error) {
+	if len(data.MemberIDs) != 1 {
+		return CreateGroupOutput{}, fmt.Errorf("%w: direct group requires exactly 1 member", chatgroup.ErrInvalidGroupType)
+	}
+
+	targetParticipant, err := u.participantRepo.FindByID(ctx, participant.ID(data.MemberIDs[0]))
+	if err != nil {
+		return CreateGroupOutput{}, participant.ErrNotFound
+	}
+	if !targetParticipant.IsUser() {
+		return CreateGroupOutput{}, fmt.Errorf("%w: direct group member must be a user", chatgroup.ErrInvalidGroupType)
+	}
+
+	existing, err := u.chatGroupRepo.FindDirectByParticipants(ctx, currentParticipant.ID, targetParticipant.ID)
+	if err == nil {
+		groupMembers, _ := u.chatMemberRepo.FindByGroup(ctx, existing.ID)
+		return CreateGroupOutput{
+			Group: ChatGroupItem{
+				ID:          int64(existing.ID),
+				Type:        string(existing.Type),
+				Name:        existing.Name,
+				Description: existing.Description,
+				AvatarURL:   existing.AvatarURL,
+				MemberCount: len(groupMembers),
+			},
+			IsCreated: false,
+		}, nil
+	}
+	if !errors.Is(err, chatgroup.ErrNotFound) {
+		return CreateGroupOutput{}, err
+	}
+
+	newGroup := chatgroup.NewDirectGroup(userID)
+	if err := u.chatGroupRepo.Create(ctx, newGroup); err != nil {
+		return CreateGroupOutput{}, err
+	}
+	if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, currentParticipant.ID, chatmember.Owner)); err != nil {
+		return CreateGroupOutput{}, err
+	}
+	if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, targetParticipant.ID, chatmember.Member)); err != nil {
+		return CreateGroupOutput{}, err
+	}
+
+	return CreateGroupOutput{
+		Group: ChatGroupItem{
+			ID:          int64(newGroup.ID),
+			Type:        string(newGroup.Type),
+			Name:        newGroup.Name,
+			Description: newGroup.Description,
+			AvatarURL:   newGroup.AvatarURL,
+			MemberCount: 2,
+		},
+		IsCreated: true,
+	}, nil
+}
+
+func (u *UseCase) createRegularGroup(
+	ctx context.Context,
+	userID user.ID,
+	currentParticipant *participant.Participant,
+	data CreateGroupInput,
+) (CreateGroupOutput, error) {
+	if data.Name == "" {
+		return CreateGroupOutput{}, fmt.Errorf("%w: group name is required", chatgroup.ErrInvalidGroupType)
+	}
+
+	maxMembers := 100
+	if data.MaxMembers != nil {
+		maxMembers = *data.MaxMembers
+	}
+
+	newGroup := chatgroup.NewGroup(data.Name, data.Description, maxMembers, userID)
+	if err := u.chatGroupRepo.Create(ctx, newGroup); err != nil {
+		return CreateGroupOutput{}, err
+	}
+	if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, currentParticipant.ID, chatmember.Owner)); err != nil {
+		return CreateGroupOutput{}, err
+	}
+
+	memberCount := 1
+	for _, memberID := range data.MemberIDs {
+		if participant.ID(memberID) == currentParticipant.ID {
+			continue
+		}
+		p, err := u.participantRepo.FindByID(ctx, participant.ID(memberID))
+		if err != nil {
+			return CreateGroupOutput{}, participant.ErrNotFound
+		}
+		if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, p.ID, chatmember.Member)); err != nil {
+			return CreateGroupOutput{}, err
+		}
+		memberCount++
+	}
+
+	return CreateGroupOutput{
+		Group: ChatGroupItem{
+			ID:          int64(newGroup.ID),
+			Type:        string(newGroup.Type),
+			Name:        newGroup.Name,
+			Description: newGroup.Description,
+			AvatarURL:   newGroup.AvatarURL,
+			MemberCount: memberCount,
+		},
+		IsCreated: true,
+	}, nil
+}
+
+func (u *UseCase) createBotGroup(
+	ctx context.Context,
+	currentParticipant *participant.Participant,
+	data CreateGroupInput,
+) (CreateGroupOutput, error) {
+	if len(data.MemberIDs) != 1 {
+		return CreateGroupOutput{}, fmt.Errorf("%w: bot group requires exactly 1 agent member", chatgroup.ErrInvalidGroupType)
+	}
+
+	agentParticipant, err := u.participantRepo.FindByID(ctx, participant.ID(data.MemberIDs[0]))
+	if err != nil {
+		return CreateGroupOutput{}, participant.ErrNotFound
+	}
+	if !agentParticipant.IsAgent() {
+		return CreateGroupOutput{}, fmt.Errorf("%w: bot group member must be an agent", chatgroup.ErrInvalidGroupType)
+	}
+
+	// Search for an existing bot group containing both participants
+	members, err := u.chatMemberRepo.FindByParticipant(ctx, currentParticipant.ID)
+	if err != nil {
+		return CreateGroupOutput{}, err
+	}
+	for _, m := range members {
+		group, err := u.chatGroupRepo.FindByID(ctx, m.GroupID)
+		if err != nil || group.IsDeleted || group.Type != chatgroup.Bot {
+			continue
+		}
+		_, err = u.chatMemberRepo.FindByGroupAndParticipant(ctx, m.GroupID, agentParticipant.ID)
+		if err == nil {
+			groupMembers, _ := u.chatMemberRepo.FindByGroup(ctx, m.GroupID)
+			return CreateGroupOutput{
+				Group: ChatGroupItem{
+					ID:          int64(group.ID),
+					Type:        string(group.Type),
+					Name:        group.Name,
+					Description: group.Description,
+					AvatarURL:   group.AvatarURL,
+					MemberCount: len(groupMembers),
+				},
+				IsCreated: false,
+			}, nil
+		}
+	}
+
+	newGroup := chatgroup.NewBotGroup(data.Name, data.Description)
+	if err := u.chatGroupRepo.Create(ctx, newGroup); err != nil {
+		return CreateGroupOutput{}, err
+	}
+	if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, currentParticipant.ID, chatmember.Member)); err != nil {
+		return CreateGroupOutput{}, err
+	}
+	if err := u.chatMemberRepo.Add(ctx, chatmember.NewChatMember(newGroup.ID, agentParticipant.ID, chatmember.Member)); err != nil {
+		return CreateGroupOutput{}, err
+	}
+
+	return CreateGroupOutput{
+		Group: ChatGroupItem{
+			ID:          int64(newGroup.ID),
+			Type:        string(newGroup.Type),
+			Name:        newGroup.Name,
+			Description: newGroup.Description,
+			AvatarURL:   newGroup.AvatarURL,
+			MemberCount: 2,
+		},
+		IsCreated: true,
 	}, nil
 }

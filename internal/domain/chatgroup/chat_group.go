@@ -16,14 +16,14 @@ type ChatGroup struct {
 	IsDeleted   bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	CreatedBy   user.ID
+	CreatedBy   *user.ID // nullable: nil for bot/system groups
 }
 
 func NewDirectGroup(creatorID user.ID) *ChatGroup {
 	return &ChatGroup{
 		Type:       Direct,
 		MaxMembers: 2,
-		CreatedBy:  creatorID,
+		CreatedBy:  &creatorID,
 	}
 }
 
@@ -33,7 +33,7 @@ func NewGroup(name, description string, maxMembers int, creatorID user.ID) *Chat
 		Description: description,
 		Type:        Group,
 		MaxMembers:  maxMembers,
-		CreatedBy:   creatorID,
+		CreatedBy:   &creatorID,
 	}
 }
 
@@ -43,7 +43,17 @@ func NewChannel(name, description string, maxMembers int, creatorID user.ID) *Ch
 		Description: description,
 		Type:        Channel,
 		MaxMembers:  maxMembers,
-		CreatedBy:   creatorID,
+		CreatedBy:   &creatorID,
+	}
+}
+
+func NewBotGroup(name, description string) *ChatGroup {
+	return &ChatGroup{
+		Name:        name,
+		Description: description,
+		Type:        Bot,
+		MaxMembers:  2,
+		CreatedBy:   nil,
 	}
 }
 

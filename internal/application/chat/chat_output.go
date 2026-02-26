@@ -42,3 +42,8 @@ type GetGroupMessagesOutput struct {
 	NextCursor *int64
 	HasMore    bool
 }
+
+type CreateGroupOutput struct {
+	Group     ChatGroupItem
+	IsCreated bool // true = newly created, false = returned existing group
+}
