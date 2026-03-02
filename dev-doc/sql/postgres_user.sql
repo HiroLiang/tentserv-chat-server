@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS goat.public.users
     password    TEXT        NOT NULL,
     user_status user_status NOT NULL,
     user_ip     TEXT        NOT NULL,
+    avatar_name TEXT        NULL     DEFAULT NULL,
     created_at  TIMESTAMP   NOT NULL DEFAULT now(),
     updated_at  TIMESTAMP   NOT NULL DEFAULT now()
 );

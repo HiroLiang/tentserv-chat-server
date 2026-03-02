@@ -54,6 +54,20 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, response.ErrAuthFailed)
 		return
 
+	case errors.Is(err, user.ErrInvalidImageType):
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_IMAGE_TYPE",
+			Message: "unsupported image type, allowed: jpeg, png, webp",
+		})
+		return
+
+	case errors.Is(err, user.ErrImageTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, response.ErrorResponse{
+			Code:    "IMAGE_TOO_LARGE",
+			Message: "image exceeds maximum allowed size of 5 MB",
+		})
+		return
+
 	default:
 		_ = c.Error(err)
 		return

@@ -30,3 +30,6 @@ redis:
   addr: "localhost:6379"
   password: "1234"
   db: 0
+storage:
+  local_path: "./uploads"
+  base_url: "/static"

@@ -24,6 +24,10 @@ DROP TABLE IF EXISTS goat.public.chat_groups CASCADE;
 -- Agents
 DROP TABLE IF EXISTS goat.public.agents CASCADE;
 
+-- Devices
+DROP TABLE IF EXISTS goat.public.device_user CASCADE;
+DROP TABLE IF EXISTS goat.public.devices CASCADE;
+
 -- Users
 DROP TABLE IF EXISTS goat.public.users_roles CASCADE;
 DROP TABLE IF EXISTS goat.public.roles CASCADE;
@@ -33,6 +37,9 @@ DROP TABLE IF EXISTS goat.public.users CASCADE;
 
 -- Users
 DROP TYPE IF EXISTS user_status;
+
+-- Devices
+DROP TYPE IF EXISTS device_platform;
 
 -- Agents
 DROP TYPE IF EXISTS agent_status;

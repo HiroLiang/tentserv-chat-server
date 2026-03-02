@@ -33,9 +33,10 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 
 		// Get mock dependencies
 		sessionStore := mockAuth.MockSessionStore()
-		dependencies := bootstrap.BuildMockDeps(
+		dependencies := bootstrap.MockDeps(
 			func(deps *bootstrap.Dependencies) {
 				deps.AgentRepo = mockRepo.MockAgentRepository() // TODO not implemented
+				deps.FileStorage = mockShared.MockFileStorage()
 				deps.TokenService = token.NewAuthTokenService(sessionStore, conf.AuthToken.Expiration)
 				deps.RateLimiter = mockShared.MockRateLimiter()
 				deps.UserRepo = mockRepo.MockUserRepo()         // TODO not implemented

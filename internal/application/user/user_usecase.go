@@ -8,7 +8,9 @@ import (
 	"github.com/HiroLiang/goat-server/internal/application/shared"
 	"github.com/HiroLiang/goat-server/internal/application/shared/auth"
 	"github.com/HiroLiang/goat-server/internal/application/shared/security"
+	"github.com/HiroLiang/goat-server/internal/application/shared/storage"
 	session "github.com/HiroLiang/goat-server/internal/domain/auth"
+	"github.com/HiroLiang/goat-server/internal/domain/device"
 	"github.com/HiroLiang/goat-server/internal/domain/role"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
 	"github.com/HiroLiang/goat-server/internal/domain/userrole"
@@ -16,22 +18,31 @@ import (
 )
 
 type UseCase struct {
+	storageURL   string
 	userRepo     user.Repository
 	userRoleRepo userrole.Repository
 	hasher       security.Hasher
 	tokenService auth.TokenService
+	fileStorage  storage.FileStorage
+	deviceRepo   device.Repository
 }
 
 func NewUseCase(
+	storageURL string,
 	repo user.Repository,
 	userRoleRepo userrole.Repository,
 	hasher security.Hasher,
-	tokenService auth.TokenService) *UseCase {
+	tokenService auth.TokenService,
+	fileStorage storage.FileStorage,
+	deviceRepo device.Repository) *UseCase {
 	return &UseCase{
+		storageURL:   storageURL,
 		userRepo:     repo,
 		userRoleRepo: userRoleRepo,
 		hasher:       hasher,
 		tokenService: tokenService,
+		fileStorage:  fileStorage,
+		deviceRepo:   deviceRepo,
 	}
 }
 
@@ -42,7 +53,7 @@ func (u *UseCase) Register(ctx context.Context, input shared.UseCaseInput[Regist
 		return user.ErrInvalidPassword
 	}
 
-	email, err := user.NewEmail(input.Data.Email)
+	email, err := user.ParseEmail(input.Data.Email)
 	if err != nil {
 		return user.ErrInvalidEmail
 	}
@@ -65,7 +76,7 @@ func (u *UseCase) Register(ctx context.Context, input shared.UseCaseInput[Regist
 func (u *UseCase) Login(ctx context.Context, input shared.UseCaseInput[LoginInput]) (LoginOutput, error) {
 
 	// Check email and build vo
-	email, err := user.NewEmail(input.Data.Email)
+	email, err := user.ParseEmail(input.Data.Email)
 	if err != nil {
 		return LoginOutput{}, user.ErrInvalidEmail
 	}
@@ -92,6 +103,15 @@ func (u *UseCase) Login(ctx context.Context, input shared.UseCaseInput[LoginInpu
 		return LoginOutput{}, user.ErrInvalidPassword
 	}
 
+	// Update last login ip
+	if currentUser.LastIP != input.Base.Request.IP {
+		currentUser.LastIP = input.Base.Request.IP
+		err = u.userRepo.Update(ctx, currentUser)
+		if err != nil {
+			return LoginOutput{}, err
+		}
+	}
+
 	// Generate auth token and store in redis
 	authToken, err := u.tokenService.Generate(ctx, session.CreateSessionParams{
 		UserID:    strconv.FormatInt(int64(currentUser.ID), 10),
@@ -100,6 +120,15 @@ func (u *UseCase) Login(ctx context.Context, input shared.UseCaseInput[LoginInpu
 	})
 	if err != nil {
 		return LoginOutput{}, user.ErrGenerateToken
+	}
+
+	// Bind the device to the user if device_id is provided
+	if input.Data.DeviceID != "" {
+		deviceID := device.ID(input.Data.DeviceID)
+		if _, err := u.deviceRepo.FindByID(ctx, deviceID); err == nil {
+			// Device exists — bind it; ignore bind errors silently
+			_ = u.deviceRepo.BindUser(ctx, deviceID, currentUser.ID)
+		}
 	}
 
 	return LoginOutput{Token: authToken}, nil
@@ -114,7 +143,7 @@ func (u *UseCase) Logout(ctx context.Context, input shared.UseCaseInput[struct{}
 func (u *UseCase) CurrentUserInfo(
 	ctx context.Context,
 	input shared.UseCaseInput[struct{}]) (CurrentUserOutput, error) {
-	id, err := user.ToID(input.Base.Auth.UserID)
+	id, err := user.ParseID(input.Base.Auth.UserID)
 	if err != nil {
 		return CurrentUserOutput{}, user.ErrInvalidUser
 	}
@@ -125,11 +154,58 @@ func (u *UseCase) CurrentUserInfo(
 	}
 
 	return CurrentUserOutput{
-		ID:       int(domainUser.ID),
-		Name:     domainUser.Name,
-		Email:    string(domainUser.Email),
-		CreateAt: timeutil.Format(domainUser.CreatedAt, "2006/01/02 15:04:05"),
+		ID:        int(domainUser.ID),
+		Name:      domainUser.Name,
+		Email:     string(domainUser.Email),
+		AvatarURL: u.buildAvatarURL(domainUser.AvatarName),
+		CreateAt:  timeutil.Format(domainUser.CreatedAt, "2006/01/02 15:04:05"),
 	}, nil
+}
+
+// UpdateProfile updates the current user's display name.
+func (u *UseCase) UpdateProfile(
+	ctx context.Context,
+	input shared.UseCaseInput[UpdateProfileInput]) error {
+	id, err := user.ParseID(input.Base.Auth.UserID)
+	if err != nil {
+		return user.ErrInvalidUser
+	}
+
+	domainUser, err := u.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return user.ErrUserNotFound
+	}
+
+	domainUser.Name = input.Data.Name
+	return u.userRepo.Update(ctx, domainUser)
+}
+
+// UploadAvatar processes and saves an avatar image for the current user.
+// The caller is responsible for validating the image MIME type and size before calling this.
+func (u *UseCase) UploadAvatar(
+	ctx context.Context,
+	input shared.UseCaseInput[UploadAvatarInput]) (UploadAvatarOutput, error) {
+	id, err := user.ParseID(input.Base.Auth.UserID)
+	if err != nil {
+		return UploadAvatarOutput{}, user.ErrInvalidUser
+	}
+
+	domainUser, err := u.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return UploadAvatarOutput{}, user.ErrUserNotFound
+	}
+
+	fileName, err := u.fileStorage.SaveAvatar(ctx, int64(id), input.Data.Image, domainUser.AvatarName)
+	if err != nil {
+		return UploadAvatarOutput{}, err
+	}
+
+	domainUser.AvatarName = fileName
+	if err := u.userRepo.Update(ctx, domainUser); err != nil {
+		return UploadAvatarOutput{}, err
+	}
+
+	return UploadAvatarOutput{AvatarURL: u.buildAvatarURL(fileName)}, nil
 }
 
 // FindRolesByUser Find all roles of user
@@ -170,4 +246,11 @@ func (u *UseCase) RevokeRoleFromUser(ctx context.Context, input shared.UseCaseIn
 		return err
 	}
 	return nil
+}
+
+func (u *UseCase) buildAvatarURL(fileName string) string {
+	if fileName == "" {
+		return ""
+	}
+	return u.storageURL + "/avatars/" + fileName
 }

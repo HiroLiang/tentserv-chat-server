@@ -43,7 +43,7 @@ func (u *UseCase) GetMyGroups(
 	ctx context.Context,
 	input shared.UseCaseInput[GetMyGroupsInput],
 ) (GetMyGroupsOutput, error) {
-	userID, err := user.ToID(input.Base.Auth.UserID)
+	userID, err := user.ParseID(input.Base.Auth.UserID)
 	if err != nil {
 		return GetMyGroupsOutput{}, user.ErrInvalidUser
 	}
@@ -128,7 +128,7 @@ func (u *UseCase) GetGroupMessages(
 	ctx context.Context,
 	input shared.UseCaseInput[GetGroupMessagesInput],
 ) (GetGroupMessagesOutput, error) {
-	userID, err := user.ToID(input.Base.Auth.UserID)
+	userID, err := user.ParseID(input.Base.Auth.UserID)
 	if err != nil {
 		return GetGroupMessagesOutput{}, user.ErrInvalidUser
 	}
@@ -248,7 +248,7 @@ func (u *UseCase) CreateGroup(
 	ctx context.Context,
 	input shared.UseCaseInput[CreateGroupInput],
 ) (CreateGroupOutput, error) {
-	userID, err := user.ToID(input.Base.Auth.UserID)
+	userID, err := user.ParseID(input.Base.Auth.UserID)
 	if err != nil {
 		return CreateGroupOutput{}, user.ErrInvalidUser
 	}

@@ -20,6 +20,7 @@ var Table = postgres.Table{
 		"password",
 		"user_status",
 		"user_ip",
+		"avatar_name",
 		"created_at",
 		"updated_at",
 	},
@@ -65,6 +66,7 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 		Set("password", rec.Password).
 		Set("user_status", rec.UserStatus).
 		Set("user_ip", rec.UserIP).
+		Set("avatar_name", rec.AvatarName).
 		Where(squirrel.Eq{"id": rec.ID}).
 		ToSql()
 	if err != nil {

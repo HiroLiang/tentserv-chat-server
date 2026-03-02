@@ -6,14 +6,21 @@ import (
 	"encoding/base64"
 	"strings"
 
+	"github.com/HiroLiang/goat-server/internal/application/shared/security"
 	"golang.org/x/crypto/argon2"
 )
 
 type Argon2Hasher struct{}
 
+var _ security.Hasher = (*Argon2Hasher)(nil)
+
 func NewArgon2Hasher() *Argon2Hasher { return &Argon2Hasher{} }
 
 func (h *Argon2Hasher) Hash(password string) (string, error) {
+	return h.HashBytes([]byte(password))
+}
+
+func (h *Argon2Hasher) HashBytes(password []byte) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
@@ -41,10 +48,10 @@ func (h *Argon2Hasher) Verify(hashed, plain string) bool {
 		return false
 	}
 
-	newHash := h.getArgon2Hash(hashed, salt)
+	newHash := h.getArgon2Hash([]byte(hashed), salt)
 	return subtle.ConstantTimeCompare(hash, newHash) == 1
 }
 
-func (h *Argon2Hasher) getArgon2Hash(str string, salt []byte) []byte {
-	return argon2.IDKey([]byte(str), salt, 1, 64*1024, 4, 32)
+func (h *Argon2Hasher) getArgon2Hash(bytes []byte, salt []byte) []byte {
+	return argon2.IDKey(bytes, salt, 1, 64*1024, 4, 32)
 }

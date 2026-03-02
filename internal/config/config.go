@@ -37,6 +37,11 @@ type AppConfig struct {
 		Password string `mapstructure:"password"`
 		DB       int    `mapstructure:"db"`
 	} `mapstructure:"redis"`
+
+	Storage struct {
+		LocalPath string `mapstructure:"local_path"`
+		BaseURL   string `mapstructure:"base_url"`
+	} `mapstructure:"storage"`
 }
 
 type DBPoolConfig struct {
@@ -107,7 +112,7 @@ func load(path string) error {
 		return fmt.Errorf("unmarshal config error: %w", err)
 	}
 
-	fmt.Printf("DBPoolConfig loaded \n")
+	fmt.Printf("Config loaded \n")
 	return nil
 }
 

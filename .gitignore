@@ -20,6 +20,7 @@ coverage*.out
 /out/
 /swag-docs/
 /config/
+/uploads/
 
 # Editors / OS
 .DS_Store

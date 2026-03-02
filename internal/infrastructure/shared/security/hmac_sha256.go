@@ -19,7 +19,7 @@ func (h *SHA256HMACer) Sign(message string) string {
 	mac := hmac.New(sha256.New, h.secret)
 	mac.Write([]byte(message))
 	sum := mac.Sum(nil)
-	return base64.StdEncoding.EncodeToString(sum)
+	return base64.RawURLEncoding.EncodeToString(sum)
 }
 
 func (h *SHA256HMACer) Verify(message, provided string) bool {

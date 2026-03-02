@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +13,27 @@ import (
 
 func NewServer(addr string, useCases *UseCases, dependencies *Dependencies) *http.Server {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(
+		gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
+			path := params.Path
+			if strings.HasPrefix(path, "/ws") {
+				path = "/ws?token=[REDACTED]"
+			}
+
+			statusColor := params.StatusCodeColor()
+			methodColor := params.MethodColor()
+			resetColor := params.ResetColor()
+
+			return fmt.Sprintf("[GIN] %v |%s %3d %s| %13v | %15s |%s %-7s %s %s\n",
+				params.TimeStamp.Format("2006/01/02 - 15:04:05"),
+				statusColor, params.StatusCode, resetColor,
+				params.Latency,
+				params.ClientIP,
+				methodColor, params.Method, resetColor,
+				path,
+			)
+		}),
+		gin.Recovery())
 
 	// Init config
 	initConfig(r)
@@ -21,6 +42,9 @@ func NewServer(addr string, useCases *UseCases, dependencies *Dependencies) *htt
 	if config.Env("APP_ENV", "dev") == "dev" {
 		RegisterSwaggerRoutes(r.Group("/swagger"))
 	}
+
+	// Serve uploaded static files (avatars, etc.)
+	r.Static("/static", config.App().Storage.LocalPath)
 
 	// Register REST routes
 	RegisterRestRoutes(r.Group("/api"), useCases, dependencies)

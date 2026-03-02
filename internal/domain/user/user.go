@@ -3,14 +3,15 @@ package user
 import "time"
 
 type User struct {
-	ID        ID
-	Name      string
-	Email     Email
-	Password  string
-	Status    Status
-	LastIP    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         ID
+	Name       string
+	Email      Email
+	Password   string
+	Status     Status
+	LastIP     string
+	AvatarName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 func NewUser(name string, email Email, hash string, ip string) *User {

@@ -44,6 +44,6 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	chatHandler.RegisterChatRoutes(group.Group("/chat", middleware.RequireAuthMiddleware()))
 
 	// Device Handler
-	var deviceHandler = device.NewDeviceHandler()
+	var deviceHandler = device.NewDeviceHandler(useCases.DeviceUseCase)
 	deviceHandler.RegisterDeviceRoutes(group.Group("/device"))
 }

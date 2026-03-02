@@ -12,4 +12,6 @@ var (
 	ErrInvalidPassword   = errors.New("invalid password")
 	ErrInvalidEmail      = errors.New("invalid email format")
 	ErrGenerateToken     = errors.New("generate token error")
+	ErrInvalidImageType  = errors.New("unsupported image type, allowed: jpeg, png, webp")
+	ErrImageTooLarge     = errors.New("image exceeds maximum allowed size")
 )

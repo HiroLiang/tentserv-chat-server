@@ -1,6 +1,7 @@
 package security
 
 type Hasher interface {
-	Hash(password string) (string, error)
-	Verify(password, hash string) bool
+	Hash(str string) (string, error)
+	HashBytes(bytes []byte) (string, error)
+	Verify(str, hash string) bool
 }

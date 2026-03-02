@@ -6,7 +6,7 @@ import (
 
 type ID int64
 
-func ToID(str string) (ID, error) {
+func ParseID(str string) (ID, error) {
 	i, err := strconv.ParseInt(str, 10, 64)
 	if err != nil {
 		return 0, ErrInvalidID
@@ -16,7 +16,7 @@ func ToID(str string) (ID, error) {
 
 type Email string
 
-func NewEmail(v string) (Email, error) {
+func ParseEmail(v string) (Email, error) {
 	if len(v) < 5 || !containsAt(v) {
 		return "", ErrInvalidEmail
 	}

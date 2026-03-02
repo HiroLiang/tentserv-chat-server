@@ -10,10 +10,16 @@ type LoginOutput struct {
 
 // CurrentUserOutput let current user logout
 type CurrentUserOutput struct {
-	ID       int
-	Name     string
-	Email    string
-	CreateAt string
+	ID        int
+	Name      string
+	Email     string
+	AvatarURL string
+	CreateAt  string
+}
+
+// UploadAvatarOutput contains the new avatar URL after a successful upload.
+type UploadAvatarOutput struct {
+	AvatarURL string
 }
 
 type FindUserRolesOutput struct {
