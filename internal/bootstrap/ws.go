@@ -36,7 +36,7 @@ func BuildWsComponents(deps *Dependencies) (*ws.Hub, *ws.MessageRouter) {
 
 // RegisterWsRoutes registers the single /ws upgrade endpoint.
 func RegisterWsRoutes(r *gin.Engine, hub *ws.Hub, router *ws.MessageRouter, deps *Dependencies) {
-	r.GET("/ws",
+	r.GET("/ws/",
 		middleware.AuthMiddleware(deps.TokenService),
 		func(c *gin.Context) {
 			conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
