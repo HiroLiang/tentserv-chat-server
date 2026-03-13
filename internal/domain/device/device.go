@@ -1,16 +1,24 @@
 package device
 
-import "time"
+import (
+	"time"
+
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
+)
 
 type Device struct {
-	ID        ID
+	ID        shared.DeviceID
 	Platform  Platform
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-func NewDevice(id ID, platform Platform, name string) *Device {
+func NewDevice(
+	id shared.DeviceID,
+	platform Platform,
+	name string,
+) *Device {
 	return &Device{
 		ID:       id,
 		Platform: platform,

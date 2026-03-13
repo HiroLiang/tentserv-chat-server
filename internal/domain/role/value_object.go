@@ -2,37 +2,39 @@ package role
 
 import "encoding/json"
 
-type ID int64
-
-type Type string
+type Code string
 
 const (
-	Admin  Type = "admin"
-	Vendor Type = "vendor"
-	User   Type = "user"
-	Guest  Type = "guest"
+	Admin  Code = "admin"
+	Vendor Code = "vendor"
+	User   Code = "user"
+	Client Code = "client"
 )
 
-func typeFrom(s string) (Type, error) {
-	switch Type(s) {
-	case Admin, Vendor, User, Guest:
-		return Type(s), nil
+func CodeFrom(s string) (Code, error) {
+	switch Code(s) {
+	case Admin, Vendor, User, Client:
+		return Code(s), nil
 	default:
 		return "", ErrInvalidType
 	}
 }
 
-func (t *Type) UnmarshalJSON(b []byte) error {
+func (t *Code) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
 
-	v, err := typeFrom(s)
+	v, err := CodeFrom(s)
 	if err != nil {
 		return err
 	}
 
 	*t = v
 	return nil
+}
+
+func (t *Code) String() string {
+	return string(*t)
 }

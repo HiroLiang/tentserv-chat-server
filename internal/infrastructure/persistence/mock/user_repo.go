@@ -24,7 +24,7 @@ func (u *UserRepo) FindByEmail(ctx context.Context, email user.Email) (*user.Use
 	panic("implement me")
 }
 
-func (u *UserRepo) Create(ctx context.Context, user *user.User) error {
+func (u *UserRepo) CreateWithRole(ctx context.Context, user *user.User, roleType string) error {
 	//TODO implement me
 	panic("implement me")
 }

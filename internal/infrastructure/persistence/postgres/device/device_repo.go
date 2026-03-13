@@ -113,7 +113,7 @@ func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
 
 func (r *DeviceRepository) BindUser(ctx context.Context, deviceID device.ID, userID user.ID) error {
 	query, args, err := postgres.Builder.
-		Insert("public.device_user").
+		Insert("public.devices_users").
 		Columns("device_id", "user_id").
 		Values(string(deviceID), userID).
 		Suffix("ON CONFLICT DO NOTHING").

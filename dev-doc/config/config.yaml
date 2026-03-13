@@ -31,5 +31,4 @@ redis:
   password: "1234"
   db: 0
 storage:
-  local_path: "./uploads"
-  base_url: "/static"
+  base_path: "./uploads"

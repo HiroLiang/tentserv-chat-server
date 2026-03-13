@@ -54,6 +54,13 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, response.ErrAuthFailed)
 		return
 
+	case errors.Is(err, user.ErrDefaultRoleNotFound):
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "ROLE_NOT_CONFIGURED",
+			Message: "default role is not configured",
+		})
+		return
+
 	case errors.Is(err, user.ErrInvalidImageType):
 		c.JSON(http.StatusBadRequest, response.ErrorResponse{
 			Code:    "INVALID_IMAGE_TYPE",

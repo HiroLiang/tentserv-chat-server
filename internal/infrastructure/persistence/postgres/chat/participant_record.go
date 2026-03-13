@@ -14,6 +14,6 @@ type ParticipantRecord struct {
 	UserID      *user.ID                    `db:"user_id"`
 	AgentID     *agent.ID                   `db:"agent_id"`
 	DisplayName string                      `db:"display_name"`
-	AvatarURL   string                      `db:"avatar_url"`
+	AvatarName  string                      `db:"avatar_name"`
 	CreatedAt   time.Time                   `db:"created_at"`
 }

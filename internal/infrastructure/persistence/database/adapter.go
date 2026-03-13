@@ -1,8 +1,6 @@
 package database
 
 import (
-	"time"
-
 	"github.com/HiroLiang/goat-server/internal/config"
 )
 
@@ -19,8 +17,8 @@ func BuildDatabaseConfigs(cfg map[string]*config.DBConfig) map[string]Connection
 		if c.Pool != nil {
 			cc.MaxOpenConns = c.Pool.MaxOpenConns
 			cc.MaxIdleConns = c.Pool.MaxIdleConns
-			cc.ConnMaxLifetime = time.Duration(c.Pool.ConnMaxLifetime)
-			cc.ConnMaxIdleTime = time.Duration(c.Pool.ConnMaxIdleTime)
+			cc.ConnMaxLifetime = c.Pool.ConnMaxLifetime
+			cc.ConnMaxIdleTime = c.Pool.ConnMaxIdleTime
 		}
 
 		result[name] = cc

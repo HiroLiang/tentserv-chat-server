@@ -4,13 +4,13 @@ import (
 	"time"
 
 	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 type RoleRecord struct {
-	ID        role.ID   `db:"id"`
-	Type      role.Type `db:"type"`
-	Creator   user.ID   `db:"creator"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID        shared.RoleID    `db:"id"`
+	Code      role.Code        `db:"code"`
+	Creator   shared.AccountID `db:"creator"`
+	CreatedAt time.Time        `db:"created_at"`
+	UpdatedAt time.Time        `db:"updated_at"`
 }

@@ -10,45 +10,34 @@ import (
 	"github.com/spf13/viper"
 )
 
+var ()
+
 // AppConfig - struct of app config.
 // Add more config here if any new config been added in config.yaml.
 type AppConfig struct {
+	Database map[string]*DBConfig `mapstructure:"databases"`
+	Redis    RedisConfig          `mapstructure:"redis"`
+
 	AuthToken struct {
 		Expiration time.Duration `mapstructure:"expiration"`
 	} `mapstructure:"auth_token"`
 
 	Secrets struct {
-		HmacSecret string `mapstructure:"HMAC_SECRET"`
+		HmacSecret string `mapstructure:"hmac"`
 	} `mapstructure:"secrets"`
 
 	RateLimitConfig struct {
-		GlobalLimit int           `mapstructure:"global_limit"`
+		GlobalLimit int64         `mapstructure:"global_limit"`
+		IPLimit     int64         `mapstructure:"ip_limit"`
+		UserLimit   int64         `mapstructure:"user_limit"`
 		GlobalUnit  time.Duration `mapstructure:"global_unit"`
-		IPLimit     int           `mapstructure:"ip_limit"`
 		IPUnit      time.Duration `mapstructure:"ip_unit"`
-		UserLimit   int           `mapstructure:"user_limit"`
 		UserUnit    time.Duration `mapstructure:"user_unit"`
 	} `mapstructure:"rate_limit_config"`
 
-	Database map[string]*DBConfig `mapstructure:"databases"`
-
-	Redis struct {
-		Addr     string `mapstructure:"addr"`
-		Password string `mapstructure:"password"`
-		DB       int    `mapstructure:"db"`
-	} `mapstructure:"redis"`
-
 	Storage struct {
-		LocalPath string `mapstructure:"local_path"`
-		BaseURL   string `mapstructure:"base_url"`
+		BasePath string `mapstructure:"base_path"`
 	} `mapstructure:"storage"`
-}
-
-type DBPoolConfig struct {
-	MaxOpenConns    int `mapstructure:"max_open_conns"`
-	MaxIdleConns    int `mapstructure:"max_idle_conns"`
-	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
-	ConnMaxIdleTime int `mapstructure:"conn_max_idle_time"`
 }
 
 type DBConfig struct {
@@ -57,8 +46,24 @@ type DBConfig struct {
 	Pool   *DBPoolConfig `mapstructure:"pool"`
 }
 
+type RedisConfig struct {
+	Addr     string `mapstructure:"addr"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+}
+
+type DBPoolConfig struct {
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time"`
+}
+
 // global singleton config
 var (
+	reBraceEnv    = regexp.MustCompile(`\$\{[^}]+}`)
+	reBraceEnvExp = regexp.MustCompile(`\$\{([^:}]+)(?::([^}]+))?}`)
+
 	config     *AppConfig
 	configOnce sync.Once
 	configErr  error
@@ -66,14 +71,9 @@ var (
 
 // App - safe accessor that lazy load default config if not loaded yet
 func App() *AppConfig {
-	configOnce.Do(func() {
-		configErr = load("./config")
-	})
-
-	if configErr != nil {
-		panic(fmt.Sprintf("config not loaded: %v", configErr))
+	if config == nil {
+		panic("config not loaded, call LoadConfig first")
 	}
-
 	return config
 }
 
@@ -112,14 +112,12 @@ func load(path string) error {
 		return fmt.Errorf("unmarshal config error: %w", err)
 	}
 
-	fmt.Printf("Config loaded \n")
 	return nil
 }
 
 func expandEnvWithDefault(s string) string {
-	re := regexp.MustCompile(`\$\{([^:}]+)(?::([^}]+))?}`)
-	return re.ReplaceAllStringFunc(s, func(sub string) string {
-		matches := re.FindStringSubmatch(sub)
+	return reBraceEnvExp.ReplaceAllStringFunc(s, func(sub string) string {
+		matches := reBraceEnvExp.FindStringSubmatch(sub)
 		if len(matches) >= 2 {
 			key := matches[1]
 			def := ""
@@ -136,5 +134,5 @@ func expandEnvWithDefault(s string) string {
 }
 
 func containsBraceEnv(s string) bool {
-	return regexp.MustCompile(`\$\{[^}]+}`).MatchString(s)
+	return reBraceEnv.MatchString(s)
 }

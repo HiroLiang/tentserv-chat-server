@@ -1,17 +1,22 @@
 package auth
 
-import "time"
+import (
+	"time"
+
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
+)
 
 type Session struct {
 	ID        string
-	UserID    string
-	IP        string
-	UserAgent string
+	AccountID shared.AccountID
+	UserID    shared.UserID
+	DeviceID  shared.DeviceID
+	Token     TokenPair
 	CreatedAt time.Time
 }
 
-type CreateSessionParams struct {
-	UserID    string
-	IP        string
-	UserAgent string
+type CreateSessionInput struct {
+	AccountID shared.AccountID
+	UserID    shared.UserID
+	DeviceID  shared.DeviceID
 }

@@ -21,7 +21,7 @@ var ParticipantTable = postgres.Table{
 		"user_id",
 		"agent_id",
 		"display_name",
-		"avatar_url",
+		"avatar_name",
 		"created_at",
 	},
 }
@@ -56,8 +56,8 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 	rec := toParticipantRecordRecord(p)
 
 	query, args, err := ParticipantTable.Insert().
-		Columns("type", "user_id", "agent_id", "display_name", "avatar_url").
-		Values(rec.Type, rec.UserID, rec.AgentID, rec.DisplayName, rec.AvatarURL).
+		Columns("type", "user_id", "agent_id", "display_name", "avatar_name").
+		Values(rec.Type, rec.UserID, rec.AgentID, rec.DisplayName, rec.AvatarName).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert participant: %w", err)

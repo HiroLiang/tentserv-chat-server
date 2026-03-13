@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/HiroLiang/goat-server/internal/application/shared"
 	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
@@ -37,7 +38,7 @@ func BuildWsComponents(deps *Dependencies) (*ws.Hub, *ws.MessageRouter) {
 // RegisterWsRoutes registers the single /ws upgrade endpoint.
 func RegisterWsRoutes(r *gin.Engine, hub *ws.Hub, router *ws.MessageRouter, deps *Dependencies) {
 	r.GET("/ws/",
-		middleware.AuthMiddleware(deps.TokenService),
+		middleware.AuthMiddleware(deps.SessionManager, deps.UserRepo),
 		func(c *gin.Context) {
 			conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 			if err != nil {
@@ -46,7 +47,7 @@ func RegisterWsRoutes(r *gin.Engine, hub *ws.Hub, router *ws.MessageRouter, deps
 
 			userID := ""
 			if v, ok := c.Get("authContext"); ok {
-				userID = v.(*shared.AuthContext).UserID
+				userID = strconv.FormatInt(int64(v.(*shared.AuthContext).UserID), 10)
 			}
 
 			client := ws.NewClient(hub, conn, userID)

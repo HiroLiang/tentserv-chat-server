@@ -21,17 +21,17 @@ func (u UserRoleRepo) FindRolesByUser(ctx context.Context, userID user.ID) ([]*r
 	panic("implement me")
 }
 
-func (u UserRoleRepo) Exists(ctx context.Context, userID user.ID, role role.Type) bool {
+func (u UserRoleRepo) Exists(ctx context.Context, userID user.ID, role role.Code) bool {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u UserRoleRepo) Assign(ctx context.Context, userID user.ID, role role.Type) error {
+func (u UserRoleRepo) Assign(ctx context.Context, userID user.ID, role role.Code) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u UserRoleRepo) Revoke(ctx context.Context, userID user.ID, role role.Type) error {
+func (u UserRoleRepo) Revoke(ctx context.Context, userID user.ID, role role.Code) error {
 	//TODO implement me
 	panic("implement me")
 }

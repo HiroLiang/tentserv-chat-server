@@ -29,19 +29,21 @@ type LoginResponse struct {
 
 // CurrentUserResponse queried for user login request.
 type CurrentUserResponse struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	AvatarURL string `json:"avatar_url"`
-	CreateAt  string `json:"create_at"`
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	Email     string   `json:"email"`
+	AvatarURL string   `json:"avatar_url"`
+	CreateAt  string   `json:"create_at"`
+	Roles     []string `json:"roles"`
 }
 
 // UpdateProfileRequest represents the fields a user can update on their profile.
 type UpdateProfileRequest struct {
-	Name string `json:"name" binding:"required,min=1,max=50"`
+	Name      string   `json:"name" binding:"required,min=1,max=50"`
+	RoleCodes []string `json:"role_codes"`
 }
 
 // UploadAvatarResponse is returned after a successful avatar upload.
 type UploadAvatarResponse struct {
-	AvatarURL string `json:"avatar_url"`
+	AvatarPath string `json:"avatar_url"`
 }

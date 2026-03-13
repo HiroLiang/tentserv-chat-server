@@ -9,7 +9,7 @@ func toParticipantDomain(rec *ParticipantRecord) (*participant.Participant, erro
 		UserID:      rec.UserID,
 		AgentID:     rec.AgentID,
 		DisplayName: rec.DisplayName,
-		AvatarURL:   rec.AvatarURL,
+		AvatarName:  rec.AvatarName,
 		CreatedAt:   rec.CreatedAt,
 	}, nil
 }
@@ -21,7 +21,7 @@ func toParticipantRecordRecord(p *participant.Participant) *ParticipantRecord {
 		UserID:      p.UserID,
 		AgentID:     p.AgentID,
 		DisplayName: p.DisplayName,
-		AvatarURL:   p.AvatarURL,
+		AvatarName:  p.AvatarName,
 		CreatedAt:   p.CreatedAt,
 	}
 }

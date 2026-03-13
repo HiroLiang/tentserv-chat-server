@@ -1,42 +1,28 @@
 package bootstrap
 
 import (
-	"github.com/HiroLiang/goat-server/internal/application/agent"
-	"github.com/HiroLiang/goat-server/internal/application/chat"
-	appdevice "github.com/HiroLiang/goat-server/internal/application/device"
-	"github.com/HiroLiang/goat-server/internal/application/user"
-	"github.com/HiroLiang/goat-server/internal/config"
+	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
+	userUseCase "github.com/HiroLiang/goat-server/internal/application/user/usecase"
 )
 
 type UseCases struct {
-	UserUseCase   *user.UseCase
-	AgentUseCase  *agent.UseCase
-	ChatUseCase   *chat.UseCase
-	DeviceUseCase *appdevice.UseCase
+	RegisterUseCase          *authUseCase.RegisterUseCase
+	LoginUseCase             *authUseCase.LoginUseCase
+	LogoutUseCase            *authUseCase.LogoutUseCase
+	GetAccountProfileUseCase *authUseCase.GetProfileUseCase
+
+	UpdateUserProfileUseCase *userUseCase.UpdateProfileUseCase
+	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
-
-	// get config
-	conf := config.App()
-
 	return &UseCases{
-		UserUseCase: user.NewUseCase(
-			conf.Storage.BaseURL,
-			deps.UserRepo,
-			deps.UserRoleRepo,
-			deps.Argon2Hasher,
-			deps.TokenService,
-			deps.FileStorage,
-			deps.DeviceRepo,
-		),
-		AgentUseCase: agent.NewUseCase(deps.AgentRepo),
-		ChatUseCase: chat.NewUseCase(
-			deps.ParticipantRepo,
-			deps.ChatGroupRepo,
-			deps.ChatMemberRepo,
-			deps.ChatMessageRepo,
-		),
-		DeviceUseCase: appdevice.NewUseCase(deps.DeviceRepo),
+		RegisterUseCase:          authUseCase.NewRegisterUseCase(deps.Uow, deps.PwdHasher, deps.AccountRepo, deps.UserRepo),
+		LoginUseCase:             authUseCase.NewLoginUseCase(deps.Uow, deps.PwdHasher, deps.SessionManager, deps.AccountRepo, deps.UserRepo),
+		LogoutUseCase:            authUseCase.NewLogoutUseCase(deps.SessionManager),
+		GetAccountProfileUseCase: authUseCase.NewGetProfileUseCase(deps.AccountRepo, deps.UserRepo),
+
+		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo),
+		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),
 	}
 }

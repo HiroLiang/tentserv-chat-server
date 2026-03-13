@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	domaindevice "github.com/HiroLiang/goat-server/internal/domain/device"
+	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,6 +18,11 @@ func handleError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, domaindevice.ErrInvalidPlatform):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+	case errors.Is(err, user.ErrInvalidUser):
+		c.JSON(http.StatusUnauthorized, response.ErrorResponse{
+			Code:    "INVALID_USER",
+			Message: "invalid user identity",
+		})
 	default:
 		_ = c.Error(err)
 	}

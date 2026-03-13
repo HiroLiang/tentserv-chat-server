@@ -3,17 +3,14 @@ package user
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 type UserRecord struct {
-	ID         user.ID     `db:"id"`
-	Name       string      `db:"name"`
-	Email      user.Email  `db:"email"`
-	Password   string      `db:"password"`
-	UserStatus user.Status `db:"user_status"`
-	UserIP     string      `db:"user_ip"`
-	AvatarName *string     `db:"avatar_name"`
-	CreatedAt  time.Time   `db:"created_at"`
-	UpdatedAt  time.Time   `db:"updated_at"`
+	ID         shared.UserID    `db:"id"`
+	AccountID  shared.AccountID `db:"account_id"`
+	Name       string           `db:"name"`
+	AvatarName *string          `db:"avatar"`
+	CreatedAt  time.Time        `db:"created_at"`
+	UpdatedAt  time.Time        `db:"updated_at"`
 }

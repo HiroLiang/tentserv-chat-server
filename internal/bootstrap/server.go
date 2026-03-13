@@ -44,7 +44,7 @@ func NewServer(addr string, useCases *UseCases, dependencies *Dependencies) *htt
 	}
 
 	// Serve uploaded static files (avatars, etc.)
-	r.Static("/static", config.App().Storage.LocalPath)
+	r.Static("/static", config.App().Storage.BasePath)
 
 	// Register REST routes
 	RegisterRestRoutes(r.Group("/api"), useCases, dependencies)

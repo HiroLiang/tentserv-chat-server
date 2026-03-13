@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/HiroLiang/goat-server/internal/domain/role"
@@ -27,6 +28,27 @@ func TestUserRoleRepository_Exists(t *testing.T) {
 	ok := repo.Exists(context.Background(), user.ID(1), role.Admin)
 	assert.True(t, ok)
 
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRoleRepository_FindRolesByUser(t *testing.T) {
+	db, mock := testutil.SetupDB(t)
+	repo := UserRoleRepository{db: sqlx.NewDb(db, "postgres")}
+
+	mock.ExpectQuery(`SELECT r.id, r.type, r.creator, r.created_at, r.updated_at FROM .*roles.* JOIN .*users_roles.*`).
+		WithArgs(user.ID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "creator", "created_at", "updated_at"}).
+			AddRow(1, "user", 1, time.Now(), time.Now()).
+			AddRow(2, "admin", 1, time.Now(), time.Now()))
+
+	roles, err := repo.FindRolesByUser(context.Background(), user.ID(1))
+	assert.NoError(t, err)
+	assert.Len(t, roles, 2)
+	if len(roles) < 2 {
+		return
+	}
+	assert.Equal(t, role.User, roles[0].Type)
+	assert.Equal(t, role.Admin, roles[1].Type)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

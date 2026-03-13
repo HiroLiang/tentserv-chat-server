@@ -8,7 +8,7 @@ import (
 
 	"github.com/HiroLiang/goat-server/internal/config"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/database"
-	redisInfra "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/redis"
+	redis2 "github.com/HiroLiang/goat-server/internal/infrastructure/redis"
 	"github.com/HiroLiang/goat-server/internal/logger"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -29,12 +29,12 @@ func (app *App) Start() error {
 	var err error
 
 	// Initialize Redis
-	redisConfig := &redisInfra.ClientConfig{
+	redisConfig := &redis2.ClientConfig{
 		Addr:     config.App().Redis.Addr,
 		Password: config.App().Redis.Password,
 		DB:       config.App().Redis.DB,
 	}
-	app.Redis, err = redisInfra.InitRedis(redisConfig)
+	app.Redis, err = redis2.InitRedis(redisConfig)
 	if err != nil {
 		return err
 	}

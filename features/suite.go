@@ -6,10 +6,6 @@ import (
 
 	"github.com/HiroLiang/goat-server/internal/bootstrap"
 	"github.com/HiroLiang/goat-server/internal/config"
-	mockAuth "github.com/HiroLiang/goat-server/internal/infrastructure/auth/mock"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/auth/token"
-	mockRepo "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/mock"
-	mockShared "github.com/HiroLiang/goat-server/internal/infrastructure/shared/mock"
 	"github.com/HiroLiang/goat-server/internal/logger"
 	"github.com/cucumber/godog"
 	"go.uber.org/zap"
@@ -29,18 +25,10 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			logger.Log.Fatal("Error loading config", zap.Error(err))
 		}
 
-		conf := config.App()
-
 		// Get mock dependencies
-		sessionStore := mockAuth.MockSessionStore()
 		dependencies := bootstrap.MockDeps(
 			func(deps *bootstrap.Dependencies) {
-				deps.AgentRepo = mockRepo.MockAgentRepository() // TODO not implemented
-				deps.FileStorage = mockShared.MockFileStorage()
-				deps.TokenService = token.NewAuthTokenService(sessionStore, conf.AuthToken.Expiration)
-				deps.RateLimiter = mockShared.MockRateLimiter()
-				deps.UserRepo = mockRepo.MockUserRepo()         // TODO not implemented
-				deps.UserRoleRepo = mockAuth.MockUserRoleRepo() // TODO not implemented
+
 			},
 		)
 

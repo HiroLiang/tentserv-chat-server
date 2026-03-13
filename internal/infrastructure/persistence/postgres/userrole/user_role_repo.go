@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/userrole"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	dbRole "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/role"
@@ -34,9 +34,12 @@ func NewUserRoleRepository(db *sqlx.DB) *UserRoleRepository {
 	return &UserRoleRepository{db: db}
 }
 
-func (r UserRoleRepository) FindRolesByUser(ctx context.Context, userID user.ID) ([]*role.Role, error) {
-	query, args, err := dbRole.Table.Select(dbRole.Table.Columns...).
-		Where(squirrel.Eq{"user_id": userID}).
+func (r UserRoleRepository) FindRolesByUser(ctx context.Context, userID shared.UserID) ([]*role.Role, error) {
+	query, args, err := postgres.Builder.
+		Select("r.id", "r.type", "r.creator", "r.created_at", "r.updated_at").
+		From(dbRole.Table.Name + " r").
+		Join(Table.Name + " ur ON ur.role_id = r.id").
+		Where(squirrel.Eq{"ur.user_id": userID}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build user_role query: %w", err)
@@ -59,7 +62,7 @@ func (r UserRoleRepository) FindRolesByUser(ctx context.Context, userID user.ID)
 	return roles, nil
 }
 
-func (r UserRoleRepository) Exists(ctx context.Context, userID user.ID, role role.Type) bool {
+func (r UserRoleRepository) Exists(ctx context.Context, userID shared.UserID, role role.Code) bool {
 	query, args, err := Table.Select("1").
 		From(Table.Name+" ur").
 		LeftJoin(dbRole.Table.Name+" r ON ur.role_id = r.id").
@@ -72,7 +75,7 @@ func (r UserRoleRepository) Exists(ctx context.Context, userID user.ID, role rol
 	return postgres.Exists(ctx, r.db, query, args...)
 }
 
-func (r UserRoleRepository) Assign(ctx context.Context, userID user.ID, role role.Type) error {
+func (r UserRoleRepository) Assign(ctx context.Context, userID shared.UserID, role role.Code) error {
 	query, args, err := Table.Insert().
 		Columns("user_id", "role_id").
 		Select(
@@ -100,7 +103,7 @@ func (r UserRoleRepository) Assign(ctx context.Context, userID user.ID, role rol
 	return nil
 }
 
-func (r UserRoleRepository) Revoke(ctx context.Context, userID user.ID, role role.Type) error {
+func (r UserRoleRepository) Revoke(ctx context.Context, userID shared.UserID, role role.Code) error {
 	query, args, err := Table.Delete().
 		From(Table.Name + " ur").
 		Where(squirrel.And{

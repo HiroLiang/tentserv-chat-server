@@ -1,10 +1,14 @@
 package user
 
-import "context"
+import (
+	"context"
+
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
+)
 
 type Repository interface {
-	FindByID(ctx context.Context, id ID) (*User, error)
-	FindByEmail(ctx context.Context, email Email) (*User, error)
-	Create(ctx context.Context, u *User) error
-	Update(ctx context.Context, u *User) error
+	Create(ctx context.Context, user *User) (shared.UserID, error)
+	FindByID(ctx context.Context, id shared.UserID) (*User, error)
+	FindByAccountID(ctx context.Context, accountID shared.AccountID) (*[]User, error)
+	Update(ctx context.Context, user *User) error
 }

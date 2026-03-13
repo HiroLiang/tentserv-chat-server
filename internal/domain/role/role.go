@@ -3,13 +3,15 @@ package role
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 type Role struct {
-	ID        ID
-	Type      Type
-	Creator   user.ID
-	CreateAt  time.Time
-	UpdatedAt time.Time
+	ID          shared.RoleID
+	Code        Code
+	Name        string
+	Description string
+	Creator     shared.AccountID
+	CreateAt    time.Time
+	UpdatedAt   time.Time
 }

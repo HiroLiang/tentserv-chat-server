@@ -1,7 +1,7 @@
 // @title Goat-Server
 // @version 1.0.0
 // @description Server for my all Goat application
-// @host dev.hiroliang.com
+// @host localhost:8080
 // @basePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -42,6 +42,7 @@ func main() {
 	if err := config.LoadConfig(config.Env("CONFIG_PATH", "./config")); err != nil {
 		logger.Log.Fatal("load config error", zap.Error(err))
 	}
+	logger.Log.Info("config loaded")
 
 	// Create application
 	app := bootstrap.CreateApp()

@@ -4,18 +4,27 @@ import (
 	"errors"
 	"net/http"
 
-	appdevice "github.com/HiroLiang/goat-server/internal/application/device"
-	"github.com/HiroLiang/goat-server/internal/domain/device"
+	deviceUseCase "github.com/HiroLiang/goat-server/internal/application/device/usecase"
 	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
 	"github.com/gin-gonic/gin"
 )
 
 type DeviceHandler struct {
-	deviceUseCase *appdevice.UseCase
+	registerUseCase     deviceUseCase.RegisterUseCase
+	getProfileUsecase   deviceUseCase.GetProfileUseCase
+	updateDeviceUseCase deviceUseCase.UpdateDeviceUseCase
 }
 
-func NewDeviceHandler(deviceUseCase *appdevice.UseCase) *DeviceHandler {
-	return &DeviceHandler{deviceUseCase: deviceUseCase}
+func NewDeviceHandler(
+	registerUseCase deviceUseCase.RegisterUseCase,
+	GetDeviceProfileUseCase deviceUseCase.GetProfileUseCase,
+	updateDeviceUseCase deviceUseCase.UpdateDeviceUseCase,
+) *DeviceHandler {
+	return &DeviceHandler{
+		registerUseCase:     registerUseCase,
+		getProfileUsecase:   GetDeviceProfileUseCase,
+		updateDeviceUseCase: updateDeviceUseCase,
+	}
 }
 
 func (h *DeviceHandler) RegisterDeviceRoutes(r *gin.RouterGroup) {
@@ -39,13 +48,12 @@ func (h *DeviceHandler) registerDeviceId(c *gin.Context) {
 		return
 	}
 
-	input := adapter.BuildInput(c, appdevice.RegisterDeviceInput{
-		DeviceID: req.DeviceID,
+	input := adapter.BuildInput(c, deviceUseCase.RegisterInput{
 		Name:     req.DeviceName,
 		Platform: req.Platform,
 	})
 
-	out, err := h.deviceUseCase.RegisterDevice(c.Request.Context(), input)
+	out, err := h.registerUseCase.Execute(c.Request.Context(), input)
 	if err != nil {
 		handleError(c, err)
 		return
@@ -71,13 +79,13 @@ func (h *DeviceHandler) registerDeviceId(c *gin.Context) {
 func (h *DeviceHandler) getDeviceInfo(c *gin.Context) {
 	deviceID := c.Param("device_id")
 
-	input := adapter.BuildInput(c, appdevice.GetDeviceInput{
+	input := adapter.BuildInput(c, deviceUseCase.GetProfileInput{
 		DeviceID: deviceID,
 	})
 
-	out, err := h.deviceUseCase.GetDevice(c.Request.Context(), input)
+	out, err := h.getProfileUsecase.Execute(c.Request.Context(), input)
 	if err != nil {
-		if errors.Is(err, device.ErrDeviceNotFound) {
+		if errors.Is(err, deviceUseCase.ErrDeviceNotFound) {
 			c.JSON(http.StatusOK, GetDeviceInfoResponse{Success: false})
 			return
 		}
@@ -104,23 +112,20 @@ func (h *DeviceHandler) getDeviceInfo(c *gin.Context) {
 // @Success 200 {object} DeviceUpdateResponse
 // @Router /api/device/{device_id} [patch]
 func (h *DeviceHandler) updateDeviceInfo(c *gin.Context) {
-	deviceID := c.Param("device_id")
-
 	var req DeviceUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid request: " + err.Error()})
 		return
 	}
 
-	input := adapter.BuildInput(c, appdevice.UpdateDeviceInput{
-		DeviceID: deviceID,
+	input := adapter.BuildInput(c, deviceUseCase.UpdateDeviceInput{
 		Name:     req.DeviceName,
 		Platform: req.Platform,
 	})
 
-	out, err := h.deviceUseCase.UpdateDevice(c.Request.Context(), input)
+	out, err := h.updateDeviceUseCase.Execute(c.Request.Context(), input)
 	if err != nil {
-		handleError(c, err)
+		c.JSON(http.StatusOK, DeviceUpdateResponse{Success: false})
 		return
 	}
 

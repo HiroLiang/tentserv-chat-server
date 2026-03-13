@@ -8,12 +8,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func MustBaseInput(c *gin.Context) *shared.BaseInput {
+func MustBaseInput(c *gin.Context) *shared.BaseContext {
 	metadata, ok := c.Get("context")
 	if !ok {
 		c.JSON(http.StatusInternalServerError, response.ErrNotFound("metadata"))
 	}
-	return metadata.(*shared.BaseInput)
+	return metadata.(*shared.BaseContext)
 }
 
 func BuildInput[T any](c *gin.Context, data T) shared.UseCaseInput[T] {

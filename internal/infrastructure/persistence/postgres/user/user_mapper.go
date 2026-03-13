@@ -8,30 +8,26 @@ func toDomain(record *UserRecord) (*user.User, error) {
 		avatarName = *record.AvatarName
 	}
 	return &user.User{
-		ID:         record.ID,
-		Name:       record.Name,
-		Email:      record.Email,
-		Password:   record.Password,
-		Status:     record.UserStatus,
-		LastIP:     record.UserIP,
-		AvatarName: avatarName,
-		CreatedAt:  record.CreatedAt,
-		UpdatedAt:  record.UpdatedAt,
+		ID:        record.ID,
+		AccountID: record.AccountID,
+		Name:      record.Name,
+		Avatar:    avatarName,
+		CreatedAt: record.CreatedAt,
+		UpdatedAt: record.UpdatedAt,
 	}, nil
 }
 
 func toRecord(u *user.User) *UserRecord {
 	var avatarURL *string
-	if u.AvatarName != "" {
-		avatarURL = &u.AvatarName
+	if u.Avatar != "" {
+		avatarURL = &u.Avatar
 	}
 	return &UserRecord{
 		ID:         u.ID,
+		AccountID:  u.AccountID,
 		Name:       u.Name,
-		Email:      u.Email,
-		Password:   u.Password,
-		UserStatus: u.Status,
-		UserIP:     u.LastIP,
 		AvatarName: avatarURL,
+		CreatedAt:  u.CreatedAt,
+		UpdatedAt:  u.UpdatedAt,
 	}
 }

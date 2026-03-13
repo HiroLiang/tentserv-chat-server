@@ -1,7 +1,6 @@
 package device
 
 // ID is the device identifier provided by the client (e.g. a hardware UUID).
-type ID string
 
 // Platform represents the operating system of a device.
 type Platform string
@@ -22,4 +21,7 @@ func ParsePlatform(s string) (Platform, error) {
 		return Platform(s), nil
 	}
 	return "", ErrInvalidPlatform
+}
+func (p *Platform) String() string {
+	return string(*p)
 }

@@ -1,11 +1,10 @@
 package userrole
 
 import (
-	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 type UserRole struct {
-	ID   user.ID
-	Role role.Role
+	ID   shared.UserID
+	Role shared.RoleID
 }

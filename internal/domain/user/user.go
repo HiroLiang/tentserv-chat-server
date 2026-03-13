@@ -1,33 +1,26 @@
 package user
 
-import "time"
+import (
+	"time"
+
+	"github.com/HiroLiang/goat-server/internal/domain/role"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
+)
 
 type User struct {
-	ID         ID
-	Name       string
-	Email      Email
-	Password   string
-	Status     Status
-	LastIP     string
-	AvatarName string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID        shared.UserID
+	AccountID shared.AccountID
+	Name      string
+	Avatar    string
+	RoleCodes []role.Code
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-func NewUser(name string, email Email, hash string, ip string) *User {
+func NewUser(accountID shared.AccountID, name string) *User {
 	return &User{
-		Name:     name,
-		Email:    email,
-		Password: hash,
-		Status:   Applying,
-		LastIP:   ip,
+		AccountID: accountID,
+		Name:      name,
+		RoleCodes: []role.Code{role.User},
 	}
-}
-
-func (u *User) IsValid() bool {
-	return u.ID != 0 && u.IsActive()
-}
-
-func (u *User) IsActive() bool {
-	return u.Status == Active
 }
