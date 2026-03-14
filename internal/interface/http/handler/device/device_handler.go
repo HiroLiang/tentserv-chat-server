@@ -10,15 +10,15 @@ import (
 )
 
 type DeviceHandler struct {
-	registerUseCase     deviceUseCase.RegisterUseCase
-	getProfileUsecase   deviceUseCase.GetProfileUseCase
-	updateDeviceUseCase deviceUseCase.UpdateDeviceUseCase
+	registerUseCase     *deviceUseCase.RegisterUseCase
+	getProfileUsecase   *deviceUseCase.GetProfileUseCase
+	updateDeviceUseCase *deviceUseCase.UpdateDeviceUseCase
 }
 
 func NewDeviceHandler(
-	registerUseCase deviceUseCase.RegisterUseCase,
-	GetDeviceProfileUseCase deviceUseCase.GetProfileUseCase,
-	updateDeviceUseCase deviceUseCase.UpdateDeviceUseCase,
+	registerUseCase *deviceUseCase.RegisterUseCase,
+	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase,
+	updateDeviceUseCase *deviceUseCase.UpdateDeviceUseCase,
 ) *DeviceHandler {
 	return &DeviceHandler{
 		registerUseCase:     registerUseCase,
@@ -49,6 +49,7 @@ func (h *DeviceHandler) registerDeviceId(c *gin.Context) {
 	}
 
 	input := adapter.BuildInput(c, deviceUseCase.RegisterInput{
+		DeviceID: req.DeviceID,
 		Name:     req.DeviceName,
 		Platform: req.Platform,
 	})

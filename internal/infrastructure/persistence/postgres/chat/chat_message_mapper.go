@@ -5,7 +5,7 @@ import "github.com/HiroLiang/goat-server/internal/domain/chatmessage"
 func toChatMessageDomain(rec *ChatMessageRecord) (*chatmessage.ChatMessage, error) {
 	return &chatmessage.ChatMessage{
 		ID:        rec.ID,
-		GroupID:   rec.GroupID,
+		RoomID:    rec.RoomID,
 		SenderID:  rec.SenderID,
 		Content:   rec.Content,
 		Type:      rec.Type,
@@ -20,7 +20,7 @@ func toChatMessageDomain(rec *ChatMessageRecord) (*chatmessage.ChatMessage, erro
 func toChatMessageRecord(msg *chatmessage.ChatMessage) *ChatMessageRecord {
 	return &ChatMessageRecord{
 		ID:        msg.ID,
-		GroupID:   msg.GroupID,
+		RoomID:    msg.RoomID,
 		SenderID:  msg.SenderID,
 		Content:   msg.Content,
 		Type:      msg.Type,

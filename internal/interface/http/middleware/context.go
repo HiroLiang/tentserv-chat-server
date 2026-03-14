@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"net"
+
 	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/gin-gonic/gin"
@@ -24,7 +26,7 @@ func ContextMiddleware() gin.HandlerFunc {
 		// Set context
 		c.Set("context", &appShared.BaseContext{
 			Request: appShared.RequestContext{
-				IP:       c.ClientIP(),
+				IP:       net.ParseIP(c.ClientIP()),
 				TraceID:  c.GetHeader("traceparent"),
 				DeviceID: deviceID,
 			},

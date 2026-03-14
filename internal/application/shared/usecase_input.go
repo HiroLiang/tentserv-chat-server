@@ -1,13 +1,15 @@
 package shared
 
 import (
+	"net"
+
 	"github.com/HiroLiang/goat-server/internal/domain/auth"
 	"github.com/HiroLiang/goat-server/internal/domain/role"
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 type RequestContext struct {
-	IP       string
+	IP       net.IP
 	TraceID  string
 	DeviceID shared.DeviceID
 }

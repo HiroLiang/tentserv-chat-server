@@ -2,104 +2,77 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-Goat-Server is the Go backend for Goat-Chat, a Tauri desktop application with Ollama agent integration. It provides REST APIs and WebSocket endpoints for user authentication, chat management, and AI agent interaction.
-
 ## Commands
 
-```shell
-# Install CLI tools (swag, godog)
-make setup
+```bash
+make setup   # Install swag and godog CLIs (required before first run)
+make build   # Compile to bin/goat-api
+make run     # Start server on :8080
+make test    # Run all tests (unit + BDD)
+make unit    # Run unit tests: go test ./internal/... -v
+make bdd     # Run BDD tests: go test -v ./features
+make swag    # Regenerate Swagger docs (after changing API annotations)
+```
 
-# Run locally
-make run
-
-# Build binary to bin/goat-api
-make build
-
-# Run all tests (unit + BDD)
-make test
-
-# Run unit tests only
-go test ./internal/... -v
-
-# Run BDD tests only
-go test -v ./features
-
-# Run a single unit test
-go test ./internal/application/user/... -run TestAssignRoleToUser_Success -v
-
-# Regenerate Swagger docs (required after modifying handler annotations)
-make swag
+To run a single unit test:
+```bash
+go test ./internal/path/to/pkg/... -v -run TestFunctionName
 ```
 
 ## Architecture
 
-The project follows Clean Architecture with four main layers:
+Clean Architecture with strict unidirectional dependency: `domain → application → infrastructure/interface`
 
+**`internal/domain/`** — Entities and repository interfaces. No framework dependencies.
+
+**`internal/application/`** — Use cases. All accept `shared.UseCaseInput[T]` which wraps:
+- `Base.Auth` — AccountID, UserID, Roles, AccessToken
+- `Base.Request` — IP, TraceID, DeviceID
+- `Data T` — typed request payload
+
+**`internal/infrastructure/`** — Implementations: PostgreSQL repos (via pgx/sqlx + Masterminds/squirrel), Redis session, local file storage.
+
+**`internal/interface/http/`** — Gin handlers, middleware, DTOs, and error translators. Each feature group has:
+- `*_handler.go` — route handler
+- `*_dto.go` — request/response structs
+- `*_error_translator.go` — maps domain errors → HTTP status codes
+
+**`internal/bootstrap/`** — DI wiring: `BuildDeps()` constructs all repos/services; `usecases.go` wires use cases.
+
+**`features/`** — BDD tests using Godog/Gherkin. `suite.go` sets up mock deps and an `httptest.Server`; `context.go` contains step definitions.
+
+## Key Patterns
+
+**Gin → UseCase bridge** (`internal/interface/http/adapter/`):
+```go
+adapter.BuildInput(c, data)      // with typed request data
+adapter.BuildEmptyInput(c)       // no request body
 ```
-internal/
-├── domain/        # Entities, value objects, repository interfaces, domain errors
-├── application/   # Use cases (orchestrate domain objects)
-├── infrastructure/ # Concrete implementations (Postgres, Redis, JWT, Argon2)
-└── interface/http/ # Gin handlers, middleware, DTOs
+
+**Import naming:** When a handler package name matches an application package name (e.g., both named `user`), the imported application package is used unqualified. If domain and application packages clash in the same file, alias domain as `domainuser`.
+
+**Repository queries:** Use `Masterminds/squirrel` — wrap conditions with `squirrel.Eq{...}` and pass to a shared `findOneBy()` helper.
+
+**Mocking in BDD tests:** `bootstrap.MockDeps()` with option functions. `FileStorage` mock must be set explicitly: `deps.FileStorage = mockShared.MockFileStorage()`.
+
+## Configuration
+
+- Production config: `config/config.yaml`
+- BDD test config: `dev-doc/config/config.yaml` (loaded via `config.LoadConfig("../dev-doc/config")`)
+- Runtime env vars: `APP_ENV`, `SERVER_PORT`, `CONFIG_PATH`
+- YAML values support `${VAR:default}` expansion
+
+## Infrastructure Requirements (local dev)
+
+```bash
+# PostgreSQL
+docker run -d --name postgres --network goat-net \
+  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=goat \
+  -p 5432:5432 postgres:18
+
+# Redis
+docker run -d --name redis --network goat-net \
+  -p 6379:6379 redis:8 redis-server --requirepass "1234"
 ```
 
-**Dependency direction:** `interface → application → domain ← infrastructure`
-
-### Bootstrap Flow (`internal/bootstrap/`)
-
-`main.go` → `bootstrap.CreateApp()` → `Start()`:
-1. `BuildDeps()` — wires repositories and services from infrastructure implementations
-2. `BuildUseCases()` — constructs use cases with dependencies
-3. `NewServer()` + `RegisterRestRoutes()` — sets up Gin with middleware and routes
-
-### Request Flow
-
-HTTP request → Gin middleware chain → Handler → `adapter.BuildInput(c, data)` → UseCase → Domain → Repository
-
-`adapter.BuildInput` packages the Gin context (IP, auth token, user ID) into `shared.UseCaseInput[T]`, which is the standard input type for all use cases.
-
-### Authentication
-
-Two-layer middleware pattern:
-- `AuthMiddleware` — validates Bearer token against Redis session store, sets `authContext` in Gin context (non-blocking, continues even without valid token)
-- `RequireAuthMiddleware` — aborts with 401 if `authContext` is absent
-
-Tokens are JWT-based but validated against Redis session store (server-side sessions). Login returns the token in the `Authorization` response header.
-
-### Error Handling Pattern
-
-Domain errors are defined per-domain (e.g., `internal/domain/user/errors.go`). Each handler has a dedicated `*_error_translator.go` that translates domain errors to HTTP status codes using `errors.Is`. Unhandled errors are passed to the global error middleware via `c.Error(err)`.
-
-### Testing
-
-- **Unit tests**: Live alongside source files (e.g., `user_usecase_test.go`). Use `testify/mock` for mocking repositories.
-- **BDD tests** (`features/`): Use Godog with Gherkin `.feature` files. The suite boots a real `httptest.Server` with mock dependencies loaded from `dev-doc/config/config.yaml`.
-
-Mock implementations are in:
-- `internal/infrastructure/persistence/mock/` — repository mocks
-- `internal/infrastructure/auth/mock/` — auth mocks
-- `internal/infrastructure/shared/mock/` — rate limiter mock
-
-### Configuration
-
-- `config/config.yaml` — main config (auth token expiration, DB DSN, Redis, rate limits, HMAC secret)
-- `.env` — `APP_ENV` and `SERVER_PORT`
-- BDD tests use `dev-doc/config/config.yaml` instead of the main config
-
-### Infrastructure
-
-- **Database**: PostgreSQL via `pgx` + `sqlx`. Query building uses `Masterminds/squirrel`. Each entity has a `*_record.go` (DB struct), `*_mapper.go` (record ↔ domain), and `*_repo.go`.
-- **Cache**: Redis via `go-redis`. UserRole repo uses a Redis cache layer wrapping Postgres.
-- **Logger**: `go.uber.org/zap` via `internal/logger/logger.go`.
-
-### Adding a New Domain Feature
-
-1. Define entity/VOs/errors/repository interface in `internal/domain/<name>/`
-2. Add use case input/output types and `UseCase` struct in `internal/application/<name>/`
-3. Implement the repository in `internal/infrastructure/persistence/postgres/<name>/`
-4. Register the repository and use case in `internal/bootstrap/dependencies.go` and `usecases.go`
-5. Add handler + DTO + error translator in `internal/interface/http/handler/<name>/`
-6. Register routes in `internal/bootstrap/rest.go`
+Initialize schema with `config/init_postgres.sql`.

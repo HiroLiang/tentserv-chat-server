@@ -14,9 +14,9 @@ type Account struct {
 	AccountName string
 	Password    string
 	Status      Status
-	UserLimit   int
+	UserLimit   int64
 	UserIDs     []shared.UserID
-	DeviceIDs   []shared.DeviceID
+	Devices     []AccountDevice
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -26,6 +26,7 @@ func NewAccount(
 	email shared.EmailAddress,
 	account string,
 	password string,
+	userLimit int64,
 ) *Account {
 	return &Account{
 		PublicID:    publicID,
@@ -33,6 +34,7 @@ func NewAccount(
 		AccountName: account,
 		Password:    password,
 		Status:      Applying,
+		UserLimit:   userLimit,
 	}
 }
 
@@ -54,14 +56,23 @@ func (a *Account) AddUser(userID shared.UserID) {
 }
 
 func (a *Account) HasDevice(deviceID shared.DeviceID) bool {
-	for _, id := range a.DeviceIDs {
-		if id == deviceID {
+	for _, device := range a.Devices {
+		if device.DeviceID == deviceID {
 			return true
 		}
 	}
 	return false
 }
 
-func (a *Account) AddDevice(deviceID shared.DeviceID) {
-	a.DeviceIDs = append(a.DeviceIDs, deviceID)
+func (a *Account) AddDevice(device AccountDevice) {
+	a.Devices = append(a.Devices, device)
+}
+
+func (a *Account) GetDevice(deviceID shared.DeviceID) *AccountDevice {
+	for _, device := range a.Devices {
+		if device.DeviceID == deviceID {
+			return &device
+		}
+	}
+	return nil
 }

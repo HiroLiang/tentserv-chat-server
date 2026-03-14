@@ -3,15 +3,15 @@ package chat
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatgroup"
+	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/goat-server/internal/domain/chatmessage"
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
+	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
 )
 
 type ChatMessageRecord struct {
 	ID        chatmessage.ID          `db:"id"`
-	GroupID   chatgroup.ID            `db:"group_id"`
-	SenderID  participant.ID          `db:"sender_id"`
+	RoomID    chatroom.ID             `db:"room_id"`
+	SenderID  chatmember.ID           `db:"sender_id"`
 	Content   string                  `db:"content"`
 	Type      chatmessage.MessageType `db:"message_type"`
 	ReplyToID *chatmessage.ID         `db:"reply_to_id"`

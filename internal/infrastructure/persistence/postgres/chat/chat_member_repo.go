@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatgroup"
 	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/goat-server/internal/domain/participant"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
@@ -14,18 +14,18 @@ import (
 )
 
 var ChatMemberTable = postgres.Table{
-	Name: "public.chat_group_members",
+	Name: "public.chat_members",
 	Columns: []string{
 		"id",
-		"group_id",
+		"room_id",
 		"participant_id",
 		"role",
-		"joined_at",
-		"is_archived",
 		"is_muted",
-		"is_pinned",
+		"is_delete",
 		"last_read_at",
+		"joined_at",
 		"updated_at",
+		"deleted_at",
 	},
 }
 
@@ -59,13 +59,13 @@ func (r *ChatMemberRepository) FindByID(ctx context.Context, id chatmember.ID) (
 	return toChatMemberDomain(rec)
 }
 
-func (r *ChatMemberRepository) FindByGroupAndParticipant(
+func (r *ChatMemberRepository) FindByRoomAndParticipant(
 	ctx context.Context,
-	groupID chatgroup.ID,
+	roomID chatroom.ID,
 	participantID participant.ID,
 ) (*chatmember.ChatMember, error) {
 	query, args, err := ChatMemberTable.Select(ChatMemberTable.Columns...).
-		Where(squirrel.Eq{"group_id": groupID, "participant_id": participantID}).
+		Where(squirrel.Eq{"room_id": roomID, "participant_id": participantID}).
 		Limit(1).
 		ToSql()
 	if err != nil {
@@ -83,8 +83,8 @@ func (r *ChatMemberRepository) FindByGroupAndParticipant(
 	return toChatMemberDomain(rec)
 }
 
-func (r *ChatMemberRepository) FindByGroup(ctx context.Context, groupID chatgroup.ID) ([]*chatmember.ChatMember, error) {
-	return r.findAll(ctx, squirrel.Eq{"group_id": groupID})
+func (r *ChatMemberRepository) FindByRoom(ctx context.Context, roomID chatroom.ID) ([]*chatmember.ChatMember, error) {
+	return r.findAll(ctx, squirrel.Eq{"room_id": roomID})
 }
 
 func (r *ChatMemberRepository) FindByParticipant(ctx context.Context, participantID participant.ID) ([]*chatmember.ChatMember, error) {
@@ -95,8 +95,8 @@ func (r *ChatMemberRepository) Add(ctx context.Context, m *chatmember.ChatMember
 	rec := toChatMemberRecord(m)
 
 	query, args, err := ChatMemberTable.Insert().
-		Columns("group_id", "participant_id", "role").
-		Values(rec.GroupID, rec.ParticipantID, rec.Role).
+		Columns("room_id", "participant_id", "role").
+		Values(rec.RoomID, rec.ParticipantID, rec.Role).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert chat member: %w", err)
@@ -110,9 +110,7 @@ func (r *ChatMemberRepository) Update(ctx context.Context, m *chatmember.ChatMem
 
 	query, args, err := ChatMemberTable.Update().
 		Set("role", rec.Role).
-		Set("is_archived", rec.IsArchived).
 		Set("is_muted", rec.IsMuted).
-		Set("is_pinned", rec.IsPinned).
 		Set("last_read_at", rec.LastReadAt).
 		Set("updated_at", squirrel.Expr("now()")).
 		Where(squirrel.Eq{"id": rec.ID}).
@@ -124,9 +122,9 @@ func (r *ChatMemberRepository) Update(ctx context.Context, m *chatmember.ChatMem
 	return postgres.Exec(ctx, r.db, query, args...)
 }
 
-func (r *ChatMemberRepository) Remove(ctx context.Context, groupID chatgroup.ID, participantID participant.ID) error {
+func (r *ChatMemberRepository) Remove(ctx context.Context, roomID chatroom.ID, participantID participant.ID) error {
 	query, args, err := ChatMemberTable.Delete().
-		Where(squirrel.Eq{"group_id": groupID, "participant_id": participantID}).
+		Where(squirrel.Eq{"room_id": roomID, "participant_id": participantID}).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build remove chat member: %w", err)

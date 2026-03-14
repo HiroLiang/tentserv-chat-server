@@ -6,19 +6,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatgroup"
+	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/goat-server/internal/domain/chatmessage"
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
+	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )
 
-var CharMessageTable = postgres.Table{
+var ChatMessageTable = postgres.Table{
 	Name: "public.chat_records",
 	Columns: []string{
 		"id",
-		"group_id",
+		"room_id",
 		"sender_id",
 		"content",
 		"message_type",
@@ -41,7 +41,7 @@ func NewChatMessageRepository(db *sqlx.DB) *ChatMessageRepository {
 }
 
 func (r *ChatMessageRepository) FindByID(ctx context.Context, id chatmessage.ID) (*chatmessage.ChatMessage, error) {
-	query, args, err := CharMessageTable.Select(CharMessageTable.Columns...).
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
 		Where(squirrel.Eq{"id": id}).
 		Limit(1).
 		ToSql()
@@ -60,13 +60,13 @@ func (r *ChatMessageRepository) FindByID(ctx context.Context, id chatmessage.ID)
 	return toChatMessageDomain(rec)
 }
 
-func (r *ChatMessageRepository) FindByGroup(
+func (r *ChatMessageRepository) FindByRoom(
 	ctx context.Context,
-	groupID chatgroup.ID,
+	roomID chatroom.ID,
 	limit, offset uint64,
 ) ([]*chatmessage.ChatMessage, error) {
-	query, args, err := CharMessageTable.Select(CharMessageTable.Columns...).
-		Where(squirrel.Eq{"group_id": groupID}).
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
+		Where(squirrel.Eq{"room_id": roomID}).
 		OrderBy("created_at DESC").
 		Limit(limit).
 		Offset(offset).
@@ -92,15 +92,15 @@ func (r *ChatMessageRepository) FindByGroup(
 	return messages, nil
 }
 
-func (r *ChatMessageRepository) FindByGroupBefore(
+func (r *ChatMessageRepository) FindByRoomBefore(
 	ctx context.Context,
-	groupID chatgroup.ID,
+	roomID chatroom.ID,
 	beforeID chatmessage.ID,
 	limit uint64,
 ) ([]*chatmessage.ChatMessage, error) {
-	query, args, err := CharMessageTable.Select(CharMessageTable.Columns...).
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
 		Where(squirrel.And{
-			squirrel.Eq{"group_id": groupID},
+			squirrel.Eq{"room_id": roomID},
 			squirrel.Eq{"is_deleted": false},
 			squirrel.Lt{"id": beforeID},
 		}).
@@ -133,12 +133,12 @@ func (r *ChatMessageRepository) FindByGroupBefore(
 	return messages, nil
 }
 
-func (r *ChatMessageRepository) FindLatestByGroup(
+func (r *ChatMessageRepository) FindLatestByRoom(
 	ctx context.Context,
-	groupID chatgroup.ID,
+	roomID chatroom.ID,
 ) (*chatmessage.ChatMessage, error) {
-	query, args, err := CharMessageTable.Select(CharMessageTable.Columns...).
-		Where(squirrel.Eq{"group_id": groupID, "is_deleted": false}).
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
+		Where(squirrel.Eq{"room_id": roomID, "is_deleted": false}).
 		OrderBy("id DESC").
 		Limit(1).
 		ToSql()
@@ -157,16 +157,16 @@ func (r *ChatMessageRepository) FindLatestByGroup(
 	return toChatMessageDomain(rec)
 }
 
-func (r *ChatMessageRepository) CountByGroupAfter(
+func (r *ChatMessageRepository) CountByRoomAfter(
 	ctx context.Context,
-	groupID chatgroup.ID,
+	roomID chatroom.ID,
 	since time.Time,
 ) (int64, error) {
 	query, args, err := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
 		Select("COUNT(*)").
-		From(CharMessageTable.Name).
+		From(ChatMessageTable.Name).
 		Where(squirrel.And{
-			squirrel.Eq{"group_id": groupID, "is_deleted": false},
+			squirrel.Eq{"room_id": roomID, "is_deleted": false},
 			squirrel.Gt{"created_at": since},
 		}).
 		ToSql()
@@ -184,9 +184,9 @@ func (r *ChatMessageRepository) CountByGroupAfter(
 
 func (r *ChatMessageRepository) FindBySender(
 	ctx context.Context,
-	senderID participant.ID,
+	senderID chatmember.ID,
 ) ([]*chatmessage.ChatMessage, error) {
-	query, args, err := CharMessageTable.Select(CharMessageTable.Columns...).
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
 		Where(squirrel.Eq{"sender_id": senderID}).
 		OrderBy("created_at DESC").
 		ToSql()
@@ -214,9 +214,9 @@ func (r *ChatMessageRepository) FindBySender(
 func (r *ChatMessageRepository) Create(ctx context.Context, msg *chatmessage.ChatMessage) error {
 	rec := toChatMessageRecord(msg)
 
-	query, args, err := CharMessageTable.Insert().
-		Columns("group_id", "sender_id", "content", "message_type", "reply_to_id").
-		Values(rec.GroupID, rec.SenderID, rec.Content, rec.Type, rec.ReplyToID).
+	query, args, err := ChatMessageTable.Insert().
+		Columns("room_id", "sender_id", "content", "message_type", "reply_to_id").
+		Values(rec.RoomID, rec.SenderID, rec.Content, rec.Type, rec.ReplyToID).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert chat message: %w", err)
@@ -228,7 +228,7 @@ func (r *ChatMessageRepository) Create(ctx context.Context, msg *chatmessage.Cha
 func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.ChatMessage) error {
 	rec := toChatMessageRecord(msg)
 
-	query, args, err := CharMessageTable.Update().
+	query, args, err := ChatMessageTable.Update().
 		Set("content", rec.Content).
 		Set("is_edited", rec.IsEdited).
 		Set("updated_at", squirrel.Expr("now()")).
@@ -242,7 +242,7 @@ func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.Cha
 }
 
 func (r *ChatMessageRepository) SoftDelete(ctx context.Context, id chatmessage.ID) error {
-	query, args, err := CharMessageTable.Update().
+	query, args, err := ChatMessageTable.Update().
 		Set("is_deleted", true).
 		Set("updated_at", squirrel.Expr("now()")).
 		Where(squirrel.Eq{"id": id}).

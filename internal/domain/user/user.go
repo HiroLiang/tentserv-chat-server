@@ -7,6 +7,9 @@ import (
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
+// ID is an alias for shared.UserID, used by other domain packages.
+type ID = shared.UserID
+
 type User struct {
 	ID        shared.UserID
 	AccountID shared.AccountID

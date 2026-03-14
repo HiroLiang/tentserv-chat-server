@@ -27,6 +27,13 @@ type GetProfileUseCase struct {
 	deviceRepo device.Repository
 }
 
+func NewGetProfileUseCase(uof transaction.UnitOfWork, deviceRepo device.Repository) *GetProfileUseCase {
+	return &GetProfileUseCase{
+		uof:        uof,
+		deviceRepo: deviceRepo,
+	}
+}
+
 func (uc *GetProfileUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[GetProfileInput],

@@ -29,6 +29,13 @@ type RegisterUseCase struct {
 	deviceRepo device.Repository
 }
 
+func NewRegisterUseCase(uof transaction.UnitOfWork, deviceRepo device.Repository) *RegisterUseCase {
+	return &RegisterUseCase{
+		uof:        uof,
+		deviceRepo: deviceRepo,
+	}
+}
+
 func (uc *RegisterUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[RegisterInput],

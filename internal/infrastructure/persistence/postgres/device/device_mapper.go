@@ -2,6 +2,7 @@ package device
 
 import (
 	"github.com/HiroLiang/goat-server/internal/domain/device"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 )
 
 func toDomain(r *DeviceRecord) (*device.Device, error) {
@@ -9,8 +10,12 @@ func toDomain(r *DeviceRecord) (*device.Device, error) {
 	if err != nil {
 		return nil, err
 	}
+	deviceID, err := shared.ParseDeviceID(r.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &device.Device{
-		ID:        device.ID(r.ID),
+		ID:        deviceID,
 		Platform:  platform,
 		Name:      r.Name,
 		CreatedAt: r.CreatedAt,
@@ -20,7 +25,7 @@ func toDomain(r *DeviceRecord) (*device.Device, error) {
 
 func toRecord(d *device.Device) *DeviceRecord {
 	return &DeviceRecord{
-		ID:       string(d.ID),
+		ID:       d.ID.String(),
 		Platform: string(d.Platform),
 		Name:     d.Name,
 	}

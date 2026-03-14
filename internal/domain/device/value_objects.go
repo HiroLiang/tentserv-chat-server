@@ -1,6 +1,9 @@
 package device
 
-// ID is the device identifier provided by the client (e.g. a hardware UUID).
+import "github.com/HiroLiang/goat-server/internal/domain/shared"
+
+// ID is an alias for shared.DeviceID, used by other domain packages.
+type ID = shared.DeviceID
 
 // Platform represents the operating system of a device.
 type Platform string

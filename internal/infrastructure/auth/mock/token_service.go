@@ -15,7 +15,7 @@ func MockTokenServiceFactory() auth.TokenService {
 
 var _ auth.TokenService = (*MockTokenService)(nil)
 
-func (m MockTokenService) Generate(ctx context.Context, params session.CreateSessionParams) (string, error) {
+func (m MockTokenService) Generate(ctx context.Context, params session.CreateSessionInput) (string, error) {
 	//TODO implement me
 	panic("implement me")
 }

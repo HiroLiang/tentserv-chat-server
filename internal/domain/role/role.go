@@ -11,7 +11,7 @@ type Role struct {
 	Code        Code
 	Name        string
 	Description string
-	Creator     shared.AccountID
+	Creator     shared.UserID
 	CreateAt    time.Time
 	UpdatedAt   time.Time
 }

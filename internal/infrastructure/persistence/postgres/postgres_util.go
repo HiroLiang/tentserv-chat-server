@@ -10,9 +10,9 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func ScanOne[T any](ctx context.Context, db *sqlx.DB, query string, args ...any) (*T, error) {
+func ScanOne[T any](ctx context.Context, db sqlx.ExtContext, query string, args ...any) (*T, error) {
 	var rec T
-	if err := db.GetContext(ctx, &rec, query, args...); err != nil {
+	if err := sqlx.GetContext(ctx, db, &rec, query, args...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -21,24 +21,24 @@ func ScanOne[T any](ctx context.Context, db *sqlx.DB, query string, args ...any)
 	return &rec, nil
 }
 
-func ScanAll[T any](ctx context.Context, db *sqlx.DB, query string, args ...any) ([]T, error) {
+func ScanAll[T any](ctx context.Context, db sqlx.ExtContext, query string, args ...any) ([]T, error) {
 	var list []T
-	if err := db.SelectContext(ctx, &list, query, args...); err != nil {
+	if err := sqlx.SelectContext(ctx, db, &list, query, args...); err != nil {
 		return nil, fmt.Errorf("scan all: %w", err)
 	}
 	return list, nil
 }
 
-func Exec(ctx context.Context, db *sqlx.DB, query string, args ...any) error {
+func Exec(ctx context.Context, db sqlx.ExtContext, query string, args ...any) error {
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("exec query: %w", err)
 	}
 	return nil
 }
 
-func Exists(ctx context.Context, db *sqlx.DB, query string, args ...any) bool {
+func Exists(ctx context.Context, db sqlx.ExtContext, query string, args ...any) bool {
 	var one int
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
+	if err := db.QueryRowxContext(ctx, query, args...).Scan(&one); err != nil {
 		logger.Log.Error(err.Error())
 		return false
 	}

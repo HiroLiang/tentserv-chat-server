@@ -3,20 +3,20 @@ package chat
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatgroup"
 	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/goat-server/internal/domain/participant"
 )
 
 type ChatMemberRecord struct {
 	ID            chatmember.ID   `db:"id"`
-	GroupID       chatgroup.ID    `db:"group_id"`
+	RoomID        chatroom.ID     `db:"room_id"`
 	ParticipantID participant.ID  `db:"participant_id"`
 	Role          chatmember.Role `db:"role"`
-	JoinedAt      time.Time       `db:"joined_at"`
-	IsArchived    bool            `db:"is_archived"`
 	IsMuted       bool            `db:"is_muted"`
-	IsPinned      bool            `db:"is_pinned"`
+	IsDeleted     bool            `db:"is_delete"`
 	LastReadAt    *time.Time      `db:"last_read_at"`
+	JoinedAt      time.Time       `db:"joined_at"`
 	UpdatedAt     time.Time       `db:"updated_at"`
+	DeletedAt     *time.Time      `db:"deleted_at"`
 }

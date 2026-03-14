@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/HiroLiang/goat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
@@ -56,7 +57,9 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrLoginFailed
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if err != nil {
+			_ = tx.Rollback()
+		}
 	}()
 
 	// Find account
@@ -102,8 +105,17 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrInvalidDeviceID
 	}
 
-	if !accountData.HasDevice(deviceID) {
-		accountData.AddDevice(deviceID)
+	// Update device
+	device := account.AccountDevice{
+		AccountID:  accountData.ID,
+		DeviceID:   deviceID,
+		LastIP:     input.Base.Request.IP,
+		LastSeenAt: time.Now(),
+	}
+
+	err = uc.accountRepo.RegisterDevice(ctx, &device)
+	if err != nil {
+		return LoginOutput{}, ErrLoginFailed
 	}
 
 	// Create session

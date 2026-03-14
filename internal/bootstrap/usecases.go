@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
+	deviceUseCase "github.com/HiroLiang/goat-server/internal/application/device/usecase"
 	userUseCase "github.com/HiroLiang/goat-server/internal/application/user/usecase"
 )
 
@@ -13,6 +14,10 @@ type UseCases struct {
 
 	UpdateUserProfileUseCase *userUseCase.UpdateProfileUseCase
 	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
+
+	RegisterDeviceUseCase   *deviceUseCase.RegisterUseCase
+	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase
+	UpdateDeviceUseCase     *deviceUseCase.UpdateDeviceUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -24,5 +29,9 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 
 		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo),
 		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),
+
+		RegisterDeviceUseCase:   deviceUseCase.NewRegisterUseCase(deps.Uow, deps.DeviceRepo),
+		GetDeviceProfileUseCase: deviceUseCase.NewGetProfileUseCase(deps.Uow, deps.DeviceRepo),
+		UpdateDeviceUseCase:     deviceUseCase.NewUpdateDeviceUseCase(deps.DeviceRepo),
 	}
 }

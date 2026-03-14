@@ -24,8 +24,10 @@ type UpdateDeviceUseCase struct {
 	deviceRepo device.Repository
 }
 
-func NewUpdateDeviceUseCase() *UpdateDeviceUseCase {
-	return &UpdateDeviceUseCase{}
+func NewUpdateDeviceUseCase(deviceRepo device.Repository) *UpdateDeviceUseCase {
+	return &UpdateDeviceUseCase{
+		deviceRepo: deviceRepo,
+	}
 }
 
 func (uc *UpdateDeviceUseCase) Execute(

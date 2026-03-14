@@ -12,4 +12,6 @@ type Repository interface {
 	FindByEmail(ctx context.Context, email shared.EmailAddress) (*Account, error)
 	Create(ctx context.Context, account *Account) (shared.AccountID, error)
 	Update(ctx context.Context, account *Account) error
+	RegisterDevice(ctx context.Context, accountDevice *AccountDevice) error
+	ReplaceDevices(ctx context.Context, accountID shared.AccountID, devices []AccountDevice) error
 }

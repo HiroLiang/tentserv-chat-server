@@ -20,7 +20,6 @@ var Table = postgres.Table{
 	Columns: []string{
 		"user_id",
 		"role_id",
-		"created_at",
 	},
 }
 
@@ -36,7 +35,7 @@ func NewUserRoleRepository(db *sqlx.DB) *UserRoleRepository {
 
 func (r UserRoleRepository) FindRolesByUser(ctx context.Context, userID shared.UserID) ([]*role.Role, error) {
 	query, args, err := postgres.Builder.
-		Select("r.id", "r.type", "r.creator", "r.created_at", "r.updated_at").
+		Select("r.id", "r.code", "r.name", "r.description", "r.created_by", "r.created_at", "r.updated_at").
 		From(dbRole.Table.Name + " r").
 		Join(Table.Name + " ur ON ur.role_id = r.id").
 		Where(squirrel.Eq{"ur.user_id": userID}).
@@ -66,7 +65,7 @@ func (r UserRoleRepository) Exists(ctx context.Context, userID shared.UserID, ro
 	query, args, err := Table.Select("1").
 		From(Table.Name+" ur").
 		LeftJoin(dbRole.Table.Name+" r ON ur.role_id = r.id").
-		Where("ur.user_id = ? AND r.type = ?", userID, role).
+		Where("ur.user_id = ? AND r.code = ?", userID, role).
 		ToSql()
 	if err != nil {
 		return false
@@ -84,7 +83,7 @@ func (r UserRoleRepository) Assign(ctx context.Context, userID shared.UserID, ro
 				Column(squirrel.Expr("?", userID)).
 				Column("id").
 				From(dbRole.Table.Name).
-				Where(squirrel.Eq{"type": role}),
+				Where(squirrel.Eq{"code": role}),
 		).
 		Suffix("ON CONFLICT DO NOTHING RETURNING user_id").
 		ToSql()
@@ -110,7 +109,7 @@ func (r UserRoleRepository) Revoke(ctx context.Context, userID shared.UserID, ro
 			squirrel.Expr("ur.role_id = r.id"),
 			squirrel.Eq{
 				"ur.user_id": userID,
-				"r.type":     role,
+				"r.code":     role,
 			},
 		}).
 		Suffix("USING " + dbRole.Table.Name + " r").

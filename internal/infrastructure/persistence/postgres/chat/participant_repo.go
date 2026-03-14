@@ -5,26 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/HiroLiang/goat-server/internal/domain/agent"
 	"github.com/HiroLiang/goat-server/internal/domain/participant"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
-	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )
-
-var ParticipantTable = postgres.Table{
-	Name: "public.participants",
-	Columns: []string{
-		"id",
-		"type",
-		"user_id",
-		"agent_id",
-		"display_name",
-		"avatar_name",
-		"created_at",
-	},
-}
 
 type ParticipantRepository struct {
 	db *sqlx.DB
@@ -37,49 +22,16 @@ func NewParticipantRepository(db *sqlx.DB) *ParticipantRepository {
 }
 
 func (r *ParticipantRepository) FindByID(ctx context.Context, id participant.ID) (*participant.Participant, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"id": id})
-}
+	query := `
+		SELECT p.id, p.type, pu.user_id, pa.agent_id, ps.system_type, p.created_at
+		FROM public.participants p
+		LEFT JOIN public.participant_users pu ON pu.participant_id = p.id
+		LEFT JOIN public.participant_agents pa ON pa.participant_id = p.id
+		LEFT JOIN public.participant_systems ps ON ps.participant_id = p.id
+		WHERE p.id = $1
+		LIMIT 1`
 
-func (r *ParticipantRepository) FindByUserID(ctx context.Context, userID user.ID) (*participant.Participant, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"user_id": userID, "type": participant.UserType})
-}
-
-func (r *ParticipantRepository) FindByAgentID(ctx context.Context, agentID agent.ID) (*participant.Participant, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"agent_id": agentID, "type": participant.AgentType})
-}
-
-func (r *ParticipantRepository) FindSystem(ctx context.Context) (*participant.Participant, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"type": participant.SystemType})
-}
-
-func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Participant) error {
-	rec := toParticipantRecordRecord(p)
-
-	query, args, err := ParticipantTable.Insert().
-		Columns("type", "user_id", "agent_id", "display_name", "avatar_name").
-		Values(rec.Type, rec.UserID, rec.AgentID, rec.DisplayName, rec.AvatarName).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build insert participant: %w", err)
-	}
-
-	return postgres.Exec(ctx, r.db, query, args...)
-}
-
-func (r *ParticipantRepository) findOneBy(
-	ctx context.Context,
-	cond squirrel.Sqlizer,
-) (*participant.Participant, error) {
-
-	query, args, err := ParticipantTable.Select(ParticipantTable.Columns...).
-		Where(cond).
-		Limit(1).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build participant query: %w", err)
-	}
-
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, id)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -88,4 +40,114 @@ func (r *ParticipantRepository) findOneBy(
 	}
 
 	return toParticipantDomain(rec)
+}
+
+func (r *ParticipantRepository) FindByUserID(ctx context.Context, userID shared.UserID) (*participant.Participant, error) {
+	query := `
+		SELECT p.id, p.type, pu.user_id, NULL::bigint AS agent_id, NULL::text AS system_type, p.created_at
+		FROM public.participants p
+		JOIN public.participant_users pu ON pu.participant_id = p.id
+		WHERE pu.user_id = $1
+		LIMIT 1`
+
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, userID)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, participant.ErrNotFound
+		}
+		return nil, fmt.Errorf("find participant by user: %w", err)
+	}
+
+	return toParticipantDomain(rec)
+}
+
+func (r *ParticipantRepository) FindByAgentID(ctx context.Context, agentID int64) (*participant.Participant, error) {
+	query := `
+		SELECT p.id, p.type, NULL::bigint AS user_id, pa.agent_id, NULL::text AS system_type, p.created_at
+		FROM public.participants p
+		JOIN public.participant_agents pa ON pa.participant_id = p.id
+		WHERE pa.agent_id = $1
+		LIMIT 1`
+
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, agentID)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, participant.ErrNotFound
+		}
+		return nil, fmt.Errorf("find participant by agent: %w", err)
+	}
+
+	return toParticipantDomain(rec)
+}
+
+func (r *ParticipantRepository) FindSystem(ctx context.Context) (*participant.Participant, error) {
+	query := `
+		SELECT p.id, p.type, NULL::bigint AS user_id, NULL::bigint AS agent_id, ps.system_type, p.created_at
+		FROM public.participants p
+		JOIN public.participant_systems ps ON ps.participant_id = p.id
+		LIMIT 1`
+
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, participant.ErrNotFound
+		}
+		return nil, fmt.Errorf("find system participant: %w", err)
+	}
+
+	return toParticipantDomain(rec)
+}
+
+func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Participant) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Insert into participants
+	var id participant.ID
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO public.participants (type) VALUES ($1) RETURNING id`,
+		p.Type,
+	).Scan(&id)
+	if err != nil {
+		return fmt.Errorf("insert participant: %w", err)
+	}
+	p.ID = id
+
+	// Insert into the corresponding join table
+	switch p.Type {
+	case participant.UserType:
+		if p.UserID == nil {
+			return fmt.Errorf("user_id required for user participant")
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO public.participant_users (participant_id, user_id) VALUES ($1, $2)`,
+			id, *p.UserID,
+		)
+	case participant.AgentType:
+		if p.AgentID == nil {
+			return fmt.Errorf("agent_id required for agent participant")
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO public.participant_agents (participant_id, agent_id) VALUES ($1, $2)`,
+			id, *p.AgentID,
+		)
+	case participant.SystemType:
+		if p.SystemType == nil {
+			return fmt.Errorf("system_type required for system participant")
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO public.participant_systems (participant_id, system_type) VALUES ($1, $2)`,
+			id, *p.SystemType,
+		)
+	default:
+		return fmt.Errorf("unknown participant type: %s", p.Type)
+	}
+	if err != nil {
+		return fmt.Errorf("insert participant detail: %w", err)
+	}
+
+	return tx.Commit()
 }

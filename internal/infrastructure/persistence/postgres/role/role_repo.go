@@ -18,8 +18,10 @@ var Table = postgres.Table{
 	Name: "goat.public.roles",
 	Columns: []string{
 		"id",
-		"type",
-		"creator",
+		"code",
+		"name",
+		"description",
+		"created_by",
 		"created_at",
 		"updated_at",
 	},
@@ -27,11 +29,6 @@ var Table = postgres.Table{
 
 type RoleRepository struct {
 	db *sqlx.DB
-}
-
-func (r *RoleRepository) FindByCode(ctx context.Context, code role.Code) (*role.Role, error) {
-	//TODO implement me
-	panic("implement me")
 }
 
 var _ role.Repository = (*RoleRepository)(nil)
@@ -44,8 +41,8 @@ func (r *RoleRepository) FindByID(ctx context.Context, id shared.RoleID) (*role.
 	return r.findOneBy(ctx, squirrel.Eq{"id": id})
 }
 
-func (r *RoleRepository) FindByType(ctx context.Context, t role.Code) (*role.Role, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"type": t})
+func (r *RoleRepository) FindByCode(ctx context.Context, code role.Code) (*role.Role, error) {
+	return r.findOneBy(ctx, squirrel.Eq{"code": code})
 }
 
 func (r *RoleRepository) FindAll(ctx context.Context) ([]*role.Role, error) {
@@ -73,8 +70,8 @@ func (r *RoleRepository) FindAll(ctx context.Context) ([]*role.Role, error) {
 func (r *RoleRepository) Create(ctx context.Context, roleDomain *role.Role) error {
 	rec := ToRecord(roleDomain)
 	query, args, err := Table.Insert().
-		Columns("type", "creator").
-		Values(rec.Code, rec.Creator).
+		Columns("code", "name", "description", "created_by").
+		Values(rec.Code, rec.Name, rec.Description, rec.CreatedBy).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert role query: %w", err)
@@ -92,8 +89,10 @@ func (r *RoleRepository) Create(ctx context.Context, roleDomain *role.Role) erro
 func (r *RoleRepository) Update(ctx context.Context, roleDomain *role.Role) error {
 	rec := ToRecord(roleDomain)
 	query, args, err := Table.Update().
-		Set("type", rec.Code).
-		Set("creator", rec.Creator).
+		Set("code", rec.Code).
+		Set("name", rec.Name).
+		Set("description", rec.Description).
+		Set("created_by", rec.CreatedBy).
 		Set("updated_at", squirrel.Expr("now()")).
 		Where(squirrel.Eq{"id": rec.ID}).
 		Suffix("RETURNING id").

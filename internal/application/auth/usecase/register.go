@@ -84,6 +84,7 @@ func (uc *RegisterUseCase) Execute(
 		emailAddr,
 		input.Data.Account,
 		hash,
+		1,
 	)
 	accountId, err := uc.accountRepo.Create(ctx, newAccount)
 	if err != nil {

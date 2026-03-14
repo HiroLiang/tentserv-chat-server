@@ -12,38 +12,29 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var Table = postgres.Table{
-	Name: "public.devices",
-	Columns: []string{
-		"id",
-		"platform",
-		"name",
-		"created_at",
-		"updated_at",
-	},
-}
-
 type DeviceRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ device.Repository = (*DeviceRepository)(nil)
 
 func NewDeviceRepository(db *sqlx.DB) *DeviceRepository {
-	return &DeviceRepository{db: db}
+	return &DeviceRepository{
+		BaseRepo: postgres.NewBaseRepo(db),
+	}
 }
 
 func (r *DeviceRepository) FindByID(ctx context.Context, deviceID device.ID) (*device.Device, error) {
 	query, args, err := Table.
 		Select(Table.Columns...).
-		Where(squirrel.Eq{"id": string(deviceID)}).
+		Where(squirrel.Eq{"id": deviceID.String()}).
 		Limit(1).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build device query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[DeviceRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[DeviceRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, device.ErrDeviceNotFound
@@ -65,7 +56,7 @@ func (r *DeviceRepository) FindAllByUserID(ctx context.Context, userID user.ID) 
 		return nil, fmt.Errorf("build devices query: %w", err)
 	}
 
-	records, err := postgres.ScanAll[DeviceRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[DeviceRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("find devices: %w", err)
 	}
@@ -92,7 +83,7 @@ func (r *DeviceRepository) Create(ctx context.Context, d *device.Device) error {
 		return err
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
@@ -108,19 +99,30 @@ func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
 		return err
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *DeviceRepository) BindUser(ctx context.Context, deviceID device.ID, userID user.ID) error {
 	query, args, err := postgres.Builder.
 		Insert("public.devices_users").
 		Columns("device_id", "user_id").
-		Values(string(deviceID), userID).
+		Values(deviceID.String(), userID).
 		Suffix("ON CONFLICT DO NOTHING").
 		ToSql()
 	if err != nil {
 		return err
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+var Table = postgres.Table{
+	Name: "public.devices",
+	Columns: []string{
+		"id",
+		"platform",
+		"name",
+		"created_at",
+		"updated_at",
+	},
 }

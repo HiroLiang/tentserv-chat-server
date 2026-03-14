@@ -35,11 +35,11 @@ func TestUserRoleRepository_FindRolesByUser(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := UserRoleRepository{db: sqlx.NewDb(db, "postgres")}
 
-	mock.ExpectQuery(`SELECT r.id, r.type, r.creator, r.created_at, r.updated_at FROM .*roles.* JOIN .*users_roles.*`).
+	mock.ExpectQuery(`SELECT r.id, r.code, r.name, r.description, r.created_by, r.created_at, r.updated_at FROM .*roles.* JOIN .*users_roles.*`).
 		WithArgs(user.ID(1)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "creator", "created_at", "updated_at"}).
-			AddRow(1, "user", 1, time.Now(), time.Now()).
-			AddRow(2, "admin", 1, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "description", "created_by", "created_at", "updated_at"}).
+			AddRow(1, "user", "User", nil, int64(1), time.Now(), time.Now()).
+			AddRow(2, "admin", "Administrator", nil, int64(1), time.Now(), time.Now()))
 
 	roles, err := repo.FindRolesByUser(context.Background(), user.ID(1))
 	assert.NoError(t, err)
@@ -47,8 +47,8 @@ func TestUserRoleRepository_FindRolesByUser(t *testing.T) {
 	if len(roles) < 2 {
 		return
 	}
-	assert.Equal(t, role.User, roles[0].Type)
-	assert.Equal(t, role.Admin, roles[1].Type)
+	assert.Equal(t, role.User, roles[0].Code)
+	assert.Equal(t, role.Admin, roles[1].Code)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -59,7 +59,7 @@ func TestUserRoleRepository_Assign(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		INSERT INTO goat.public.users_roles (user_id,role_id)
-		SELECT $1, id FROM goat.public.roles WHERE type = $2
+		SELECT $1, id FROM goat.public.roles WHERE code = $2
 		ON CONFLICT DO NOTHING RETURNING user_id
 	`)).
 		WithArgs(user.ID(1), "admin").

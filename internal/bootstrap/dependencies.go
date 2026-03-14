@@ -7,6 +7,7 @@ import (
 	"github.com/HiroLiang/goat-server/internal/config"
 	"github.com/HiroLiang/goat-server/internal/domain/account"
 	"github.com/HiroLiang/goat-server/internal/domain/cache"
+	"github.com/HiroLiang/goat-server/internal/domain/device"
 	"github.com/HiroLiang/goat-server/internal/domain/security"
 	"github.com/HiroLiang/goat-server/internal/domain/transaction"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
@@ -14,6 +15,7 @@ import (
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/database"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	postgresAccount "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/account"
+	postgresDevice "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/device"
 	postgresUser "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/user"
 	infraRedis "github.com/HiroLiang/goat-server/internal/infrastructure/redis"
 	infraRedisSecurity "github.com/HiroLiang/goat-server/internal/infrastructure/redis/security"
@@ -38,6 +40,7 @@ type Dependencies struct {
 
 	AccountRepo account.Repository
 	UserRepo    user.Repository
+	DeviceRepo  device.Repository
 }
 
 func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Dependencies, error) {
@@ -76,6 +79,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 		HMacer:           infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
 		AccountRepo:      postgresAccount.NewAccountRepo(postgresDB),
 		UserRepo:         postgresUser.NewUserRepository(postgresDB),
+		DeviceRepo:       postgresDevice.NewDeviceRepository(postgresDB),
 	}, nil
 }
 

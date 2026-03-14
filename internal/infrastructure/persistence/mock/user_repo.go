@@ -3,6 +3,7 @@ package mock
 import (
 	"context"
 
+	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
 )
 
@@ -14,22 +15,22 @@ func MockUserRepo() *UserRepo {
 
 var _ user.Repository = (*UserRepo)(nil)
 
-func (u *UserRepo) FindByID(ctx context.Context, id user.ID) (*user.User, error) {
+func (u *UserRepo) Create(ctx context.Context, usr *user.User) (shared.UserID, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u *UserRepo) FindByEmail(ctx context.Context, email user.Email) (*user.User, error) {
+func (u *UserRepo) FindByID(ctx context.Context, id shared.UserID) (*user.User, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u *UserRepo) CreateWithRole(ctx context.Context, user *user.User, roleType string) error {
+func (u *UserRepo) FindByAccountID(ctx context.Context, accountID shared.AccountID) (*[]user.User, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u *UserRepo) Update(ctx context.Context, user *user.User) error {
+func (u *UserRepo) Update(ctx context.Context, usr *user.User) error {
 	//TODO implement me
 	panic("implement me")
 }
