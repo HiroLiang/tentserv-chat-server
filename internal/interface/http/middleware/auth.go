@@ -7,6 +7,7 @@ import (
 
 	"github.com/HiroLiang/goat-server/internal/application/auth/port"
 	"github.com/HiroLiang/goat-server/internal/application/shared"
+	"github.com/HiroLiang/goat-server/internal/config"
 	"github.com/HiroLiang/goat-server/internal/domain/auth"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
 	"github.com/HiroLiang/goat-server/internal/interface/http/response"
@@ -28,7 +29,7 @@ func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository
 
 			// Verify and get current session by token
 			session, err := sessionManager.FindByToken(c.Request.Context(), token)
-			if err == nil && session.DeviceID.Equal(DeviceID) {
+			if err == nil && (session.DeviceID.Equal(DeviceID) || config.Env("APP_ENV", "") == "dev") {
 
 				// Find current user
 				if userData, err := userRepo.FindByID(c.Request.Context(), session.UserID); err == nil {

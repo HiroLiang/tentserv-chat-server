@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/HiroLiang/goat-server/internal/application/user/usecase"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
@@ -18,23 +19,59 @@ import (
 type UserHandler struct {
 	updateProfileUseCase *usecase.UpdateProfileUseCase
 	uploadAvatarUseCase  *usecase.UploadAvatarUseCase
+	getProfileUseCase    *usecase.GetProfileUseCase
 }
 
 // NewUserHandler Create a new UserHandler instance with dependencies
 func NewUserHandler(
 	updateProfileUseCase *usecase.UpdateProfileUseCase,
 	uploadAvatarUseCase *usecase.UploadAvatarUseCase,
+	getProfileUseCase *usecase.GetProfileUseCase,
 ) *UserHandler {
 	return &UserHandler{
 		updateProfileUseCase: updateProfileUseCase,
 		uploadAvatarUseCase:  uploadAvatarUseCase,
+		getProfileUseCase:    getProfileUseCase,
 	}
 }
 
 // RegisterUserRoutes registers user-related API routes
 func (h *UserHandler) RegisterUserRoutes(r *gin.RouterGroup) {
+	r.GET("/:user_id", h.getProfile)
 	r.PATCH("/profile", middleware.RequireAuthMiddleware(), h.updateProfile)
 	r.POST("/avatar", middleware.RequireAuthMiddleware(), h.uploadAvatar)
+}
+
+// @Summary Get user profile
+// @Description Get a user's public profile by ID
+// @Tags User
+// @Produce json
+// @Param user_id path int true "User ID"
+// @Success 200 {object} GetUserProfileResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 404 {object} response.ErrorResponse "Not Found"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/user/{user_id} [get]
+func (h *UserHandler) getProfile(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.GetProfileInput{ID: id})
+	out, err := h.getProfileUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, GetUserProfileResponse{
+		ID:        out.ID,
+		Name:      out.Name,
+		Avatar:    out.Avatar,
+		RoleCodes: out.RoleCodes,
+	})
 }
 
 // @Summary Update profile

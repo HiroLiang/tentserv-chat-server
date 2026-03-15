@@ -18,15 +18,15 @@ func toDomain(record *UserRecord) (*user.User, error) {
 }
 
 func toRecord(u *user.User) *UserRecord {
-	var avatarURL *string
+	var avatarURL string
 	if u.Avatar != "" {
-		avatarURL = &u.Avatar
+		avatarURL = u.Avatar
 	}
 	return &UserRecord{
 		ID:         u.ID,
 		AccountID:  u.AccountID,
 		Name:       u.Name,
-		AvatarName: avatarURL,
+		AvatarName: &avatarURL,
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,
 	}

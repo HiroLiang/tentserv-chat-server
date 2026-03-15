@@ -38,6 +38,14 @@ type AppConfig struct {
 	Storage struct {
 		BasePath string `mapstructure:"base_path"`
 	} `mapstructure:"storage"`
+
+	Email struct {
+		SenderAddress string        `mapstructure:"sender_address"`
+		SenderName    string        `mapstructure:"sender_name"`
+		ApiKey        string        `mapstructure:"api_key"`
+		BaseURL       string        `mapstructure:"base_url"`
+		VerifyTTL     time.Duration `mapstructure:"verify_ttl"`
+	} `mapstructure:"email"`
 }
 
 type DBConfig struct {

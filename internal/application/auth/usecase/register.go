@@ -2,16 +2,20 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"fmt"
 
+	"github.com/HiroLiang/goat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/application/shared/email"
+	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
 	"github.com/HiroLiang/goat-server/internal/application/shared/security"
+	"github.com/HiroLiang/goat-server/internal/config"
 	"github.com/HiroLiang/goat-server/internal/domain/account"
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/transaction"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
-	infraBuilder "github.com/HiroLiang/goat-server/internal/infrastructure/email/builder"
 	"github.com/gofrs/uuid"
 )
 
@@ -27,11 +31,13 @@ type RegisterOutput struct {
 }
 
 type RegisterUseCase struct {
-	uow          transaction.UnitOfWork
-	hasher       security.Hasher
-	accountRepo  account.Repository
-	userRepo     user.Repository
-	emailService email.EmailService
+	uow                transaction.UnitOfWork
+	hasher             security.Hasher
+	accountRepo        account.Repository
+	userRepo           user.Repository
+	verificationStore  port.VerificationStore
+	emailService       appEmail.EmailService
+	mailBuilderFactory func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder
 }
 
 func NewRegisterUseCase(
@@ -39,12 +45,18 @@ func NewRegisterUseCase(
 	hasher security.Hasher,
 	accountRepo account.Repository,
 	userRepo user.Repository,
+	verificationStore port.VerificationStore,
+	emailService appEmail.EmailService,
+	mailBuilderFactory func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder,
 ) *RegisterUseCase {
 	return &RegisterUseCase{
-		uow:         uow,
-		hasher:      hasher,
-		accountRepo: accountRepo,
-		userRepo:    userRepo,
+		uow:                uow,
+		hasher:             hasher,
+		accountRepo:        accountRepo,
+		userRepo:           userRepo,
+		verificationStore:  verificationStore,
+		emailService:       emailService,
+		mailBuilderFactory: mailBuilderFactory,
 	}
 }
 
@@ -60,7 +72,7 @@ func (uc *RegisterUseCase) Execute(
 		_ = tx.Rollback()
 	}()
 
-	// Create Account
+	// Validate email
 	emailAddr, err := shared.ParseEmail(input.Data.Email)
 	if err != nil {
 		return RegisterOutput{}, ErrInvalidEmail
@@ -98,12 +110,32 @@ func (uc *RegisterUseCase) Execute(
 		}
 	}
 
-	// Send verification email
-	builder := infraBuilder.NewRegisterMailBuilder()
-	err = uc.emailService.Send(ctx, builder)
+	// Generate verification token
+	token, err := generateVerificationToken()
 	if err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
+	// Store token → accountID in Redis
+	conf := config.App()
+	if err := uc.verificationStore.Store(ctx, token, int64(accountId), conf.Email.VerifyTTL); err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	// Build, verify URL and send email
+	verifyURL := fmt.Sprintf("%s/api/auth/verify-email?token=%s", conf.Email.BaseURL, token)
+	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Name, verifyURL)
+	if err := uc.emailService.Send(ctx, builder); err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
 	return RegisterOutput{int64(accountId)}, tx.Commit()
+}
+
+func generateVerificationToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

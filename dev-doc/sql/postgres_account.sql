@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS goat.public.users_roles
 
 ---- Trigger ----
 
--- Limit user number of single account
+-- Limit user number of a single account
 CREATE OR REPLACE FUNCTION limit_user_per_account()
     RETURNS trigger AS
 $$

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/HiroLiang/goat-server/internal/domain/role"
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/goat-server/internal/logger"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )
@@ -23,6 +25,10 @@ func NewUserRepository(db *sqlx.DB) *UserRepository {
 	return &UserRepository{
 		BaseRepo: postgres.NewBaseRepo(db),
 	}
+}
+
+func (r *UserRepository) FindByID(ctx context.Context, id shared.UserID) (*user.User, error) {
+	return r.findOneBy(ctx, squirrel.Eq{"id": id})
 }
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) (shared.UserID, error) {
@@ -47,10 +53,6 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) (shared.UserI
 
 	u.ID = userID
 	return userID, nil
-}
-
-func (r *UserRepository) FindByID(ctx context.Context, id shared.UserID) (*user.User, error) {
-	return r.findOneBy(ctx, squirrel.Eq{"id": id})
 }
 
 func (r *UserRepository) FindByAccountID(ctx context.Context, accountID shared.AccountID) (*[]user.User, error) {
@@ -109,13 +111,44 @@ func (r *UserRepository) findOneBy(
 
 	rec, err := postgres.ScanOne[UserRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
+		logger.Log.Error(fmt.Sprintf("find user: %d", err))
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, user.ErrUserNotFound
 		}
 		return nil, fmt.Errorf("find user: %w", err)
 	}
 
-	return toDomain(rec)
+	userData, err := toDomain(rec)
+	if err != nil {
+		return nil, fmt.Errorf("convert user: %w", err)
+	}
+
+	roleCodes, err := r.findRoleCodes(ctx, userData.ID)
+	if err != nil {
+		return nil, fmt.Errorf("find user roles: %w", err)
+	}
+	userData.RoleCodes = roleCodes
+
+	return userData, nil
+}
+
+func (r *UserRepository) findRoleCodes(ctx context.Context, id shared.UserID) ([]role.Code, error) {
+	query, args, err := JoinTable.
+		Select("roles.code").
+		Join("roles ON roles.id = users_roles.role_id").
+		Where(squirrel.Eq{"user_id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build user roles query: %w", err)
+	}
+
+	codes, err := postgres.ScanAll[role.Code](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan user roles: %w", err)
+	}
+
+	return codes, nil
+
 }
 
 func isUniqueViolation(err error) bool {
@@ -123,7 +156,7 @@ func isUniqueViolation(err error) bool {
 }
 
 var Table = postgres.Table{
-	Name: "public.users",
+	Name: "goat.public.users",
 	Columns: []string{
 		"id",
 		"account_id",
@@ -131,5 +164,13 @@ var Table = postgres.Table{
 		"avatar",
 		"created_at",
 		"updated_at",
+	},
+}
+
+var JoinTable = postgres.Table{
+	Name: "goat.public.users_roles",
+	Columns: []string{
+		"user_id",
+		"role_id",
 	},
 }

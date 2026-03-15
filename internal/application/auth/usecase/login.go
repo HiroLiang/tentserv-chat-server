@@ -7,6 +7,7 @@ import (
 
 	"github.com/HiroLiang/goat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
+	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
 	"github.com/HiroLiang/goat-server/internal/application/shared/security"
 	"github.com/HiroLiang/goat-server/internal/domain/account"
 	"github.com/HiroLiang/goat-server/internal/domain/auth"
@@ -16,9 +17,9 @@ import (
 )
 
 type LoginInput struct {
-	AccountName string
-	Password    string
-	DeviceID    string
+	Identifier string
+	Password   string
+	DeviceID   string
 }
 
 type LoginOutput struct {
@@ -26,11 +27,13 @@ type LoginOutput struct {
 }
 
 type LoginUseCase struct {
-	uow            transaction.UnitOfWork
-	hasher         security.Hasher
-	sessionManager port.SessionManager
-	accountRepo    account.Repository
-	userRepo       user.Repository
+	uow                transaction.UnitOfWork
+	hasher             security.Hasher
+	sessionManager     port.SessionManager
+	accountRepo        account.Repository
+	userRepo           user.Repository
+	emailService       appEmail.EmailService
+	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
 }
 
 func NewLoginUseCase(
@@ -39,13 +42,17 @@ func NewLoginUseCase(
 	sessionManager port.SessionManager,
 	accountRepo account.Repository,
 	userRepo user.Repository,
+	emailService appEmail.EmailService,
+	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
 ) *LoginUseCase {
 	return &LoginUseCase{
-		uow:            uow,
-		hasher:         hasher,
-		sessionManager: sessionManager,
-		accountRepo:    accountRepo,
-		userRepo:       userRepo,
+		uow:                uow,
+		hasher:             hasher,
+		sessionManager:     sessionManager,
+		accountRepo:        accountRepo,
+		userRepo:           userRepo,
+		emailService:       emailService,
+		mailBuilderFactory: mailBuilderFactory,
 	}
 }
 
@@ -62,8 +69,8 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		}
 	}()
 
-	// Find account
-	accountData, err := uc.accountRepo.FindByAccountName(ctx, input.Data.AccountName)
+	// Find an account by identifier (email or account name)
+	accountData, err := uc.findAccount(ctx, input.Data.Identifier)
 	if err != nil {
 		if errors.Is(err, account.ErrAccountNotFound) {
 			return LoginOutput{}, ErrAccountNotFound
@@ -134,9 +141,33 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrLoginFailed
 	}
 
-	// TODO: Record login event & send email notify login device
+	// Send login notification email (fire-and-forget)
+	go func() {
+		bgCtx := context.Background()
+		builder := uc.mailBuilderFactory(
+			string(accountData.Email),
+			accountData.AccountName,
+			input.Data.DeviceID,
+			input.Base.Request.IP.String(),
+			time.Now(),
+		)
+		_ = uc.emailService.Send(bgCtx, builder)
+	}()
 
 	return LoginOutput{TokenPair: tokenPair}, tx.Commit()
+}
+
+func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*account.Account, error) {
+	if emailAddr, err := shared.ParseEmail(identifier); err == nil {
+		acc, err := uc.accountRepo.FindByEmail(ctx, emailAddr)
+		if err == nil {
+			return acc, nil
+		}
+		if !errors.Is(err, account.ErrAccountNotFound) {
+			return nil, err
+		}
+	}
+	return uc.accountRepo.FindByAccountName(ctx, identifier)
 }
 
 func (uc *LoginUseCase) castStatusError(status account.Status) error {

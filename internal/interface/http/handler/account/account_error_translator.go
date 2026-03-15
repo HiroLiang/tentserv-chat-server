@@ -34,6 +34,7 @@ func HandleError(ctx *gin.Context, err error) {
 		{usecase.ErrAccountInactive, errResponse{http.StatusForbidden, "ACCOUNT_INACTIVE", "account is inactive"}},
 		{usecase.ErrUserNotFound, errResponse{http.StatusNotFound, "USER_NOT_FOUND", "user not found"}},
 		{usecase.ErrPasswordError, errResponse{http.StatusUnauthorized, "PASSWORD_ERROR", "incorrect password"}},
+		{usecase.ErrTokenInvalid, errResponse{http.StatusBadRequest, "TOKEN_INVALID", "invalid or expired verification token"}},
 	}
 
 	for _, e := range errMap {

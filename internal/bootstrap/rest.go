@@ -15,6 +15,7 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	group.Use(middleware.ErrorHandler())
 	group.Use(middleware.GlobalRateLimitMiddleware(dependencies.RateLimiter))
 	group.Use(middleware.IPRateLimitMiddleware(dependencies.RateLimiter))
+	group.Use(middleware.AuthMiddleware(dependencies.SessionManager, dependencies.UserRepo))
 	group.Use(middleware.ContextMiddleware())
 
 	// Health Check Handler
@@ -26,13 +27,15 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.RegisterUseCase,
 		useCases.LoginUseCase,
 		useCases.LogoutUseCase,
-		useCases.GetAccountProfileUseCase)
+		useCases.GetAccountProfileUseCase,
+		useCases.VerifyEmailUseCase)
 	authHandler.RegisterAuthRoutes(group.Group("/auth"))
 
 	// User Handler
 	var userHandler = user.NewUserHandler(
 		useCases.UpdateUserProfileUseCase,
-		useCases.UploadAvatarUseCase)
+		useCases.UploadAvatarUseCase,
+		useCases.GetUserProfileUseCase)
 	userHandler.RegisterUserRoutes(group.Group("/user"))
 
 	var deviceHandler = device.NewDeviceHandler(

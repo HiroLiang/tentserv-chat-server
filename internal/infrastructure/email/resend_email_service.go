@@ -14,10 +14,12 @@ type ResendEmailService struct {
 	recorder email.EmailRecorder
 }
 
-func NewResendEmailService(key string) *ResendEmailService {
+func NewResendEmailService(key string, recorder email.EmailRecorder) *ResendEmailService {
 	client := resend.NewClient(key)
+	logger.Log.Info("Resend email service initialized" + key)
 	return &ResendEmailService{
-		client: client,
+		client:   client,
+		recorder: recorder,
 	}
 }
 
@@ -27,7 +29,9 @@ func (s *ResendEmailService) Send(ctx context.Context, builder email.EmailBuilde
 		return shared.ErrSendingEmail
 	}
 
-	s.recorder.RecordSending(ctx, mail)
+	if s.recorder != nil {
+		s.recorder.RecordSending(ctx, mail)
+	}
 
 	params := &resend.SendEmailRequest{
 		From:    mail.Sender.String(),
@@ -42,11 +46,16 @@ func (s *ResendEmailService) Send(ctx context.Context, builder email.EmailBuilde
 
 	sent, err := s.client.Emails.Send(params)
 	if err != nil {
-		s.recorder.RecordFailed(ctx, mail)
+		if s.recorder != nil {
+			s.recorder.RecordFailed(ctx, mail)
+		}
 		logger.Log.Error(err.Error())
+		return shared.ErrSendingEmail
 	}
 
-	s.recorder.RecordSuccess(ctx, mail, sent.Id)
+	if s.recorder != nil {
+		s.recorder.RecordSuccess(ctx, mail, sent.Id)
+	}
 	return nil
 }
 

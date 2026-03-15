@@ -2,12 +2,14 @@ package account
 
 import (
 	"context"
+	"errors"
 
 	"github.com/HiroLiang/goat-server/internal/domain/account"
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/user"
 	"github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -34,21 +36,37 @@ func (r *AccountRepo) FindByEmail(ctx context.Context, email shared.EmailAddress
 
 }
 
-func (r *AccountRepo) Create(ctx context.Context, account *account.Account) (shared.AccountID, error) {
+func (r *AccountRepo) Create(ctx context.Context, accountData *account.Account) (shared.AccountID, error) {
 	query, args, err := Table.Insert().
 		Columns("public_id", "email", "account", "password", "status", "user_limit").
 		Values(
-			account.PublicID, account.Email, account.AccountName, account.Password, account.Status, account.UserLimit).
+			accountData.PublicID, accountData.Email, accountData.AccountName, accountData.Password, accountData.Status, accountData.UserLimit).
 		Suffix("RETURNING id").
 		ToSql()
 	if err != nil {
-		return 0, err
+		return -1, err
 	}
 
 	var id int64
 	err = r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&id)
 	if err != nil {
-		return 0, err
+
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+
+			if pgErr.Code == "23505" {
+
+				switch pgErr.ConstraintName {
+				case "accounts_email_key":
+					return -1, account.ErrEmailExist
+
+				case "accounts_account_key":
+					return -1, account.ErrAccountExist
+				}
+			}
+		}
+
+		return -1, err
 	}
 
 	return shared.AccountID(id), nil

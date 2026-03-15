@@ -1,18 +1,21 @@
 package account
 
 import (
+	"fmt"
 	"net/http"
 
 	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
 	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	registerUsecase   *authUseCase.RegisterUseCase
-	loginUsecase      *authUseCase.LoginUseCase
-	logoutUsecase     *authUseCase.LogoutUseCase
-	getProfileUsecase *authUseCase.GetProfileUseCase
+	registerUsecase    *authUseCase.RegisterUseCase
+	loginUsecase       *authUseCase.LoginUseCase
+	logoutUsecase      *authUseCase.LogoutUseCase
+	getProfileUsecase  *authUseCase.GetProfileUseCase
+	verifyEmailUsecase *authUseCase.VerifyEmailUseCase
 }
 
 func NewAuthHandler(
@@ -20,18 +23,23 @@ func NewAuthHandler(
 	loginUsecase *authUseCase.LoginUseCase,
 	logoutUsecase *authUseCase.LogoutUseCase,
 	getProfileUsecase *authUseCase.GetProfileUseCase,
+	verifyEmailUsecase *authUseCase.VerifyEmailUseCase,
 ) *AuthHandler {
 	return &AuthHandler{
-		registerUsecase,
-		loginUsecase,
-		logoutUsecase,
-		getProfileUsecase}
+		registerUsecase:    registerUsecase,
+		loginUsecase:       loginUsecase,
+		logoutUsecase:      logoutUsecase,
+		getProfileUsecase:  getProfileUsecase,
+		verifyEmailUsecase: verifyEmailUsecase,
+	}
 }
 
 func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
 	r.POST("/register", h.register)
 	r.POST("/login", h.login)
-	r.POST("/logout", h.logout)
+	r.POST("/logout", h.logout, middleware.RequireAuthMiddleware())
+	r.GET("/profile", middleware.RequireAuthMiddleware(), h.getProfile)
+	r.GET("/verify-email", h.verifyEmail)
 }
 
 // @Summary Account register
@@ -96,9 +104,9 @@ func (h *AuthHandler) login(c *gin.Context) {
 	}
 
 	input := adapter.BuildInput(c, authUseCase.LoginInput{
-		DeviceID:    req.DeviceID,
-		AccountName: req.Account,
-		Password:    req.Password,
+		DeviceID:   req.DeviceID,
+		Identifier: req.Identifier,
+		Password:   req.Password,
 	})
 
 	output, err := h.loginUsecase.Execute(c.Request.Context(), &input)
@@ -107,7 +115,7 @@ func (h *AuthHandler) login(c *gin.Context) {
 		return
 	}
 
-	c.Header("Authorization", string(output.TokenPair.AccessToken))
+	c.Header("Authorization", fmt.Sprintf("Bearer %s", string(output.TokenPair.AccessToken)))
 	c.JSON(http.StatusOK, LoginResponse{})
 }
 
@@ -130,4 +138,63 @@ func (h *AuthHandler) logout(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+// @Summary Get account profile
+// @Description Get the current account and user profile
+// @Tags Auth
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} GetProfileResponse
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 404 {object} response.ErrorResponse "Not Found"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/auth/profile [get]
+func (h *AuthHandler) getProfile(c *gin.Context) {
+	input := adapter.BuildInput(c, authUseCase.GetProfileInput{})
+
+	out, err := h.getProfileUsecase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, GetProfileResponse{
+		PublicID:    out.PublicID,
+		Email:       out.Email,
+		AccountName: out.AccountName,
+		Status:      out.Status,
+		UserIDs:     out.UserISs,
+		CurrentUser: UserProfileItem{
+			ID:        out.CurrentUser.ID,
+			Name:      out.CurrentUser.Name,
+			Avatar:    out.CurrentUser.Avatar,
+			RoleCodes: out.CurrentUser.RoleCodes,
+		},
+	})
+}
+
+// @Summary Verify email address
+// @Description Verify account email using the token sent during registration
+// @Tags Auth
+// @Produce json
+// @Param token query string true "Verification token"
+// @Success 200 {object} VerifyEmailResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Router /api/auth/verify-email [get]
+func (h *AuthHandler) verifyEmail(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		HandleError(c, authUseCase.ErrTokenInvalid)
+		return
+	}
+
+	input := adapter.BuildInput(c, authUseCase.VerifyEmailInput{Token: token})
+	_, err := h.verifyEmailUsecase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, VerifyEmailResponse{})
 }

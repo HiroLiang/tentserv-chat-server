@@ -35,6 +35,9 @@ DROP TABLE IF EXISTS goat.public.participant_system_types CASCADE;
 -- Agents
 DROP TABLE IF EXISTS goat.public.agents CASCADE;
 
+-- Emails
+DROP TABLE IF EXISTS goat.public.email_logs CASCADE;
+
 -- Devices
 DROP TABLE IF EXISTS goat.public.account_login_events CASCADE;
 DROP TABLE IF EXISTS goat.public.account_sessions CASCADE;
@@ -62,6 +65,9 @@ DROP TYPE IF EXISTS participant_type;
 DROP TYPE IF EXISTS agent_status;
 DROP TYPE IF EXISTS agent_types;
 DROP TYPE IF EXISTS agent_engine;
+
+-- Emails
+DROP TYPE IF EXISTS email_status;
 
 -- Devices
 DROP TYPE IF EXISTS device_platform;

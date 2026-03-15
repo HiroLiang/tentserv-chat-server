@@ -21,4 +21,6 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 
 	ErrPasswordError = errors.New("password error")
+
+	ErrTokenInvalid = errors.New("invalid or expired verification token")
 )

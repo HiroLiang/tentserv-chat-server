@@ -47,3 +47,11 @@ type UpdateProfileRequest struct {
 type UploadAvatarResponse struct {
 	AvatarPath string `json:"avatar_url"`
 }
+
+// GetUserProfileResponse is returned for a user profile query.
+type GetUserProfileResponse struct {
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Avatar    string   `json:"avatar"`
+	RoleCodes []string `json:"role_codes"`
+}

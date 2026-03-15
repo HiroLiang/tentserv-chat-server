@@ -21,13 +21,13 @@ type Claims struct {
 }
 
 // GenerateToken 生成 JWT token
-func GenerateToken(userID int64, email string, sessionID string, jwtSecret string, expirationHours int) (string, error) {
+func GenerateToken(userID int64, email string, sessionID string, jwtSecret string, expiration time.Duration) (string, error) {
 	claims := Claims{
 		UserID:    userID,
 		Email:     email,
 		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(expirationHours))),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},
@@ -62,12 +62,12 @@ func ValidateToken(tokenString string, jwtSecret string) (*Claims, error) {
 }
 
 // RefreshToken 刷新 token
-func RefreshToken(tokenString string, jwtSecret string, expirationHours int) (string, error) {
+func RefreshToken(tokenString string, jwtSecret string, expiration time.Duration) (string, error) {
 	claims, err := ValidateToken(tokenString, jwtSecret)
 	if err != nil {
 		return "", err
 	}
 
 	// 生成新的 token（保留原有的 session ID）
-	return GenerateToken(claims.UserID, claims.Email, claims.SessionID, jwtSecret, expirationHours)
+	return GenerateToken(claims.UserID, claims.Email, claims.SessionID, jwtSecret, expiration)
 }
