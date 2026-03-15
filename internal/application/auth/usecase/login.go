@@ -14,6 +14,7 @@ import (
 	"github.com/HiroLiang/goat-server/internal/domain/shared"
 	"github.com/HiroLiang/goat-server/internal/domain/transaction"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/userrole"
 )
 
 type LoginInput struct {
@@ -32,6 +33,7 @@ type LoginUseCase struct {
 	sessionManager     port.SessionManager
 	accountRepo        account.Repository
 	userRepo           user.Repository
+	userRoleRepo       userrole.Repository
 	emailService       appEmail.EmailService
 	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
 }
@@ -42,6 +44,7 @@ func NewLoginUseCase(
 	sessionManager port.SessionManager,
 	accountRepo account.Repository,
 	userRepo user.Repository,
+	userRoleRepo userrole.Repository,
 	emailService appEmail.EmailService,
 	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
 ) *LoginUseCase {
@@ -51,6 +54,7 @@ func NewLoginUseCase(
 		sessionManager:     sessionManager,
 		accountRepo:        accountRepo,
 		userRepo:           userRepo,
+		userRoleRepo:       userRoleRepo,
 		emailService:       emailService,
 		mailBuilderFactory: mailBuilderFactory,
 	}
@@ -96,6 +100,13 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		userID, err := uc.userRepo.Create(ctx, newUser)
 		if err != nil {
 			return LoginOutput{}, ErrLoginFailed
+		}
+
+		// persist default roles
+		for _, code := range newUser.RoleCodes {
+			if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
+				return LoginOutput{}, ErrLoginFailed
+			}
 		}
 
 		// add user to account

@@ -49,7 +49,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		),
 		LoginUseCase: authUseCase.NewLoginUseCase(
 			deps.Uow, deps.PwdHasher, deps.SessionManager,
-			deps.AccountRepo, deps.UserRepo,
+			deps.AccountRepo, deps.UserRepo, deps.UserRoleRepo,
 			deps.EmailService,
 			func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder {
 				return infraBuilder.NewLoginMailBuilder(sender, recipientEmail, recipientName, deviceID, ip, loginTime)

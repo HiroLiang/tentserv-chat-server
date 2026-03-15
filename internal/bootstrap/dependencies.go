@@ -12,6 +12,7 @@ import (
 	"github.com/HiroLiang/goat-server/internal/domain/security"
 	"github.com/HiroLiang/goat-server/internal/domain/transaction"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/goat-server/internal/domain/userrole"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/auth/session"
 	infraVerification "github.com/HiroLiang/goat-server/internal/infrastructure/auth/verification"
 	infraEmail "github.com/HiroLiang/goat-server/internal/infrastructure/email"
@@ -22,6 +23,7 @@ import (
 	postgresEmail "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/email"
 	postgresSession "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/session"
 	postgresUser "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/user"
+	postgresUserRole "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/userrole"
 	infraRedis "github.com/HiroLiang/goat-server/internal/infrastructure/redis"
 	infraRedisSecurity "github.com/HiroLiang/goat-server/internal/infrastructure/redis/security"
 	infraSharedSecurity "github.com/HiroLiang/goat-server/internal/infrastructure/shared/security"
@@ -46,9 +48,10 @@ type Dependencies struct {
 	VerificationStore port.VerificationStore
 	EmailService      appEmail.EmailService
 
-	AccountRepo account.Repository
-	UserRepo    user.Repository
-	DeviceRepo  device.Repository
+	AccountRepo  account.Repository
+	UserRepo     user.Repository
+	UserRoleRepo userrole.Repository
+	DeviceRepo   device.Repository
 }
 
 func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Dependencies, error) {
@@ -96,6 +99,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 		EmailService:      infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
 		AccountRepo:       postgresAccount.NewAccountRepo(postgresDB),
 		UserRepo:          postgresUser.NewUserRepository(postgresDB),
+		UserRoleRepo:      postgresUserRole.NewUserRoleRepository(postgresDB),
 		DeviceRepo:        postgresDevice.NewDeviceRepository(postgresDB),
 	}, nil
 }

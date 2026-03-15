@@ -6,6 +6,7 @@ import (
 
 	"github.com/HiroLiang/goat-server/internal/bootstrap"
 	"github.com/HiroLiang/goat-server/internal/config"
+	mockAuth "github.com/HiroLiang/goat-server/internal/infrastructure/auth/mock"
 	"github.com/HiroLiang/goat-server/internal/logger"
 	"github.com/cucumber/godog"
 	"go.uber.org/zap"
@@ -28,7 +29,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		// Get mock dependencies
 		dependencies := bootstrap.MockDeps(
 			func(deps *bootstrap.Dependencies) {
-
+				deps.UserRoleRepo = mockAuth.MockUserRoleRepo()
 			},
 		)
 
