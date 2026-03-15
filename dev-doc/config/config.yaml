@@ -1,34 +1,35 @@
-auth_token:
-  expiration: 60m
-secrets:
-  HMAC_SECRET: "4F9aQd7r9vV1wE2gqR5mTzK8uM0xJfL1"
-rate_limit_config:
-  global_limit: 60
-  global_unit: 10s
-  ip_limit: 10
-  ip_unit: 10s
-  user_limit: 60
-  user_unit: 1m
 databases:
-  mysql: # not used
-    driver: mysql
-    dsn: "root:1234@tcp(localhost:3306)/goat?charset=utf8mb4&parseTime=True&loc=Local"
-    pool:
-      max_open_conns: 20
-      max_idle_conns: 10
-      conn_max_lifetime: 3600 # second
-      conn_max_idle_time: 600 # second
   postgres:
     driver: pgx
     dsn: "postgres://root:1234@localhost:5432/goat?sslmode=disable"
     pool:
       max_open_conns: 30
       max_idle_conns: 15
-      conn_max_lifetime: 3600 # second
-      conn_max_idle_time: 600 # second
+      conn_max_lifetime: 60m
+      conn_max_idle_time: 10m
 redis:
   addr: "localhost:6379"
   password: "1234"
   db: 0
+rate_limit_config:
+  global_limit: 3600
+  global_unit: 10s
+  ip_limit: 600
+  ip_unit: 10s
+  user_limit: 1800
+  user_unit: 1m
+secrets:
+  hmac: ${HMAC_SECRET}
+token:
+  session_expiration: 7d
+
+auth_token:
+  expiration: 60m
 storage:
   base_path: "./uploads"
+email:
+  sender_address: ${EMAIL_SENDER:onboarding@resend.dev}
+  sender_name: ${EMAIL_SENDER_NAME:Tentserv}
+  api_key: ${RESEND_API_KEY}
+  base_url: ${APP_BASE_URL:http://localhost:8080}
+  verify_ttl: 24h
