@@ -24,13 +24,27 @@ var Table = postgres.Table{
 }
 
 type AgentRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ agent.Repository = (*AgentRepository)(nil)
 
 func NewAgentRepository(db *sqlx.DB) *AgentRepository {
-	return &AgentRepository{db: db}
+	return &AgentRepository{
+		BaseRepo: postgres.NewBaseRepo(db),
+	}
+}
+
+// FindByID returns an agent by ID.
+func (r AgentRepository) FindByID(ctx context.Context, id agent.ID) (*agent.Agent, error) {
+	results, err := r.find(ctx, squirrel.Eq{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, agent.ErrNotFound
+	}
+	return results[0], nil
 }
 
 // FindAll returns all agents.
@@ -58,7 +72,7 @@ func (r AgentRepository) Create(ctx context.Context, agent *agent.Agent) error {
 		return fmt.Errorf("build insert agent: %w", err)
 	}
 
-	if err := postgres.Exec(ctx, r.db, query, args...); err != nil {
+	if err := postgres.Exec(ctx, r.GetDB(ctx), query, args...); err != nil {
 		return fmt.Errorf("insert agent: %w", err)
 	}
 
@@ -81,7 +95,7 @@ func (r AgentRepository) find(
 		return nil, fmt.Errorf("build sql: %w", err)
 	}
 
-	records, err := postgres.ScanAll[AgentRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[AgentRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("scan agents: %w", err)
 	}

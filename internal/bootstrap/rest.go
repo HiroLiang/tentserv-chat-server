@@ -2,8 +2,10 @@ package bootstrap
 
 import (
 	"github.com/HiroLiang/goat-server/internal/interface/http/handler/account"
+	"github.com/HiroLiang/goat-server/internal/interface/http/handler/chat"
 	"github.com/HiroLiang/goat-server/internal/interface/http/handler/device"
 	"github.com/HiroLiang/goat-server/internal/interface/http/handler/health"
+	"github.com/HiroLiang/goat-server/internal/interface/http/handler/participant"
 	"github.com/HiroLiang/goat-server/internal/interface/http/handler/user"
 	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -49,14 +51,25 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	//agentHandler.RegisterAgentRoutes(group.Group("/agent", middleware.RequireAuthMiddleware()))
 
 	// Chat Handler
-	//var chatHandler = chat.NewChatHandler(useCases.ChatUseCase)
-	//chatHandler.RegisterChatRoutes(group.Group("/chat", middleware.RequireAuthMiddleware()))
-
-	// Device Handler
-	//var deviceHandler = device.NewDeviceHandler(useCases.DeviceUseCase)
-	//deviceHandler.RegisterDeviceRoutes(group.Group("/device"))
+	chatGroup := group.Group("/chat", middleware.RequireAuthMiddleware())
+	var chatRoomHandler = chat.NewChatRoomHandler(
+		useCases.CreateChatRoomUseCase,
+		useCases.JoinChatRoomUseCase,
+		useCases.ApproveJoinRequestUseCase,
+		useCases.GetUserChatRoomsUseCase,
+		useCases.GetChatRoomDetailUseCase,
+		useCases.GetChatRoomMessagesUseCase,
+		useCases.UpdateMemberStatusUseCase)
+	chatRoomHandler.RegisterChatRoomRoutes(chatGroup)
 
 	// Participant Handler
-	//var participantHandler = participant.NewParticipantHandler(useCases.ParticipantUseCase)
-	//participantHandler.RegisterParticipantRoutes(group.Group("/participant", middleware.RequireAuthMiddleware()))
+	participantGroup := group.Group("/participant", middleware.RequireAuthMiddleware())
+	var participantHandler = participant.NewParticipantHandler(
+		useCases.CreateUserParticipantUseCase,
+		useCases.GetUserParticipantUseCase)
+	participantHandler.RegisterParticipantRoutes(participantGroup)
+
+	// Future: admin-only participant routes
+	// adminGroup := group.Group("/admin/participant", middleware.RequireAuthMiddleware(), middleware.RequireRoleMiddleware(role.Admin))
+	// participantHandler.RegisterAdminParticipantRoutes(adminGroup)
 }

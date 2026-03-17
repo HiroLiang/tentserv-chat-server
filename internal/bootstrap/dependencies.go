@@ -7,8 +7,14 @@ import (
 	appSecurity "github.com/HiroLiang/goat-server/internal/application/shared/security"
 	"github.com/HiroLiang/goat-server/internal/config"
 	"github.com/HiroLiang/goat-server/internal/domain/account"
+	domainAgent "github.com/HiroLiang/goat-server/internal/domain/agent"
 	"github.com/HiroLiang/goat-server/internal/domain/cache"
+	"github.com/HiroLiang/goat-server/internal/domain/chatinvitation"
+	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/goat-server/internal/domain/chatmessage"
+	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/goat-server/internal/domain/device"
+	"github.com/HiroLiang/goat-server/internal/domain/participant"
 	"github.com/HiroLiang/goat-server/internal/domain/security"
 	"github.com/HiroLiang/goat-server/internal/domain/transaction"
 	"github.com/HiroLiang/goat-server/internal/domain/user"
@@ -19,6 +25,8 @@ import (
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/database"
 	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
 	postgresAccount "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/account"
+	postgresAgent "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/agent"
+	postgresChat "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/chat"
 	postgresDevice "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/device"
 	postgresEmail "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/email"
 	postgresSession "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/session"
@@ -48,10 +56,16 @@ type Dependencies struct {
 	VerificationStore port.VerificationStore
 	EmailService      appEmail.EmailService
 
-	AccountRepo  account.Repository
-	UserRepo     user.Repository
-	UserRoleRepo userrole.Repository
-	DeviceRepo   device.Repository
+	AccountRepo           account.Repository
+	UserRepo              user.Repository
+	UserRoleRepo          userrole.Repository
+	DeviceRepo            device.Repository
+	ParticipantRepository participant.Repository
+	ChatRoomRepo          chatroom.Repository
+	ChatMemberRepo        chatmember.Repository
+	ChatInvitationRepo    chatinvitation.Repository
+	ChatMessageRepo       chatmessage.Repository
+	AgentRepo             domainAgent.Repository
 }
 
 func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Dependencies, error) {
@@ -89,18 +103,24 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 			sessionRepo,
 			conf.AuthToken.Expiration,
 		),
-		RateLimiter:       rateLimiter,
-		RedisCache:        redisCache,
-		PwdHasher:         infraSharedSecurity.NewArgon2Hasher(),
-		ContextHasher:     infraSharedSecurity.NewContentHasher(),
-		LocalFileStorage:  infraStorage.NewLocalFileStorage(),
-		HMacer:            infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
-		VerificationStore: infraVerification.NewVerificationStore(redisCache),
-		EmailService:      infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
-		AccountRepo:       postgresAccount.NewAccountRepo(postgresDB),
-		UserRepo:          postgresUser.NewUserRepository(postgresDB),
-		UserRoleRepo:      postgresUserRole.NewUserRoleRepository(postgresDB),
-		DeviceRepo:        postgresDevice.NewDeviceRepository(postgresDB),
+		RateLimiter:           rateLimiter,
+		RedisCache:            redisCache,
+		PwdHasher:             infraSharedSecurity.NewArgon2Hasher(),
+		ContextHasher:         infraSharedSecurity.NewContentHasher(),
+		LocalFileStorage:      infraStorage.NewLocalFileStorage(),
+		HMacer:                infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
+		VerificationStore:     infraVerification.NewVerificationStore(redisCache),
+		EmailService:          infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
+		AccountRepo:           postgresAccount.NewAccountRepo(postgresDB),
+		UserRepo:              postgresUser.NewUserRepository(postgresDB),
+		UserRoleRepo:          postgresUserRole.NewUserRoleRepository(postgresDB),
+		DeviceRepo:            postgresDevice.NewDeviceRepository(postgresDB),
+		ParticipantRepository: postgresChat.NewParticipantRepository(postgresDB),
+		ChatRoomRepo:          postgresChat.NewChatRoomRepository(postgresDB),
+		ChatMemberRepo:        postgresChat.NewChatMemberRepository(postgresDB),
+		ChatInvitationRepo:    postgresChat.NewChatInvitationRepository(postgresDB),
+		ChatMessageRepo:       postgresChat.NewChatMessageRepository(postgresDB),
+		AgentRepo:             postgresAgent.NewAgentRepository(postgresDB),
 	}, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
+	chatUseCase "github.com/HiroLiang/goat-server/internal/application/chat/usecase"
 	deviceUseCase "github.com/HiroLiang/goat-server/internal/application/device/usecase"
 	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
 	userUseCase "github.com/HiroLiang/goat-server/internal/application/user/usecase"
@@ -26,6 +27,17 @@ type UseCases struct {
 	RegisterDeviceUseCase   *deviceUseCase.RegisterUseCase
 	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase
 	UpdateDeviceUseCase     *deviceUseCase.UpdateDeviceUseCase
+
+	CreateUserParticipantUseCase *chatUseCase.CreateUserParticipantUseCase
+	GetUserParticipantUseCase    *chatUseCase.GetUserParticipantUseCase
+
+	CreateChatRoomUseCase      *chatUseCase.CreateChatRoomUseCase
+	JoinChatRoomUseCase        *chatUseCase.JoinChatRoomUseCase
+	ApproveJoinRequestUseCase  *chatUseCase.ApproveJoinRequestUseCase
+	GetUserChatRoomsUseCase    *chatUseCase.GetUserChatRoomsUseCase
+	GetChatRoomDetailUseCase   *chatUseCase.GetChatRoomDetailUseCase
+	GetChatRoomMessagesUseCase *chatUseCase.GetChatRoomMessagesUseCase
+	UpdateMemberStatusUseCase  *chatUseCase.UpdateMemberStatusUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -66,5 +78,53 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		RegisterDeviceUseCase:   deviceUseCase.NewRegisterUseCase(deps.Uow, deps.DeviceRepo),
 		GetDeviceProfileUseCase: deviceUseCase.NewGetProfileUseCase(deps.Uow, deps.DeviceRepo),
 		UpdateDeviceUseCase:     deviceUseCase.NewUpdateDeviceUseCase(deps.DeviceRepo),
+
+		CreateUserParticipantUseCase: chatUseCase.NewCreateUserParticipantUseCase(deps.Uow, deps.ParticipantRepository),
+		GetUserParticipantUseCase:    chatUseCase.NewGetUserParticipantUseCase(deps.ParticipantRepository),
+
+		CreateChatRoomUseCase: chatUseCase.NewCreateChatRoomUseCase(
+			deps.Uow,
+			deps.ChatRoomRepo,
+			deps.ChatMemberRepo,
+			deps.ParticipantRepository,
+		),
+		JoinChatRoomUseCase: chatUseCase.NewJoinChatRoomUseCase(
+			deps.Uow,
+			deps.ChatRoomRepo,
+			deps.ChatMemberRepo,
+			deps.ParticipantRepository,
+			deps.ChatInvitationRepo,
+		),
+		ApproveJoinRequestUseCase: chatUseCase.NewApproveJoinRequestUseCase(
+			deps.Uow,
+			deps.ChatMemberRepo,
+			deps.ParticipantRepository,
+			deps.ChatInvitationRepo,
+		),
+		GetUserChatRoomsUseCase: chatUseCase.NewGetUserChatRoomsUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
+			deps.ChatMessageRepo,
+			deps.UserRepo,
+			deps.AgentRepo,
+		),
+		GetChatRoomDetailUseCase: chatUseCase.NewGetChatRoomDetailUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
+			deps.ChatMessageRepo,
+			deps.UserRepo,
+			deps.AgentRepo,
+		),
+		GetChatRoomMessagesUseCase: chatUseCase.NewGetChatRoomMessagesUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.ChatMessageRepo,
+		),
+		UpdateMemberStatusUseCase: chatUseCase.NewUpdateMemberStatusUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+		),
 	}
 }

@@ -14,6 +14,11 @@ func MockAgentRepository() *AgentRepository {
 	return &AgentRepository{}
 }
 
+func (a AgentRepository) FindByID(ctx context.Context, id agent.ID) (*agent.Agent, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (a AgentRepository) FindAll(ctx context.Context) ([]*agent.Agent, error) {
 	//TODO implement me
 	panic("implement me")

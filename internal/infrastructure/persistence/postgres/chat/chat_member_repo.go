@@ -97,12 +97,17 @@ func (r *ChatMemberRepository) Add(ctx context.Context, m *chatmember.ChatMember
 	query, args, err := ChatMemberTable.Insert().
 		Columns("room_id", "participant_id", "role").
 		Values(rec.RoomID, rec.ParticipantID, rec.Role).
+		Suffix("RETURNING id, joined_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert chat member: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	row := r.db.QueryRowContext(ctx, query, args...)
+	if err := row.Scan(&m.ID, &m.JoinedAt); err != nil {
+		return fmt.Errorf("insert chat member: %w", err)
+	}
+	return nil
 }
 
 func (r *ChatMemberRepository) Update(ctx context.Context, m *chatmember.ChatMember) error {

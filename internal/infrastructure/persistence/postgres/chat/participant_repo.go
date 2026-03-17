@@ -12,13 +12,15 @@ import (
 )
 
 type ParticipantRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ participant.Repository = (*ParticipantRepository)(nil)
 
 func NewParticipantRepository(db *sqlx.DB) *ParticipantRepository {
-	return &ParticipantRepository{db: db}
+	return &ParticipantRepository{
+		BaseRepo: postgres.NewBaseRepo(db),
+	}
 }
 
 func (r *ParticipantRepository) FindByID(ctx context.Context, id participant.ID) (*participant.Participant, error) {
@@ -31,7 +33,7 @@ func (r *ParticipantRepository) FindByID(ctx context.Context, id participant.ID)
 		WHERE p.id = $1
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, id)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query, id)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -50,7 +52,7 @@ func (r *ParticipantRepository) FindByUserID(ctx context.Context, userID shared.
 		WHERE pu.user_id = $1
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, userID)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query, userID)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -69,7 +71,7 @@ func (r *ParticipantRepository) FindByAgentID(ctx context.Context, agentID int64
 		WHERE pa.agent_id = $1
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query, agentID)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query, agentID)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -87,7 +89,7 @@ func (r *ParticipantRepository) FindSystem(ctx context.Context) (*participant.Pa
 		JOIN public.participant_systems ps ON ps.participant_id = p.id
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.db, query)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -99,15 +101,10 @@ func (r *ParticipantRepository) FindSystem(ctx context.Context) (*participant.Pa
 }
 
 func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Participant) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
 
 	// Insert into participants
 	var id participant.ID
-	err = tx.QueryRowContext(ctx,
+	err := r.GetDB(ctx).QueryRowxContext(ctx,
 		`INSERT INTO public.participants (type) VALUES ($1) RETURNING id`,
 		p.Type,
 	).Scan(&id)
@@ -122,7 +119,7 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 		if p.UserID == nil {
 			return fmt.Errorf("user_id required for user participant")
 		}
-		_, err = tx.ExecContext(ctx,
+		_, err = r.GetDB(ctx).ExecContext(ctx,
 			`INSERT INTO public.participant_users (participant_id, user_id) VALUES ($1, $2)`,
 			id, *p.UserID,
 		)
@@ -130,7 +127,7 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 		if p.AgentID == nil {
 			return fmt.Errorf("agent_id required for agent participant")
 		}
-		_, err = tx.ExecContext(ctx,
+		_, err = r.GetDB(ctx).ExecContext(ctx,
 			`INSERT INTO public.participant_agents (participant_id, agent_id) VALUES ($1, $2)`,
 			id, *p.AgentID,
 		)
@@ -138,7 +135,7 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 		if p.SystemType == nil {
 			return fmt.Errorf("system_type required for system participant")
 		}
-		_, err = tx.ExecContext(ctx,
+		_, err = r.GetDB(ctx).ExecContext(ctx,
 			`INSERT INTO public.participant_systems (participant_id, system_type) VALUES ($1, $2)`,
 			id, *p.SystemType,
 		)
@@ -149,5 +146,5 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 		return fmt.Errorf("insert participant detail: %w", err)
 	}
 
-	return tx.Commit()
+	return nil
 }
