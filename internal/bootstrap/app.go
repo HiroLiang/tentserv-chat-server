@@ -16,10 +16,10 @@ import (
 )
 
 type App struct {
-	Server           *http.Server
-	Redis            *redis.Client
-	DataSources      *database.DataSources
-	schedulerCancel  context.CancelFunc
+	Server          *http.Server
+	Redis           *redis.Client
+	DataSources     *database.DataSources
+	schedulerCancel context.CancelFunc
 }
 
 func CreateApp() *App {

@@ -17,18 +17,18 @@ import (
 )
 
 var allowedMIMETypes = map[string]bool{
-	"image/jpeg":                true,
-	"image/png":                 true,
-	"image/webp":                true,
-	"image/gif":                 true,
-	"application/pdf":           true,
-	"application/zip":           true,
-	"text/plain":                true,
-	"application/octet-stream":  true,
-	"application/msword":        true,
+	"image/jpeg":               true,
+	"image/png":                true,
+	"image/webp":               true,
+	"image/gif":                true,
+	"application/pdf":          true,
+	"application/zip":          true,
+	"text/plain":               true,
+	"application/octet-stream": true,
+	"application/msword":       true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.ms-excel":  true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.ms-excel": true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
 }
 
 type UploadRoomMediaInput struct {

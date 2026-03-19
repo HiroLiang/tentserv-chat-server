@@ -20,7 +20,7 @@ var (
 	ErrInvalidMessageType = errors.New("invalid message type")
 	ErrSendMessage        = errors.New("failed to send message")
 
-	ErrInvalidFileType  = errors.New("unsupported file type")
-	ErrFileTooLarge     = errors.New("file too large")
-	ErrUploadRoomMedia  = errors.New("failed to upload room media")
+	ErrInvalidFileType = errors.New("unsupported file type")
+	ErrFileTooLarge    = errors.New("file too large")
+	ErrUploadRoomMedia = errors.New("failed to upload room media")
 )

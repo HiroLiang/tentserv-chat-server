@@ -40,12 +40,12 @@ type CountOTPPreKeysResponse struct {
 
 // Key Bundle
 type KeyBundleResponse struct {
-	IdentityKey string  `json:"identity_key"`
+	IdentityKey  string  `json:"identity_key"`
 	SignedPreKey string  `json:"signed_pre_key"`
 	SPKSignature string  `json:"spk_signature"`
-	SPKKeyID    uint32  `json:"spk_key_id"`
-	OTPPreKey   *string `json:"otp_pre_key,omitempty"`
-	OTPPreKeyID *uint32 `json:"otp_pre_key_id,omitempty"`
+	SPKKeyID     uint32  `json:"spk_key_id"`
+	OTPPreKey    *string `json:"otp_pre_key,omitempty"`
+	OTPPreKeyID  *uint32 `json:"otp_pre_key_id,omitempty"`
 }
 
 // Sender Key

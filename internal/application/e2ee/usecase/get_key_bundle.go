@@ -21,12 +21,12 @@ type GetKeyBundleInput struct {
 }
 
 type KeyBundleOutput struct {
-	IdentityKey   string  // base64
-	SignedPreKey  string  // base64
-	SPKSignature  string  // base64
-	SPKKeyID      uint32
-	OTPPreKey     *string // base64, optional
-	OTPPreKeyID   *uint32 // optional
+	IdentityKey  string // base64
+	SignedPreKey string // base64
+	SPKSignature string // base64
+	SPKKeyID     uint32
+	OTPPreKey    *string // base64, optional
+	OTPPreKeyID  *uint32 // optional
 }
 
 type GetKeyBundleUseCase struct {

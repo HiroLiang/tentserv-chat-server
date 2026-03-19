@@ -12,8 +12,8 @@ const (
 type PayloadType string
 
 const (
-	PayloadTypeSenderKey      PayloadType = "sender_key"
-	PayloadTypeMessage        PayloadType = "message"
-	PayloadTypeSPKUpdate      PayloadType = "spk_update"
-	PayloadTypeReplenishOTP   PayloadType = "e2ee.replenish_otp_keys"
+	PayloadTypeSenderKey    PayloadType = "sender_key"
+	PayloadTypeMessage      PayloadType = "message"
+	PayloadTypeSPKUpdate    PayloadType = "spk_update"
+	PayloadTypeReplenishOTP PayloadType = "e2ee.replenish_otp_keys"
 )
