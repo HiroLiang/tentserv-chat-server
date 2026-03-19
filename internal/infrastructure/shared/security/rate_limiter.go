@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	securityApp "github.com/HiroLiang/goat-server/internal/application/shared/security"
-	"github.com/HiroLiang/goat-server/internal/domain/security"
+	securityApp "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 )
 
 type RedisRateLimiter struct {

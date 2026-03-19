@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared/email"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type RegisterMailBuilder struct {

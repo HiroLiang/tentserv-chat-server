@@ -4,11 +4,12 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
-	"github.com/HiroLiang/goat-server/internal/interface/ws"
-	wsChat "github.com/HiroLiang/goat-server/internal/interface/ws/handler/chat"
-	wsGame "github.com/HiroLiang/goat-server/internal/interface/ws/handler/game"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/ws"
+	wsChat "github.com/HiroLiang/tentserv-chat-server/internal/interface/ws/handler/chat"
+	wsGame "github.com/HiroLiang/tentserv-chat-server/internal/interface/ws/handler/game"
+	wsSystem "github.com/HiroLiang/tentserv-chat-server/internal/interface/ws/handler/system"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -22,17 +23,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// BuildWsComponents creates and starts the Hub, and wires all message handlers
-// onto the router.
-func BuildWsComponents(deps *Dependencies) (*ws.Hub, *ws.MessageRouter) {
-	hub := ws.NewHub()
-	go hub.Run()
-
+// BuildWsComponents wires all message handlers onto the router.
+// The Hub is already created and started in BuildDeps.
+func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.MessageRouter) {
 	router := ws.NewMessageRouter()
-	router.Register("chat.send", wsChat.NewMessageHandler())
+	router.Register("chat.send", wsChat.NewMessageHandler(useCases.SendMessageUseCase))
 	router.Register("game.move", wsGame.NewMoveHandler())
+	router.Register("system.ack", wsSystem.NewAckHandler(deps.Hub))
 
-	return hub, router
+	return deps.Hub, router
 }
 
 // RegisterWsRoutes registers the single /ws upgrade endpoint.

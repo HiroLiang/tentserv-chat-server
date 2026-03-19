@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/HiroLiang/goat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	"go.uber.org/zap"
 )
 

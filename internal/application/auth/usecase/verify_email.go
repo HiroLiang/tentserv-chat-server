@@ -3,10 +3,10 @@ package usecase
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/account"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type VerifyEmailInput struct {

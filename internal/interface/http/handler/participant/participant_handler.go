@@ -3,8 +3,8 @@ package participant
 import (
 	"net/http"
 
-	"github.com/HiroLiang/goat-server/internal/application/chat/usecase"
-	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
 	"github.com/gin-gonic/gin"
 )
 

@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	"github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/config"
-	"github.com/HiroLiang/goat-server/internal/domain/auth"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/interface/http/response"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
 )
 

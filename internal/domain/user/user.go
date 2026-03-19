@@ -3,8 +3,8 @@ package user
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 // ID is an alias for shared.UserID, used by other domain packages.

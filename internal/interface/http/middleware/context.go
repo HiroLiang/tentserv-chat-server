@@ -3,8 +3,8 @@ package middleware
 import (
 	"net"
 
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/gin-gonic/gin"
 )
 

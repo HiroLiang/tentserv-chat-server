@@ -3,8 +3,8 @@ package account
 import (
 	"net"
 
-	"github.com/HiroLiang/goat-server/internal/domain/account"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 func ToAccount(record *AccountRecord) *account.Account {

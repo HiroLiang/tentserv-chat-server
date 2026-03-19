@@ -1,12 +1,18 @@
 package chat
 
 import (
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 
-	"github.com/HiroLiang/goat-server/internal/application/chat/usecase"
-	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
-	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
+	appPort "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,6 +24,9 @@ type ChatRoomHandler struct {
 	getChatRoomDetailUseCase   *usecase.GetChatRoomDetailUseCase
 	getChatRoomMessagesUseCase *usecase.GetChatRoomMessagesUseCase
 	updateMemberStatusUseCase  *usecase.UpdateMemberStatusUseCase
+	sendMessageUseCase         *usecase.SendMessageUseCase
+	uploadRoomMediaUseCase     *usecase.UploadRoomMediaUseCase
+	fileStorage                appPort.FileStorage
 }
 
 func NewChatRoomHandler(
@@ -28,6 +37,9 @@ func NewChatRoomHandler(
 	getChatRoomDetailUseCase *usecase.GetChatRoomDetailUseCase,
 	getChatRoomMessagesUseCase *usecase.GetChatRoomMessagesUseCase,
 	updateMemberStatusUseCase *usecase.UpdateMemberStatusUseCase,
+	sendMessageUseCase *usecase.SendMessageUseCase,
+	uploadRoomMediaUseCase *usecase.UploadRoomMediaUseCase,
+	fileStorage appPort.FileStorage,
 ) *ChatRoomHandler {
 	return &ChatRoomHandler{
 		createChatRoomUseCase:      createChatRoomUseCase,
@@ -37,6 +49,9 @@ func NewChatRoomHandler(
 		getChatRoomDetailUseCase:   getChatRoomDetailUseCase,
 		getChatRoomMessagesUseCase: getChatRoomMessagesUseCase,
 		updateMemberStatusUseCase:  updateMemberStatusUseCase,
+		sendMessageUseCase:         sendMessageUseCase,
+		uploadRoomMediaUseCase:     uploadRoomMediaUseCase,
+		fileStorage:                fileStorage,
 	}
 }
 
@@ -48,6 +63,15 @@ func (h *ChatRoomHandler) RegisterChatRoomRoutes(r *gin.RouterGroup) {
 	r.GET("/room/:room_id", h.getChatRoomDetail)
 	r.GET("/room/:room_id/messages", h.getChatRoomMessages)
 	r.PATCH("/room/:room_id/member/status", h.updateMemberStatus)
+	r.POST("/room/:room_id/messages", h.sendMessage)
+	r.POST("/room/:room_id/media", h.uploadRoomMedia)
+}
+
+func (h *ChatRoomHandler) resolveContentURL(content string, msgType string) string {
+	if msgType == string(chatmessage.Image) || msgType == string(chatmessage.File) {
+		return h.fileStorage.URL(content)
+	}
+	return content
 }
 
 // @Summary Create a chat room
@@ -172,7 +196,7 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 }
 
 // @Summary Get chat room detail
-// @Description Retrieve full detail of a chat room including member list and recent messages.
+// @Description Retrieve full detail of a chat room including a member list and recent messages.
 // @Tags Chat
 // @Produce json
 // @Security BearerAuth
@@ -184,8 +208,7 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse "Internal Server Error"
 // @Router /api/chat/room/{room_id} [get]
 func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
-	roomIDStr := c.Param("room_id")
-	roomID, err := strconv.ParseInt(roomIDStr, 10, 64)
+	roomID, err := h.getRoomID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
 		return
@@ -216,7 +239,7 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 		messages = append(messages, ChatMessageInfoResponse{
 			MessageID: msg.MessageID,
 			SenderID:  msg.SenderID,
-			Content:   msg.Content,
+			Content:   h.resolveContentURL(msg.Content, msg.Type),
 			Type:      msg.Type,
 			ReplyToID: msg.ReplyToID,
 			IsEdited:  msg.IsEdited,
@@ -250,8 +273,7 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse "Internal Server Error"
 // @Router /api/chat/room/{room_id}/messages [get]
 func (h *ChatRoomHandler) getChatRoomMessages(c *gin.Context) {
-	roomIDStr := c.Param("room_id")
-	roomID, err := strconv.ParseInt(roomIDStr, 10, 64)
+	roomID, err := h.getRoomID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
 		return
@@ -279,7 +301,7 @@ func (h *ChatRoomHandler) getChatRoomMessages(c *gin.Context) {
 		messages = append(messages, ChatMessageInfoResponse{
 			MessageID: msg.MessageID,
 			SenderID:  msg.SenderID,
-			Content:   msg.Content,
+			Content:   h.resolveContentURL(msg.Content, msg.Type),
 			Type:      msg.Type,
 			ReplyToID: msg.ReplyToID,
 			IsEdited:  msg.IsEdited,
@@ -306,8 +328,7 @@ func (h *ChatRoomHandler) getChatRoomMessages(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse "Internal Server Error"
 // @Router /api/chat/room/{room_id}/member/status [patch]
 func (h *ChatRoomHandler) updateMemberStatus(c *gin.Context) {
-	roomIDStr := c.Param("room_id")
-	roomID, err := strconv.ParseInt(roomIDStr, 10, 64)
+	roomID, err := h.getRoomID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
 		return
@@ -329,6 +350,134 @@ func (h *ChatRoomHandler) updateMemberStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, UpdateMemberStatusResponse{Members: statuses})
+}
+
+// @Summary Send a message to a chat room
+// @Description Send a text, image, or file message to the given room. For image/file, content must be the relative path returned by the upload endpoint.
+// @Tags Chat
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param room_id path int true "Room ID"
+// @Param payload body SendMessageRequest true "Message payload"
+// @Success 201 {object} SendMessageResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/chat/room/{room_id}/messages [post]
+func (h *ChatRoomHandler) sendMessage(c *gin.Context) {
+	roomID, err := h.getRoomID(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
+		return
+	}
+
+	var req SendMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.SendMessageInput{
+		RoomID:    roomID,
+		Content:   req.Content,
+		Type:      req.Type,
+		ReplyToID: req.ReplyToID,
+	})
+	out, err := h.sendMessageUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	content := h.resolveContentURL(out.Content, out.Type)
+
+	c.JSON(http.StatusCreated, SendMessageResponse{
+		MessageID: out.MessageID,
+		SenderID:  out.SenderID,
+		Content:   content,
+		Type:      out.Type,
+		ReplyToID: out.ReplyToID,
+		CreatedAt: out.CreatedAt,
+	})
+}
+
+// @Summary Upload media to a chat room
+// @Description Upload an image or file to the given room. Returns the relative path to use as Content in a send-message call.
+// @Tags Chat
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param room_id path int true "Room ID"
+// @Param file formData file true "File to upload"
+// @Success 200 {object} UploadRoomMediaResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 413 {object} response.ErrorResponse "File Too Large"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/chat/room/{room_id}/media [post]
+func (h *ChatRoomHandler) uploadRoomMedia(c *gin.Context) {
+	roomID, err := h.getRoomID(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
+		return
+	}
+
+	const maxSize = 20 << 20 // 20 MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize)
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "file field required"})
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "failed to open file"})
+		return
+	}
+	defer func(f multipart.File) {
+		err := f.Close()
+		if err != nil {
+			logger.Log.Error("failed to close file")
+		}
+	}(f)
+
+	// Detect MIME type from the first 512 bytes
+	sniff := make([]byte, 512)
+	n, _ := f.Read(sniff)
+	mimeType := http.DetectContentType(sniff[:n])
+	// Strip parameters (e.g., charset) from a mime type
+	mimeType, _, _ = mime.ParseMediaType(mimeType)
+
+	// Seek back to the beginning
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "failed to process file"})
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.UploadRoomMediaInput{
+		RoomID:   roomID,
+		File:     f,
+		Filename: fileHeader.Filename,
+		MimeType: mimeType,
+		Size:     fileHeader.Size,
+	})
+	out, err := h.uploadRoomMediaUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, UploadRoomMediaResponse{
+		Path:     out.Path,
+		URL:      out.URL,
+		MimeType: out.MimeType,
+		Size:     out.Size,
+	})
 }
 
 // @Summary Resolve a join invitation
@@ -377,4 +526,13 @@ func (h *ChatRoomHandler) resolveInvitation(c *gin.Context) {
 		Role:         out.Role,
 		JoinedAt:     out.JoinedAt,
 	})
+}
+
+func (h *ChatRoomHandler) getRoomID(c *gin.Context) (int64, error) {
+	roomIDStr := c.Param("room_id")
+	roomID, err := strconv.ParseInt(roomIDStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return roomID, nil
 }

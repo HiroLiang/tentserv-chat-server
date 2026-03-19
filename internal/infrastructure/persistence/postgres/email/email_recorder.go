@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/jmoiron/sqlx"
 )
 

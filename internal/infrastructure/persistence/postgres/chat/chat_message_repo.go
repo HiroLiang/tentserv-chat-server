@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
-	"github.com/HiroLiang/goat-server/internal/domain/chatmessage"
-	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )
@@ -217,12 +217,13 @@ func (r *ChatMessageRepository) Create(ctx context.Context, msg *chatmessage.Cha
 	query, args, err := ChatMessageTable.Insert().
 		Columns("room_id", "sender_id", "content", "message_type", "reply_to_id").
 		Values(rec.RoomID, rec.SenderID, rec.Content, rec.Type, rec.ReplyToID).
+		Suffix("RETURNING id, created_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert chat message: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return r.db.QueryRowxContext(ctx, query, args...).Scan(&msg.ID, &msg.CreatedAt)
 }
 
 func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.ChatMessage) error {

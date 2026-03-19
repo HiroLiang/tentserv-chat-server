@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
-	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
-	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
+	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 

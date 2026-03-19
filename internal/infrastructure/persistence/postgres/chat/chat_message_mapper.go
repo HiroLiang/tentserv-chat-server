@@ -1,6 +1,6 @@
 package chat
 
-import "github.com/HiroLiang/goat-server/internal/domain/chatmessage"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 
 func toChatMessageDomain(rec *ChatMessageRecord) (*chatmessage.ChatMessage, error) {
 	return &chatmessage.ChatMessage{

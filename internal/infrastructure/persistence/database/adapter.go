@@ -1,7 +1,7 @@
 package database
 
 import (
-	"github.com/HiroLiang/goat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 )
 
 func BuildDatabaseConfigs(cfg map[string]*config.DBConfig) map[string]ConnectionConfig {

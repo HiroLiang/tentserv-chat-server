@@ -3,8 +3,8 @@ package agent
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/agent"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 )
 
 type AgentRecord struct {

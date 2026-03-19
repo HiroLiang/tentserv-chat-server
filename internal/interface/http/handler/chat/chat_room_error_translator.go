@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/HiroLiang/goat-server/internal/application/chat/usecase"
-	"github.com/HiroLiang/goat-server/internal/interface/http/response"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gin-gonic/gin"
 )
 
@@ -53,6 +53,24 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, response.ErrNotFound("participant"))
 
 	case errors.Is(err, usecase.ErrChatRoomCreate), errors.Is(err, usecase.ErrInvitationCreate):
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Message: "internal server error",
+		})
+
+	case errors.Is(err, usecase.ErrInvalidMessageType), errors.Is(err, usecase.ErrInvalidFileType):
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_INPUT",
+			Message: err.Error(),
+		})
+
+	case errors.Is(err, usecase.ErrFileTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, response.ErrorResponse{
+			Code:    "FILE_TOO_LARGE",
+			Message: err.Error(),
+		})
+
+	case errors.Is(err, usecase.ErrUploadRoomMedia), errors.Is(err, usecase.ErrSendMessage):
 		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
 			Code:    "INTERNAL_ERROR",
 			Message: "internal server error",

@@ -3,14 +3,15 @@ package bootstrap
 import (
 	"time"
 
-	authUseCase "github.com/HiroLiang/goat-server/internal/application/auth/usecase"
-	chatUseCase "github.com/HiroLiang/goat-server/internal/application/chat/usecase"
-	deviceUseCase "github.com/HiroLiang/goat-server/internal/application/device/usecase"
-	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
-	userUseCase "github.com/HiroLiang/goat-server/internal/application/user/usecase"
-	"github.com/HiroLiang/goat-server/internal/config"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	infraBuilder "github.com/HiroLiang/goat-server/internal/infrastructure/email/builder"
+	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
+	chatUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
+	deviceUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/device/usecase"
+	e2eeUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/usecase"
+	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	userUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	infraBuilder "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/email/builder"
 )
 
 type UseCases struct {
@@ -38,6 +39,17 @@ type UseCases struct {
 	GetChatRoomDetailUseCase   *chatUseCase.GetChatRoomDetailUseCase
 	GetChatRoomMessagesUseCase *chatUseCase.GetChatRoomMessagesUseCase
 	UpdateMemberStatusUseCase  *chatUseCase.UpdateMemberStatusUseCase
+
+	UploadIdentityKeyUseCase  *e2eeUseCase.UploadIdentityKeyUseCase
+	UploadSignedPreKeyUseCase *e2eeUseCase.UploadSignedPreKeyUseCase
+	UploadOTPPreKeysUseCase   *e2eeUseCase.UploadOTPPreKeysUseCase
+	CountOTPPreKeysUseCase    *e2eeUseCase.CountOTPPreKeysUseCase
+	GetKeyBundleUseCase       *e2eeUseCase.GetKeyBundleUseCase
+	UploadSenderKeyUseCase    *e2eeUseCase.UploadSenderKeyUseCase
+	GetSenderKeysUseCase      *e2eeUseCase.GetSenderKeysUseCase
+
+	SendMessageUseCase     *chatUseCase.SendMessageUseCase
+	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -125,6 +137,50 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		UpdateMemberStatusUseCase: chatUseCase.NewUpdateMemberStatusUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+		),
+
+		UploadIdentityKeyUseCase: e2eeUseCase.NewUploadIdentityKeyUseCase(
+			deps.IdentityKeyRepo,
+			deps.KeyVerifier,
+		),
+		UploadSignedPreKeyUseCase: e2eeUseCase.NewUploadSignedPreKeyUseCase(
+			deps.IdentityKeyRepo,
+			deps.SignedPreKeyRepo,
+			deps.KeyVerifier,
+		),
+		UploadOTPPreKeysUseCase: e2eeUseCase.NewUploadOTPPreKeysUseCase(
+			deps.OTPPreKeyRepo,
+		),
+		CountOTPPreKeysUseCase: e2eeUseCase.NewCountOTPPreKeysUseCase(
+			deps.OTPPreKeyRepo,
+		),
+		GetKeyBundleUseCase: e2eeUseCase.NewGetKeyBundleUseCase(
+			deps.IdentityKeyRepo,
+			deps.SignedPreKeyRepo,
+			deps.OTPPreKeyRepo,
+			deps.PushDispatcher,
+		),
+		UploadSenderKeyUseCase: e2eeUseCase.NewUploadSenderKeyUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.MemberSenderKeyRepo,
+		),
+		GetSenderKeysUseCase: e2eeUseCase.NewGetSenderKeysUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.MemberSenderKeyRepo,
+		),
+
+		SendMessageUseCase: chatUseCase.NewSendMessageUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.ChatMessageRepo,
+			deps.Hub,
+		),
+		UploadRoomMediaUseCase: chatUseCase.NewUploadRoomMediaUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.LocalFileStorage,
 		),
 	}
 }

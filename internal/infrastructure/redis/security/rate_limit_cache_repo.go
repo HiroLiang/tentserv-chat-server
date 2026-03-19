@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -16,4 +16,11 @@ var (
 	ErrInvitationAlreadyResolved = errors.New("invitation already resolved")
 	ErrNotRoomAdmin              = errors.New("caller is not room owner or admin")
 	ErrNotRoomMember             = errors.New("not a member of this room")
+
+	ErrInvalidMessageType = errors.New("invalid message type")
+	ErrSendMessage        = errors.New("failed to send message")
+
+	ErrInvalidFileType  = errors.New("unsupported file type")
+	ErrFileTooLarge     = errors.New("file too large")
+	ErrUploadRoomMedia  = errors.New("failed to upload room media")
 )

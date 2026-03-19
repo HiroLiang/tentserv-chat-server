@@ -3,7 +3,7 @@ package chatroom
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 )
 
 type Repository interface {

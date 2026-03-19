@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/HiroLiang/goat-server/internal/application/user/usecase"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
-	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )

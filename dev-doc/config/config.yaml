@@ -27,6 +27,7 @@ auth_token:
   expiration: 60m
 storage:
   base_path: "./uploads"
+  base_url: "${APP_BASE_URL:http://localhost:8080}/static"
 email:
   sender_address: ${EMAIL_SENDER:onboarding@resend.dev}
   sender_name: ${EMAIL_SENDER_NAME:Tentserv}

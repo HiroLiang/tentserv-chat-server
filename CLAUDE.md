@@ -23,19 +23,21 @@ go test ./internal/path/to/pkg/... -v -run TestFunctionName
 
 Clean Architecture with strict unidirectional dependency: `domain → application → infrastructure/interface`
 
-**`internal/domain/`** — Entities and repository interfaces. No framework dependencies.
+**`internal/domain/`** — Entities and repository interfaces. No framework dependencies. Each domain package contains: entity (`<name>.go`), `repository.go` (interface), `value_objects.go` (typed primitives), `errors.go`.
 
 **`internal/application/`** — Use cases. All accept `shared.UseCaseInput[T]` which wraps:
 - `Base.Auth` — AccountID, UserID, Roles, AccessToken
 - `Base.Request` — IP, TraceID, DeviceID
 - `Data T` — typed request payload
 
-**`internal/infrastructure/`** — Implementations: PostgreSQL repos (via pgx/sqlx + Masterminds/squirrel), Redis session, local file storage.
+**`internal/infrastructure/`** — Implementations: PostgreSQL repos (via pgx/sqlx + Masterminds/squirrel), Redis session/cache/rate-limiter, local file storage, email (Resend), E2EE crypto.
 
 **`internal/interface/http/`** — Gin handlers, middleware, DTOs, and error translators. Each feature group has:
 - `*_handler.go` — route handler
 - `*_dto.go` — request/response structs
 - `*_error_translator.go` — maps domain errors → HTTP status codes
+
+**`internal/interface/ws/`** — Gorilla WebSocket handlers for real-time chat and game events.
 
 **`internal/bootstrap/`** — DI wiring: `BuildDeps()` constructs all repos/services; `usecases.go` wires use cases.
 
@@ -51,9 +53,23 @@ adapter.BuildEmptyInput(c)       // no request body
 
 **Import naming:** When a handler package name matches an application package name (e.g., both named `user`), the imported application package is used unqualified. If domain and application packages clash in the same file, alias domain as `domainuser`.
 
-**Repository queries:** Use `Masterminds/squirrel` — wrap conditions with `squirrel.Eq{...}` and pass to a shared `findOneBy()` helper.
+**Repository queries:** Use `Masterminds/squirrel` — wrap conditions with `squirrel.Eq{...}` and pass to shared `postgres.ScanOne[T]` / `postgres.ScanAll[T]` helpers. `BaseRepo.GetDB(ctx)` returns the active transaction if one exists in context, otherwise the raw DB.
+
+**Infrastructure record/mapper pattern:** Each repo has three files: `*_record.go` (raw DB struct with `[]byte` keys), `*_mapper.go` (domain ↔ record conversion), `*_repo.go` (implements domain interface).
 
 **Mocking in BDD tests:** `bootstrap.MockDeps()` with option functions. `FileStorage` mock must be set explicitly: `deps.FileStorage = mockShared.MockFileStorage()`.
+
+## E2EE (End-to-End Encryption)
+
+Signal Protocol key types implemented in `internal/domain/`:
+- `useridentitykey/` — long-lived Curve25519 identity key (one per user per device)
+- `usersignedprekey/` — medium-term pre-key signed by identity key (Ed25519)
+- `userotpprekey/` — one-time pre-keys consumed in X3DH
+- `membersenderkey/` — per-member group sender keys (chain-based re-keying)
+
+Crypto interface: `internal/application/shared/crypto/e2ee.go` (`KeyVerifier`).
+Implementation: `internal/infrastructure/shared/crypto/e2ee_verifier.go` — Ed25519 verify + SHA-256 fingerprint.
+DB migration: `dev-doc/sql/migrate_add_e2ee.sql`.
 
 ## Configuration
 

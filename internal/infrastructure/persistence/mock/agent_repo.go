@@ -3,7 +3,7 @@ package mock
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/domain/agent"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
 )
 
 type AgentRepository struct{}

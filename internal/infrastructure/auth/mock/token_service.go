@@ -3,8 +3,8 @@ package mock
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared/auth"
-	session "github.com/HiroLiang/goat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/auth"
+	session "github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 )
 
 type MockTokenService struct{}

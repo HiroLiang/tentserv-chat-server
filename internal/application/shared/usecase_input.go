@@ -3,9 +3,9 @@ package shared
 import (
 	"net"
 
-	"github.com/HiroLiang/goat-server/internal/domain/auth"
-	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type RequestContext struct {

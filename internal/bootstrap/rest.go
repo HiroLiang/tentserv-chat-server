@@ -1,13 +1,14 @@
 package bootstrap
 
 import (
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/account"
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/chat"
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/device"
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/health"
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/participant"
-	"github.com/HiroLiang/goat-server/internal/interface/http/handler/user"
-	"github.com/HiroLiang/goat-server/internal/interface/http/middleware"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/chat"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/e2ee"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/health"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -59,7 +60,10 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.GetUserChatRoomsUseCase,
 		useCases.GetChatRoomDetailUseCase,
 		useCases.GetChatRoomMessagesUseCase,
-		useCases.UpdateMemberStatusUseCase)
+		useCases.UpdateMemberStatusUseCase,
+		useCases.SendMessageUseCase,
+		useCases.UploadRoomMediaUseCase,
+		dependencies.LocalFileStorage)
 	chatRoomHandler.RegisterChatRoomRoutes(chatGroup)
 
 	// Participant Handler
@@ -68,6 +72,18 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.CreateUserParticipantUseCase,
 		useCases.GetUserParticipantUseCase)
 	participantHandler.RegisterParticipantRoutes(participantGroup)
+
+	// E2EE Handler
+	e2eeGroup := group.Group("/e2ee", middleware.RequireAuthMiddleware())
+	e2ee.NewE2EEHandler(
+		useCases.UploadIdentityKeyUseCase,
+		useCases.UploadSignedPreKeyUseCase,
+		useCases.UploadOTPPreKeysUseCase,
+		useCases.CountOTPPreKeysUseCase,
+		useCases.GetKeyBundleUseCase,
+		useCases.UploadSenderKeyUseCase,
+		useCases.GetSenderKeysUseCase,
+	).RegisterE2EERoutes(e2eeGroup)
 
 	// Future: admin-only participant routes
 	// adminGroup := group.Group("/admin/participant", middleware.RequireAuthMiddleware(), middleware.RequireRoleMiddleware(role.Admin))

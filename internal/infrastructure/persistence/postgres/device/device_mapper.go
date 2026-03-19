@@ -1,8 +1,8 @@
 package device
 
 import (
-	"github.com/HiroLiang/goat-server/internal/domain/device"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 func toDomain(r *DeviceRecord) (*device.Device, error) {

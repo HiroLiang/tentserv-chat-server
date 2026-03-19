@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/testutil"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/testutil"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 )

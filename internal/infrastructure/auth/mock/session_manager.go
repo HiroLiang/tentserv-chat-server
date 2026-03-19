@@ -3,9 +3,9 @@ package mock
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	"github.com/HiroLiang/goat-server/internal/domain/auth"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type MockSessionManager struct {

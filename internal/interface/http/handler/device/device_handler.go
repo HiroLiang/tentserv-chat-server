@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	deviceUseCase "github.com/HiroLiang/goat-server/internal/application/device/usecase"
-	"github.com/HiroLiang/goat-server/internal/interface/http/adapter"
+	deviceUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/device/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
 	"github.com/gin-gonic/gin"
 )
 

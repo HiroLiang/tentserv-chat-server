@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	"github.com/HiroLiang/goat-server/internal/domain/cache"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/cache"
 )
 
 const keyPrefix = "email_verify:"

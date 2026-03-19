@@ -3,7 +3,7 @@ package role
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type Role struct {

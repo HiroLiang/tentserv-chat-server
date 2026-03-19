@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/HiroLiang/goat-server/internal/domain/role"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )

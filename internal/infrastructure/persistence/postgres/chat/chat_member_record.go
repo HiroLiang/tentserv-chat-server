@@ -3,9 +3,9 @@ package chat
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
-	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 )
 
 type ChatMemberRecord struct {

@@ -6,18 +6,20 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/config"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/database"
-	redis2 "github.com/HiroLiang/goat-server/internal/infrastructure/redis"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/database"
+	infraPush "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/push"
+	redis2 "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/redis"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 type App struct {
-	Server      *http.Server
-	Redis       *redis.Client
-	DataSources *database.DataSources
+	Server           *http.Server
+	Redis            *redis.Client
+	DataSources      *database.DataSources
+	schedulerCancel  context.CancelFunc
 }
 
 func CreateApp() *App {
@@ -52,6 +54,11 @@ func (app *App) Start() error {
 		return err
 	}
 
+	// Start retry scheduler
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	app.schedulerCancel = schedulerCancel
+	go infraPush.NewRetryScheduler(dependencies.DeliveryQueueRepo, dependencies.Hub).Start(schedulerCtx)
+
 	// build use cases
 	useCases := BuildUseCases(dependencies)
 
@@ -77,6 +84,11 @@ func (app *App) Start() error {
 }
 
 func (app *App) Stop(ctx context.Context) {
+
+	// 0. Stop scheduler
+	if app.schedulerCancel != nil {
+		app.schedulerCancel()
+	}
 
 	// 1. Stop accepting requests
 	if app.Server != nil {

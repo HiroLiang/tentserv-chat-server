@@ -37,6 +37,7 @@ type AppConfig struct {
 
 	Storage struct {
 		BasePath string `mapstructure:"base_path"`
+		BaseURL  string `mapstructure:"base_url"`
 	} `mapstructure:"storage"`
 
 	Email struct {

@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	session "github.com/HiroLiang/goat-server/internal/domain/auth"
+	session "github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 )
 
 type TokenService interface {

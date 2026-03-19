@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	"github.com/HiroLiang/goat-server/internal/domain/auth"
-	"github.com/HiroLiang/goat-server/internal/domain/cache"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	postgresSession "github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres/session"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/cache"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	postgresSession "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/session"
 )
 
 const (

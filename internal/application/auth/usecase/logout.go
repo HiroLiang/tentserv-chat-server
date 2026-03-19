@@ -3,8 +3,8 @@ package usecase
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 )
 
 type LogoutInput struct{}

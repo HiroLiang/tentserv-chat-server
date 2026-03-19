@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	domaindevice "github.com/HiroLiang/goat-server/internal/domain/device"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/interface/http/response"
+	domaindevice "github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
 )
 

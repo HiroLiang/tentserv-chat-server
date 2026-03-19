@@ -1,6 +1,6 @@
 package role
 
-import "github.com/HiroLiang/goat-server/internal/domain/role"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 
 func ToDomain(record *RoleRecord) (*role.Role, error) {
 	r := &role.Role{

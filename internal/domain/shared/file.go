@@ -26,3 +26,9 @@ func NewFile(name string, data []byte, mimeType string) (File, error) {
 		data:     data,
 	}, nil
 }
+
+func (f File) Name() string     { return f.name }
+func (f File) Ext() string      { return f.ext }
+func (f File) MimeType() string { return f.mimeType }
+func (f File) Size() int64      { return f.size }
+func (f File) Data() []byte     { return f.data }

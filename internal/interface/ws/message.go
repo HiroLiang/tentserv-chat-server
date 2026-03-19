@@ -7,6 +7,7 @@ import "encoding/json"
 //
 //	{"type": "module.action", "payload": {...}}
 type Message struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Type       string          `json:"type"`
+	Payload    json.RawMessage `json:"payload"`
+	DeliveryID *int64          `json:"delivery_id,omitempty"`
 }

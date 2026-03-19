@@ -3,9 +3,9 @@ package usecase
 import (
 	"context"
 
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/device"
-	"github.com/HiroLiang/goat-server/internal/shared/timeutil"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/shared/timeutil"
 )
 
 type UpdateDeviceInput struct {

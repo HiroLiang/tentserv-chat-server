@@ -1,8 +1,8 @@
 package middleware
 
 import (
-	"github.com/HiroLiang/goat-server/internal/application/shared/security"
-	"github.com/HiroLiang/goat-server/internal/interface/http/response"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
 )
 

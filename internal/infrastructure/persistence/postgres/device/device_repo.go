@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/HiroLiang/goat-server/internal/domain/device"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )

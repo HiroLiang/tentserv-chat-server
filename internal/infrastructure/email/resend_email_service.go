@@ -3,9 +3,9 @@ package email
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared/email"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/resend/resend-go/v3"
 )
 

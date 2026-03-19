@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/HiroLiang/goat-server/internal/interface/ws"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/ws"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/stretchr/testify/assert"
 )
 

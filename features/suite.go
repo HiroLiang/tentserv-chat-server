@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http/httptest"
 
-	"github.com/HiroLiang/goat-server/internal/bootstrap"
-	"github.com/HiroLiang/goat-server/internal/config"
-	mockAuth "github.com/HiroLiang/goat-server/internal/infrastructure/auth/mock"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/bootstrap"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	mockAuth "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/auth/mock"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/cucumber/godog"
 	"go.uber.org/zap"
 )

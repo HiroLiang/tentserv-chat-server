@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/domain/transaction"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/jmoiron/sqlx"
 )
 

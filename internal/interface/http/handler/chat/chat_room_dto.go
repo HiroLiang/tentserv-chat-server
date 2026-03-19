@@ -103,3 +103,25 @@ type GetUserChatRoomsResponse struct {
 	Channel []ChatRoomSummaryResponse `json:"channel"`
 	Bot     []ChatRoomSummaryResponse `json:"bot"`
 }
+
+type SendMessageRequest struct {
+	Content   string `json:"content"   binding:"required"`
+	Type      string `json:"type"      binding:"required,oneof=text image file"`
+	ReplyToID *int64 `json:"reply_to_id,omitempty"`
+}
+
+type SendMessageResponse struct {
+	MessageID int64     `json:"message_id"`
+	SenderID  int64     `json:"sender_id"`
+	Content   string    `json:"content"`
+	Type      string    `json:"type"`
+	ReplyToID *int64    `json:"reply_to_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type UploadRoomMediaResponse struct {
+	Path     string `json:"path"`
+	URL      string `json:"url"`
+	MimeType string `json:"mime_type"`
+	Size     int64  `json:"size"`
+}

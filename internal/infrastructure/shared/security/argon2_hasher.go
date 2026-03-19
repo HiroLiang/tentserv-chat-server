@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"strings"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 	"golang.org/x/crypto/argon2"
 )
 

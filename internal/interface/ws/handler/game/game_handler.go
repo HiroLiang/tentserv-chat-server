@@ -3,8 +3,8 @@ package game
 import (
 	"encoding/json"
 
-	"github.com/HiroLiang/goat-server/internal/interface/ws"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/ws"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"go.uber.org/zap"
 )
 

@@ -1,6 +1,6 @@
 package chat
 
-import "github.com/HiroLiang/goat-server/internal/domain/chatinvitation"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
 
 func toInvitationDomain(rec *ChatInvitationRecord) *chatinvitation.ChatInvitation {
 	return &chatinvitation.ChatInvitation{

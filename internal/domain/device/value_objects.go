@@ -1,6 +1,6 @@
 package device
 
-import "github.com/HiroLiang/goat-server/internal/domain/shared"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 
 // ID is an alias for shared.DeviceID, used by other domain packages.
 type ID = shared.DeviceID

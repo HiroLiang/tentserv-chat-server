@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/HiroLiang/goat-server/internal/domain/agent"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
 
 func toDomain(record *AgentRecord) (*agent.Agent, error) {
 	return &agent.Agent{

@@ -1,4 +1,4 @@
-// @title Goat-Server
+// @title Tentservv Chat Server
 // @version 1.0.0
 // @description Server for my all Goat application
 // @host dev.hiroliang.com
@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/bootstrap"
-	"github.com/HiroLiang/goat-server/internal/config"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/bootstrap"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 
-	_ "github.com/HiroLiang/goat-server/swag-docs"
+	_ "github.com/HiroLiang/tentserv-chat-server/swag-docs"
 )
 
 func init() {

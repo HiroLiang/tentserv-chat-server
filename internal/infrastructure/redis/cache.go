@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/cache"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/cache"
 	"github.com/redis/go-redis/v9"
 )
 

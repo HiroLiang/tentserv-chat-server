@@ -1,6 +1,6 @@
 package chat
 
-import "github.com/HiroLiang/goat-server/internal/domain/chatroom"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 
 func toChatRoomDomain(rec *ChatRoomRecord) (*chatroom.ChatRoom, error) {
 	room := &chatroom.ChatRoom{

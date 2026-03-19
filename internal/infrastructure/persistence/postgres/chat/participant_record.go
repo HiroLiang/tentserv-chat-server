@@ -3,8 +3,8 @@ package chat
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type ParticipantRecord struct {

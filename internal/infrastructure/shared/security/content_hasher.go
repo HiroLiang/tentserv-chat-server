@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 
-	"github.com/HiroLiang/goat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 )
 
 type ContentHasher struct{}

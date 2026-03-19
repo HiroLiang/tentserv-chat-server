@@ -9,12 +9,12 @@ import (
 	"io"
 	"path/filepath"
 
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/application/shared/port"
-	"github.com/HiroLiang/goat-server/internal/application/shared/security"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/disintegration/imaging"
 )
 

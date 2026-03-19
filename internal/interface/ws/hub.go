@@ -1,6 +1,10 @@
 package ws
 
-import "sync"
+import (
+	"encoding/json"
+	"sync"
+	"time"
+)
 
 // Hub manages all active WebSocket clients and routes broadcasts.
 type Hub struct {
@@ -19,6 +23,10 @@ type Hub struct {
 
 	// Unregister removes a client from the hub.
 	Unregister chan *Client
+
+	// pendingAcks tracks in-flight deliveries waiting for client ACK.
+	pendingAcks map[int64]chan struct{}
+	ackMu       sync.Mutex
 }
 
 // NewHub creates a new Hub.
@@ -29,6 +37,7 @@ func NewHub() *Hub {
 		Broadcast:   make(chan []byte, 256),
 		Register:    make(chan *Client),
 		Unregister:  make(chan *Client),
+		pendingAcks: make(map[int64]chan struct{}),
 	}
 }
 
@@ -72,6 +81,52 @@ func (h *Hub) SendToUser(userID string, msg []byte) {
 
 	for _, c := range clients {
 		c.Send(msg)
+	}
+}
+
+// PushAndWaitAck sends a typed message with a delivery ID to a user and waits for the client ACK.
+// Returns true if ACK was received within timeout, false otherwise.
+func (h *Hub) PushAndWaitAck(userID string, deliveryID int64, msgType string, payload []byte, timeout time.Duration) bool {
+	ackCh := make(chan struct{}, 1)
+
+	h.ackMu.Lock()
+	h.pendingAcks[deliveryID] = ackCh
+	h.ackMu.Unlock()
+
+	msg := Message{
+		Type:       msgType,
+		Payload:    json.RawMessage(payload),
+		DeliveryID: &deliveryID,
+	}
+	data, err := json.Marshal(msg)
+	if err == nil {
+		h.SendToUser(userID, data)
+	}
+
+	select {
+	case <-ackCh:
+		h.ackMu.Lock()
+		delete(h.pendingAcks, deliveryID)
+		h.ackMu.Unlock()
+		return true
+	case <-time.After(timeout):
+		h.ackMu.Lock()
+		delete(h.pendingAcks, deliveryID)
+		h.ackMu.Unlock()
+		return false
+	}
+}
+
+// ResolveAck closes the pending ACK channel for the given deliveryID.
+func (h *Hub) ResolveAck(deliveryID int64) {
+	h.ackMu.Lock()
+	ch, ok := h.pendingAcks[deliveryID]
+	h.ackMu.Unlock()
+	if ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 

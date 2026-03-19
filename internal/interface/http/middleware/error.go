@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/HiroLiang/goat-server/internal/interface/http/response"
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )

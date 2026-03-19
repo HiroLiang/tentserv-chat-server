@@ -3,8 +3,8 @@ package mock
 import (
 	"context"
 
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 )
 
 type UserRepo struct{}

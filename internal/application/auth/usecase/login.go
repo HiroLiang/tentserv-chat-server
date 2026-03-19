@@ -5,16 +5,16 @@ import (
 	"errors"
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/application/auth/port"
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	appEmail "github.com/HiroLiang/goat-server/internal/application/shared/email"
-	"github.com/HiroLiang/goat-server/internal/application/shared/security"
-	"github.com/HiroLiang/goat-server/internal/domain/account"
-	"github.com/HiroLiang/goat-server/internal/domain/auth"
-	"github.com/HiroLiang/goat-server/internal/domain/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/transaction"
-	"github.com/HiroLiang/goat-server/internal/domain/user"
-	"github.com/HiroLiang/goat-server/internal/domain/userrole"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/userrole"
 )
 
 type LoginInput struct {

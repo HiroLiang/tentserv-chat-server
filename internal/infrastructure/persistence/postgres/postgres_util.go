@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/HiroLiang/goat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/jmoiron/sqlx"
 )
 

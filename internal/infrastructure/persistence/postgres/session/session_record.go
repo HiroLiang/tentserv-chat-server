@@ -3,7 +3,7 @@ package session
 import (
 	"time"
 
-	"github.com/HiroLiang/goat-server/internal/infrastructure/persistence/postgres"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 )
 
 type SessionRecord struct {

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"time"
 
-	appShared "github.com/HiroLiang/goat-server/internal/application/shared"
-	"github.com/HiroLiang/goat-server/internal/domain/chatinvitation"
-	"github.com/HiroLiang/goat-server/internal/domain/chatmember"
-	"github.com/HiroLiang/goat-server/internal/domain/chatroom"
-	"github.com/HiroLiang/goat-server/internal/domain/participant"
-	"github.com/HiroLiang/goat-server/internal/domain/transaction"
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 )
 
 type JoinChatRoomInput struct {

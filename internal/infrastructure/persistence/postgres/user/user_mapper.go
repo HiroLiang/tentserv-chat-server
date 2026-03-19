@@ -1,6 +1,6 @@
 package user
 
-import "github.com/HiroLiang/goat-server/internal/domain/user"
+import "github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 
 func toDomain(record *UserRecord) (*user.User, error) {
 	avatarName := ""
