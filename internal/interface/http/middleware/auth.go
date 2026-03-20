@@ -18,8 +18,13 @@ import (
 func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		// Get auth token from the header
+		// Get auth token from the header, falling back to query param for WebSocket
 		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			if t := c.Query("token"); t != "" {
+				authHeader = "Bearer " + t
+			}
+		}
 		DeviceID := c.GetHeader("X-Device-ID")
 
 		// Validate token if exists

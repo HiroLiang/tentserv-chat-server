@@ -9,5 +9,5 @@ CREATE TABLE public.delivery_queue
     delivered_at TIMESTAMP
 );
 
-CREATE INDEX delivery_queue_user_status ON delivery_queue (user_id, status);
-CREATE INDEX delivery_queue_status_create_at ON delivery_queue (status, created_at);
+CREATE INDEX idx_delivery_queue_user_status ON delivery_queue (user_id, status);
+CREATE INDEX idx_delivery_queue_status_create_at ON delivery_queue (status, created_at);

@@ -128,8 +128,7 @@ func (h *UserHandler) uploadAvatar(c *gin.Context) {
 
 	file, _, err := c.Request.FormFile("avatar")
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			HandleError(c, user.ErrImageTooLarge)
 			return
 		}

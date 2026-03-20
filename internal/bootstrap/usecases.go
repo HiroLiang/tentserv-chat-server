@@ -7,6 +7,7 @@ import (
 	chatUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
 	deviceUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/device/usecase"
 	e2eeUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/usecase"
+	friendshipUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/friendship/usecase"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	userUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
@@ -50,6 +51,8 @@ type UseCases struct {
 
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
+
+	GetFriendsUseCase *friendshipUseCase.GetFriendsUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -182,5 +185,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.LocalFileStorage,
 		),
+
+		GetFriendsUseCase: friendshipUseCase.NewGetFriendsUseCase(deps.FriendshipRepo),
 	}
 }

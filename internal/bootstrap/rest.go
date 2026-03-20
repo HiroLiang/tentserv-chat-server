@@ -18,6 +18,7 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	group.Use(middleware.ErrorHandler())
 	group.Use(middleware.GlobalRateLimitMiddleware(dependencies.RateLimiter))
 	group.Use(middleware.IPRateLimitMiddleware(dependencies.RateLimiter))
+	group.Use(middleware.AccessLogMiddleware())
 	group.Use(middleware.AuthMiddleware(dependencies.SessionManager, dependencies.UserRepo))
 	group.Use(middleware.ContextMiddleware())
 
@@ -40,6 +41,9 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.UploadAvatarUseCase,
 		useCases.GetUserProfileUseCase)
 	userHandler.RegisterUserRoutes(group.Group("/user"))
+
+	var friendshipHandler = user.NewFriendshipHandler(useCases.GetFriendsUseCase)
+	friendshipHandler.RegisterFriendshipRoutes(group.Group("/user", middleware.RequireAuthMiddleware()))
 
 	var deviceHandler = device.NewDeviceHandler(
 		useCases.RegisterDeviceUseCase,

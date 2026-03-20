@@ -68,8 +68,9 @@ func (h *E2EEHandler) uploadIdentityKey_(c *gin.Context) {
 		return
 	}
 	input := adapter.BuildInput(c, usecase.UploadIdentityKeyInput{
-		DeviceID:  req.DeviceID,
-		PublicKey: req.PublicKey,
+		DeviceID:      req.DeviceID,
+		PublicKey:     req.PublicKey,
+		SignPublicKey: req.SignPublicKey,
 	})
 	out, err := h.uploadIdentityKey.Execute(c.Request.Context(), input)
 	if err != nil {
@@ -192,12 +193,13 @@ func (h *E2EEHandler) getKeyBundle_(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, KeyBundleResponse{
-		IdentityKey:  out.IdentityKey,
-		SignedPreKey: out.SignedPreKey,
-		SPKSignature: out.SPKSignature,
-		SPKKeyID:     out.SPKKeyID,
-		OTPPreKey:    out.OTPPreKey,
-		OTPPreKeyID:  out.OTPPreKeyID,
+		IdentityKey:     out.IdentityKey,
+		IdentityKeySign: out.IdentityKeySign,
+		SignedPreKey:    out.SignedPreKey,
+		SPKSignature:    out.SPKSignature,
+		SPKKeyID:        out.SPKKeyID,
+		OTPPreKey:       out.OTPPreKey,
+		OTPPreKeyID:     out.OTPPreKeyID,
 	})
 }
 

@@ -21,12 +21,13 @@ type GetKeyBundleInput struct {
 }
 
 type KeyBundleOutput struct {
-	IdentityKey  string // base64
-	SignedPreKey string // base64
-	SPKSignature string // base64
-	SPKKeyID     uint32
-	OTPPreKey    *string // base64, optional
-	OTPPreKeyID  *uint32 // optional
+	IdentityKey     string // base64, X25519 DH key
+	IdentityKeySign string // base64, Ed25519 signing key
+	SignedPreKey    string // base64
+	SPKSignature    string // base64
+	SPKKeyID        uint32
+	OTPPreKey       *string // base64, optional
+	OTPPreKeyID     *uint32 // optional
 }
 
 type GetKeyBundleUseCase struct {
@@ -75,10 +76,11 @@ func (u *GetKeyBundleUseCase) Execute(
 	}
 
 	out := &KeyBundleOutput{
-		IdentityKey:  base64.StdEncoding.EncodeToString(identityKey.PublicKey[:]),
-		SignedPreKey: base64.StdEncoding.EncodeToString(signedPreKey.PublicKey[:]),
-		SPKSignature: base64.StdEncoding.EncodeToString(signedPreKey.Signature[:]),
-		SPKKeyID:     uint32(signedPreKey.KeyID),
+		IdentityKey:     base64.StdEncoding.EncodeToString(identityKey.PublicKey[:]),
+		IdentityKeySign: base64.StdEncoding.EncodeToString(identityKey.SignPublicKey[:]),
+		SignedPreKey:    base64.StdEncoding.EncodeToString(signedPreKey.PublicKey[:]),
+		SPKSignature:    base64.StdEncoding.EncodeToString(signedPreKey.Signature[:]),
+		SPKKeyID:        uint32(signedPreKey.KeyID),
 	}
 
 	otpKey, err := u.otpPreKeyRepo.ConsumeOne(ctx, targetUserID, deviceID)
@@ -89,7 +91,7 @@ func (u *GetKeyBundleUseCase) Execute(
 		out.OTPPreKeyID = &keyID
 	}
 
-	// Check remaining OTP prekeys; dispatch replenish request if below threshold
+	// Check remaining OTP prekeys; dispatch replenish request if below a threshold
 	remaining, err := u.otpPreKeyRepo.CountAvailable(ctx, targetUserID, deviceID)
 	if err == nil && remaining < OTPReplenishThreshold {
 		payload, _ := json.Marshal(map[string]interface{}{

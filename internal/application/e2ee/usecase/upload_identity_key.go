@@ -12,8 +12,9 @@ import (
 )
 
 type UploadIdentityKeyInput struct {
-	DeviceID  string
-	PublicKey string // base64-encoded 32-byte Curve25519 key
+	DeviceID      string
+	PublicKey     string // base64-encoded 32-byte Curve25519 key
+	SignPublicKey string // base64-encoded 32-byte Ed25519 signing key
 }
 
 type UploadIdentityKeyOutput struct {
@@ -47,6 +48,14 @@ func (u *UploadIdentityKeyUseCase) Execute(
 		return nil, fmt.Errorf("%w: public key must be 32 bytes", ErrInvalidSignature)
 	}
 
+	signKeyBytes, err := base64.StdEncoding.DecodeString(input.Data.SignPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode sign public key", ErrInvalidSignature)
+	}
+	if len(signKeyBytes) != 32 {
+		return nil, fmt.Errorf("%w: sign public key must be 32 bytes", ErrInvalidSignature)
+	}
+
 	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid device id: %w", err)
@@ -56,12 +65,15 @@ func (u *UploadIdentityKeyUseCase) Execute(
 
 	var pub useridentitykey.PublicKey
 	copy(pub[:], keyBytes)
+	var signPub useridentitykey.SignPublicKey
+	copy(signPub[:], signKeyBytes)
 
 	key := &useridentitykey.UserIdentityKey{
-		UserID:      input.Base.Auth.UserID,
-		DeviceID:    deviceID,
-		PublicKey:   pub,
-		Fingerprint: useridentitykey.Fingerprint(fingerprint),
+		UserID:        input.Base.Auth.UserID,
+		DeviceID:      deviceID,
+		PublicKey:     pub,
+		SignPublicKey: signPub,
+		Fingerprint:   useridentitykey.Fingerprint(fingerprint),
 	}
 
 	if err := u.identityKeyRepo.Upsert(ctx, key); err != nil {

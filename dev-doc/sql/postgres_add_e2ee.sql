@@ -7,8 +7,9 @@ CREATE TABLE IF NOT EXISTS public.user_identity_keys
     id          BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     user_id     BIGINT    NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
     device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
-    public_key  BYTEA     NOT NULL, -- 32-byte Curve25519 public key
-    fingerprint TEXT      NOT NULL, -- hex(SHA-256(public_key)) for display
+    public_key      BYTEA     NOT NULL, -- 32-byte Curve25519 public key
+    sign_public_key BYTEA     NOT NULL, -- 32-byte Ed25519 signing public key
+    fingerprint     TEXT      NOT NULL, -- hex(SHA-256(public_key)) for display
     uploaded_at TIMESTAMP NOT NULL DEFAULT now(),
     UNIQUE (user_id, device_id)
 );

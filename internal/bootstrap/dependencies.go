@@ -17,6 +17,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/deliveryqueue"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
@@ -38,6 +39,7 @@ import (
 	postgresDevice "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/device"
 	postgresE2EE "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/e2ee"
 	postgresEmail "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/email"
+	postgresFriendship "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/friendship"
 	postgresSession "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/session"
 	postgresUser "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/user"
 	postgresUserRole "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres/userrole"
@@ -88,6 +90,8 @@ type Dependencies struct {
 	Hub               *ws.Hub
 	DeliveryQueueRepo deliveryqueue.Repository
 	PushDispatcher    appPush.Dispatcher
+
+	FriendshipRepo friendship.Repository
 }
 
 func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Dependencies, error) {
@@ -157,6 +161,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 		Hub:                   hub,
 		DeliveryQueueRepo:     deliveryQueueRepo,
 		PushDispatcher:        pushDispatcher,
+		FriendshipRepo:        postgresFriendship.NewFriendshipRepository(postgresDB),
 	}, nil
 }
 

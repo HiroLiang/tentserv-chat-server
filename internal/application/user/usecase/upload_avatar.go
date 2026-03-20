@@ -91,8 +91,7 @@ func (uc *UploadAvatarUseCase) Execute(
 	// Save as JPEG (overwrites existing avatar for the same user)
 	fileName := fmt.Sprintf("%d_%s.jpg", userData.ID, ver)
 	path := filepath.Join(dir, fileName)
-	oldFileName := userData.Avatar
-	oldPath := filepath.Join(dir, oldFileName)
+	oldAvatarPath := filepath.Join("", userData.Avatar)
 
 	// Prepare file data
 	fileData, err := shared.NewFile(fileName, data, "image/jpeg")
@@ -106,8 +105,8 @@ func (uc *UploadAvatarUseCase) Execute(
 		if errors.Is(err, port.ErrFileAlreadyExists) {
 
 			// Update the current user's avatar name if the file name wrong
-			if userData.Avatar != fileName {
-				userData.Avatar = fileName
+			if userData.Avatar != path {
+				userData.Avatar = path
 				if err := uc.userRepo.Update(ctx, userData); err != nil {
 					return nil, ErrUploadFile
 				}
@@ -117,17 +116,17 @@ func (uc *UploadAvatarUseCase) Execute(
 		return nil, ErrUploadFile
 	}
 
-	// Update user avatar name
-	userData.Avatar = result.Filename
+	// Update user avatar path
+	userData.Avatar = result.Path
 	if err := uc.userRepo.Update(ctx, userData); err != nil {
 		return nil, ErrUploadFile
 	}
 
 	// Delete old avatar if userData is updated
-	if oldFileName != "" && oldFileName != userData.Avatar {
+	if oldAvatarPath != "" && oldAvatarPath != userData.Avatar {
 		go func() {
-			if err := uc.fileStorage.Delete(context.Background(), oldPath); err != nil {
-				logger.Log.Warn(fmt.Sprintf("Delete %s failed: %v", oldPath, err))
+			if err := uc.fileStorage.Delete(context.Background(), oldAvatarPath); err != nil {
+				logger.Log.Warn(fmt.Sprintf("Delete %s failed: %v", oldAvatarPath, err))
 			}
 		}()
 	}

@@ -9,10 +9,11 @@ import (
 )
 
 type IdentityKeyRecord struct {
-	ID          useridentitykey.ID `db:"id"`
-	UserID      user.ID            `db:"user_id"`
-	DeviceID    device.ID          `db:"device_id"`
-	PublicKey   []byte             `db:"public_key"`
-	Fingerprint string             `db:"fingerprint"`
-	UploadedAt  time.Time          `db:"uploaded_at"`
+	ID            useridentitykey.ID `db:"id"`
+	UserID        user.ID            `db:"user_id"`
+	DeviceID      device.ID          `db:"device_id"`
+	PublicKey     []byte             `db:"public_key"`
+	SignPublicKey []byte             `db:"sign_public_key"`
+	Fingerprint   string             `db:"fingerprint"`
+	UploadedAt    time.Time          `db:"uploaded_at"`
 }

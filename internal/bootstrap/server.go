@@ -85,8 +85,8 @@ func initConfig(r *gin.Engine) {
 			return false
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Accept", "Content-Type", "Authorization", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length", "Authorization", "X-Request-Id"},
+		AllowHeaders:     []string{"Origin", "Accept", "Content-Type", "Authorization", "X-Requested-With", "X-Device-ID"},
+		ExposeHeaders:    []string{"Content-Length", "Authorization", "X-Request-Id", "X-Device-ID"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))

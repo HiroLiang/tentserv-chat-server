@@ -8,10 +8,11 @@ import (
 )
 
 type UserIdentityKey struct {
-	ID          ID
-	UserID      user.ID
-	DeviceID    device.ID
-	PublicKey   PublicKey
-	Fingerprint Fingerprint
-	UploadedAt  time.Time
+	ID            ID
+	UserID        user.ID
+	DeviceID      device.ID
+	PublicKey     PublicKey
+	SignPublicKey SignPublicKey
+	Fingerprint   Fingerprint
+	UploadedAt    time.Time
 }

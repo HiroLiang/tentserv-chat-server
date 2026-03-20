@@ -16,7 +16,7 @@ import (
 var identityKeyTable = postgres.Table{
 	Name: "public.user_identity_keys",
 	Columns: []string{
-		"id", "user_id", "device_id", "public_key", "fingerprint", "uploaded_at",
+		"id", "user_id", "device_id", "public_key", "sign_public_key", "fingerprint", "uploaded_at",
 	},
 }
 
@@ -85,10 +85,11 @@ func (r *IdentityKeyRepository) Upsert(ctx context.Context, key *useridentitykey
 	rec := toIdentityKeyRecord(key)
 
 	query, args, err := identityKeyTable.Insert().
-		Columns("user_id", "device_id", "public_key", "fingerprint").
-		Values(rec.UserID, rec.DeviceID, rec.PublicKey, rec.Fingerprint).
+		Columns("user_id", "device_id", "public_key", "sign_public_key", "fingerprint").
+		Values(rec.UserID, rec.DeviceID, rec.PublicKey, rec.SignPublicKey, rec.Fingerprint).
 		Suffix(`ON CONFLICT (user_id, device_id) DO UPDATE
 			SET public_key = EXCLUDED.public_key,
+			    sign_public_key = EXCLUDED.sign_public_key,
 			    fingerprint = EXCLUDED.fingerprint,
 			    uploaded_at = now()
 			RETURNING id, uploaded_at`).

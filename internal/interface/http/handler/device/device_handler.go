@@ -126,7 +126,7 @@ func (h *DeviceHandler) updateDeviceInfo(c *gin.Context) {
 
 	out, err := h.updateDeviceUseCase.Execute(c.Request.Context(), input)
 	if err != nil {
-		c.JSON(http.StatusOK, DeviceUpdateResponse{Success: false})
+		handleError(c, err)
 		return
 	}
 

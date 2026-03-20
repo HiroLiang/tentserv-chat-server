@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS public.chat_invitations
     updated_at TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
-CREATE INDEX chat_invitation_room_id_invite_id ON public.chat_invitations (room_id, invitee_id);
+CREATE INDEX idx_chat_invitation_room_id_invite_id ON public.chat_invitations (room_id, invitee_id);

@@ -9,6 +9,8 @@ import (
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
+	"go.uber.org/zap"
 )
 
 type LocalFileStorage struct {
@@ -54,7 +56,12 @@ func (s *LocalFileStorage) SaveStream(ctx context.Context, reader io.Reader, met
 	if err != nil {
 		return port.SaveResult{}, err
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			logger.Log.Error(err.Error())
+		}
+	}(f)
 
 	written, err := io.Copy(f, reader)
 	if err != nil {
@@ -71,8 +78,11 @@ func (s *LocalFileStorage) SaveStream(ctx context.Context, reader io.Reader, met
 
 func (s *LocalFileStorage) Delete(ctx context.Context, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
+	logger.Log.Info("Delete attempt", zap.String("fullPath", fullPath))
+
 	err := os.Remove(fullPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		logger.Log.Error(err.Error())
 		return err
 	}
 	return nil
