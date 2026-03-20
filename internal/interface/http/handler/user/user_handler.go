@@ -20,6 +20,7 @@ type UserHandler struct {
 	updateProfileUseCase *usecase.UpdateProfileUseCase
 	uploadAvatarUseCase  *usecase.UploadAvatarUseCase
 	getProfileUseCase    *usecase.GetProfileUseCase
+	searchUsersUseCase   *usecase.SearchUsersUseCase
 }
 
 // NewUserHandler Create a new UserHandler instance with dependencies
@@ -27,11 +28,13 @@ func NewUserHandler(
 	updateProfileUseCase *usecase.UpdateProfileUseCase,
 	uploadAvatarUseCase *usecase.UploadAvatarUseCase,
 	getProfileUseCase *usecase.GetProfileUseCase,
+	searchUsersUseCase *usecase.SearchUsersUseCase,
 ) *UserHandler {
 	return &UserHandler{
 		updateProfileUseCase: updateProfileUseCase,
 		uploadAvatarUseCase:  uploadAvatarUseCase,
 		getProfileUseCase:    getProfileUseCase,
+		searchUsersUseCase:   searchUsersUseCase,
 	}
 }
 
@@ -40,6 +43,9 @@ func (h *UserHandler) RegisterUserRoutes(r *gin.RouterGroup) {
 	r.GET("/:user_id", h.getProfile)
 	r.PATCH("/profile", middleware.RequireAuthMiddleware(), h.updateProfile)
 	r.POST("/avatar", middleware.RequireAuthMiddleware(), h.uploadAvatar)
+
+	authed := r.Group("", middleware.RequireAuthMiddleware())
+	authed.GET("/search", h.searchUsers)
 }
 
 // @Summary Get user profile
@@ -173,4 +179,49 @@ func isAllowedImageType(mimeType string) bool {
 		return true
 	}
 	return false
+}
+
+// @Summary Search users
+// @Description Search users by name (fuzzy), account handle (exact), or public UUID (exact). Exactly one parameter must be provided.
+// @Tags User
+// @Produce json
+// @Security BearerAuth
+// @Param name query string false "Fuzzy name search"
+// @Param account query string false "Exact account handle"
+// @Param public_id query string false "Exact public UUID"
+// @Success 200 {array} UserSearchResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/user/search [get]
+func (h *UserHandler) searchUsers(c *gin.Context) {
+	name := c.Query("name")
+	account := c.Query("account")
+	publicID := c.Query("public_id")
+
+	input := adapter.BuildInput(c, usecase.SearchUsersInput{
+		Name:     name,
+		Account:  account,
+		PublicID: publicID,
+	})
+
+	out, err := h.searchUsersUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	resp := make([]UserSearchResponse, 0, len(out.Users))
+	for _, u := range out.Users {
+		resp = append(resp, UserSearchResponse{
+			UserID:           int64(u.ID),
+			Name:             u.Name,
+			Avatar:           u.Avatar,
+			PublicID:         u.PublicID,
+			Account:          u.AccountName,
+			FriendshipStatus: u.FriendshipStatus,
+		})
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

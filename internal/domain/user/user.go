@@ -27,3 +27,11 @@ func NewUser(accountID shared.AccountID, name string) *User {
 		RoleCodes: []role.Code{role.User},
 	}
 }
+
+type UserSearchResult struct {
+	ID          shared.UserID
+	Name        string
+	Avatar      string
+	PublicID    string
+	AccountName string
+}

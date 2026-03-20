@@ -39,10 +39,17 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	var userHandler = user.NewUserHandler(
 		useCases.UpdateUserProfileUseCase,
 		useCases.UploadAvatarUseCase,
-		useCases.GetUserProfileUseCase)
+		useCases.GetUserProfileUseCase,
+		useCases.SearchUsersUseCase)
 	userHandler.RegisterUserRoutes(group.Group("/user"))
 
-	var friendshipHandler = user.NewFriendshipHandler(useCases.GetFriendsUseCase)
+	var friendshipHandler = user.NewFriendshipHandler(
+		useCases.GetFriendsUseCase,
+		useCases.ApplyFriendshipUseCase,
+		useCases.AcceptFriendshipUseCase,
+		useCases.GetFriendRequestsUseCase,
+		useCases.RemoveFriendshipUseCase,
+	)
 	friendshipHandler.RegisterFriendshipRoutes(group.Group("/user", middleware.RequireAuthMiddleware()))
 
 	var deviceHandler = device.NewDeviceHandler(

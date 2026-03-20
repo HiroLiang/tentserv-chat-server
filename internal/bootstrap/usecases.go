@@ -25,6 +25,7 @@ type UseCases struct {
 	UpdateUserProfileUseCase *userUseCase.UpdateProfileUseCase
 	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
 	GetUserProfileUseCase    *userUseCase.GetProfileUseCase
+	SearchUsersUseCase       *userUseCase.SearchUsersUseCase
 
 	RegisterDeviceUseCase   *deviceUseCase.RegisterUseCase
 	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase
@@ -52,7 +53,11 @@ type UseCases struct {
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
 
-	GetFriendsUseCase *friendshipUseCase.GetFriendsUseCase
+	GetFriendsUseCase        *friendshipUseCase.GetFriendsUseCase
+	ApplyFriendshipUseCase   *friendshipUseCase.ApplyFriendshipUseCase
+	AcceptFriendshipUseCase  *friendshipUseCase.AcceptFriendshipUseCase
+	GetFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase
+	RemoveFriendshipUseCase  *friendshipUseCase.RemoveFriendshipUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -89,6 +94,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo),
 		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),
 		GetUserProfileUseCase:    userUseCase.NewGetProfileUseCase(deps.UserRepo),
+		SearchUsersUseCase:       userUseCase.NewSearchUsersUseCase(deps.UserRepo, deps.FriendshipRepo),
 
 		RegisterDeviceUseCase:   deviceUseCase.NewRegisterUseCase(deps.Uow, deps.DeviceRepo),
 		GetDeviceProfileUseCase: deviceUseCase.NewGetProfileUseCase(deps.Uow, deps.DeviceRepo),
@@ -186,6 +192,10 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.LocalFileStorage,
 		),
 
-		GetFriendsUseCase: friendshipUseCase.NewGetFriendsUseCase(deps.FriendshipRepo),
+		GetFriendsUseCase:        friendshipUseCase.NewGetFriendsUseCase(deps.FriendshipRepo, deps.UserRepo),
+		ApplyFriendshipUseCase:   friendshipUseCase.NewApplyFriendshipUseCase(deps.FriendshipRepo),
+		AcceptFriendshipUseCase:  friendshipUseCase.NewAcceptFriendshipUseCase(deps.Uow, deps.FriendshipRepo),
+		GetFriendRequestsUseCase: friendshipUseCase.NewGetFriendRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
+		RemoveFriendshipUseCase:  friendshipUseCase.NewRemoveFriendshipUseCase(deps.FriendshipRepo),
 	}
 }

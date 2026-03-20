@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
@@ -12,8 +13,34 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/Masterminds/squirrel"
+	"github.com/gofrs/uuid"
 	"github.com/jmoiron/sqlx"
 )
+
+type UserSearchRecord struct {
+	ID          shared.UserID    `db:"id"`
+	Name        string           `db:"name"`
+	AvatarName  *string          `db:"avatar"`
+	AccountID   shared.AccountID `db:"account_id"`
+	PublicID    uuid.UUID        `db:"public_id"`
+	AccountName string           `db:"account"`
+	CreatedAt   time.Time        `db:"created_at"`
+	UpdatedAt   time.Time        `db:"updated_at"`
+}
+
+func toSearchDomain(r *UserSearchRecord) *user.UserSearchResult {
+	avatar := ""
+	if r.AvatarName != nil {
+		avatar = *r.AvatarName
+	}
+	return &user.UserSearchResult{
+		ID:          r.ID,
+		Name:        r.Name,
+		Avatar:      avatar,
+		PublicID:    r.PublicID.String(),
+		AccountName: r.AccountName,
+	}
+}
 
 type UserRepository struct {
 	postgres.BaseRepo
@@ -93,6 +120,45 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 	}
 
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+var searchColumns = []string{
+	"u.id", "u.name", "u.avatar", "u.account_id", "u.created_at", "u.updated_at", "a.public_id", "a.account",
+}
+
+func (r *UserRepository) searchJoinQuery(ctx context.Context, cond squirrel.Sqlizer) ([]*user.UserSearchResult, error) {
+	query, args, err := squirrel.Select(searchColumns...).
+		From("goat.public.users u").
+		Join("goat.public.accounts a ON u.account_id = a.id").
+		Where(cond).
+		PlaceholderFormat(squirrel.Dollar).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build search query: %w", err)
+	}
+
+	records, err := postgres.ScanAll[UserSearchRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan search results: %w", err)
+	}
+
+	results := make([]*user.UserSearchResult, 0, len(records))
+	for i := range records {
+		results = append(results, toSearchDomain(&records[i]))
+	}
+	return results, nil
+}
+
+func (r *UserRepository) SearchByName(ctx context.Context, keyword string) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.ILike{"u.name": "%" + keyword + "%"})
+}
+
+func (r *UserRepository) FindByAccountName(ctx context.Context, accountName string) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.Eq{"a.account": accountName})
+}
+
+func (r *UserRepository) FindByPublicID(ctx context.Context, publicID string) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.Eq{"a.public_id": publicID})
 }
 
 func (r *UserRepository) findOneBy(

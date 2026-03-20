@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
@@ -72,6 +73,13 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusRequestEntityTooLarge, response.ErrorResponse{
 			Code:    "IMAGE_TOO_LARGE",
 			Message: "image exceeds maximum allowed size of 5 MB",
+		})
+		return
+
+	case errors.Is(err, usecase.ErrInvalidSearchInput):
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_SEARCH_PARAMS",
+			Message: "exactly one search parameter is required",
 		})
 		return
 

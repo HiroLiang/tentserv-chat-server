@@ -11,4 +11,7 @@ type Repository interface {
 	FindByID(ctx context.Context, id shared.UserID) (*User, error)
 	FindByAccountID(ctx context.Context, accountID shared.AccountID) (*[]User, error)
 	Update(ctx context.Context, user *User) error
+	SearchByName(ctx context.Context, keyword string) ([]*UserSearchResult, error)
+	FindByAccountName(ctx context.Context, accountName string) ([]*UserSearchResult, error)
+	FindByPublicID(ctx context.Context, publicID string) ([]*UserSearchResult, error)
 }

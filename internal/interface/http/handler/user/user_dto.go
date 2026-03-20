@@ -55,3 +55,13 @@ type GetUserProfileResponse struct {
 	Avatar    string   `json:"avatar"`
 	RoleCodes []string `json:"role_codes"`
 }
+
+// UserSearchResponse is returned for user search results.
+type UserSearchResponse struct {
+	UserID           int64   `json:"user_id"`
+	Name             string  `json:"name"`
+	Avatar           string  `json:"avatar"`
+	PublicID         string  `json:"public_id"`
+	Account          string  `json:"account"`
+	FriendshipStatus *string `json:"friendship_status,omitempty"`
+}
