@@ -55,7 +55,6 @@ DROP TABLE IF EXISTS goat.public.chat_records CASCADE;
 DROP TABLE IF EXISTS goat.public.chat_members CASCADE;
 DROP TABLE IF EXISTS goat.public.chat_rooms CASCADE;
 
-
 -- Participants
 DROP TABLE IF EXISTS goat.public.participant_systems CASCADE;
 DROP TABLE IF EXISTS goat.public.participant_agents CASCADE;
@@ -93,7 +92,6 @@ DROP TYPE IF EXISTS invitation_status;
 DROP TYPE IF EXISTS chat_message_type;
 DROP TYPE IF EXISTS chat_member_role;
 DROP TYPE IF EXISTS chat_room_type;
-
 
 -- Participants
 DROP TYPE IF EXISTS participant_type;

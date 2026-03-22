@@ -14,7 +14,7 @@ import (
 )
 
 var signedPreKeyTable = postgres.Table{
-	Name: "public.user_signed_prekeys",
+	Name: "public.user_signed_pre_keys",
 	Columns: []string{
 		"id", "user_id", "device_id", "key_id", "public_key", "signature",
 		"is_active", "created_at", "expires_at",

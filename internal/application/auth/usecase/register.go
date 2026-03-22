@@ -16,6 +16,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/userrole"
 	"github.com/gofrs/uuid"
 )
 
@@ -35,6 +36,7 @@ type RegisterUseCase struct {
 	hasher             security.Hasher
 	accountRepo        account.Repository
 	userRepo           user.Repository
+	userRoleRepo       userrole.Repository
 	verificationStore  port.VerificationStore
 	emailService       appEmail.EmailService
 	mailBuilderFactory func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder
@@ -45,6 +47,7 @@ func NewRegisterUseCase(
 	hasher security.Hasher,
 	accountRepo account.Repository,
 	userRepo user.Repository,
+	userRoleRepo userrole.Repository,
 	verificationStore port.VerificationStore,
 	emailService appEmail.EmailService,
 	mailBuilderFactory func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder,
@@ -54,6 +57,7 @@ func NewRegisterUseCase(
 		hasher:             hasher,
 		accountRepo:        accountRepo,
 		userRepo:           userRepo,
+		userRoleRepo:       userRoleRepo,
 		verificationStore:  verificationStore,
 		emailService:       emailService,
 		mailBuilderFactory: mailBuilderFactory,
@@ -110,6 +114,26 @@ func (uc *RegisterUseCase) Execute(
 		}
 	}
 
+	// Create a user with the provided display name
+	newUser := user.NewUser(accountId, input.Data.Name)
+	userID, err := uc.userRepo.Create(ctx, newUser)
+	if err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	// Assign default roles
+	for _, code := range newUser.RoleCodes {
+		if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
+			return RegisterOutput{}, ErrRegisterFailed
+		}
+	}
+
+	// Link user to account
+	newAccount.AddUser(userID)
+	if err := uc.accountRepo.Update(ctx, newAccount); err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
 	// Generate verification token
 	token, err := generateVerificationToken()
 	if err != nil {
@@ -124,7 +148,7 @@ func (uc *RegisterUseCase) Execute(
 
 	// Build, verify URL and send email
 	verifyURL := fmt.Sprintf("%s/api/auth/verify-email?token=%s", conf.Email.BaseURL, token)
-	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Name, verifyURL)
+	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Account, verifyURL)
 	if err := uc.emailService.Send(ctx, builder); err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}

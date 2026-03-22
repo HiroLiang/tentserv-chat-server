@@ -73,6 +73,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.PwdHasher,
 			deps.AccountRepo,
 			deps.UserRepo,
+			deps.UserRoleRepo,
 			deps.VerificationStore,
 			deps.EmailService,
 			func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder {

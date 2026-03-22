@@ -11,11 +11,12 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/userotpprekey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
+	"github.com/gofrs/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
 var otpPreKeyTable = postgres.Table{
-	Name: "public.user_one_time_prekeys",
+	Name: "public.user_one_time_pre_keys",
 	Columns: []string{
 		"id", "user_id", "device_id", "key_id", "public_key", "uploaded_at",
 	},
@@ -40,13 +41,13 @@ func (r *OTPPreKeyRepository) ConsumeOne(
 ) (*userotpprekey.UserOTPPreKey, error) {
 	const query = `
 WITH victim AS (
-    SELECT id FROM public.user_one_time_prekeys
+    SELECT id FROM public.user_one_time_pre_keys
     WHERE user_id = $1 AND device_id = $2
     LIMIT 1 FOR UPDATE SKIP LOCKED
 )
-DELETE FROM public.user_one_time_prekeys
+DELETE FROM public.user_one_time_pre_keys
 USING victim
-WHERE public.user_one_time_prekeys.id = victim.id
+WHERE public.user_one_time_pre_keys.id = victim.id
 RETURNING id, user_id, device_id, key_id, public_key, uploaded_at`
 
 	db := r.GetDB(ctx)
@@ -88,7 +89,7 @@ func (r *OTPPreKeyRepository) CountAvailable(
 	query, args, err := postgres.Builder.
 		Select("COUNT(*)").
 		From(otpPreKeyTable.Name).
-		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": uuid.UUID(deviceID)}).
 		ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("build count otp prekeys: %w", err)

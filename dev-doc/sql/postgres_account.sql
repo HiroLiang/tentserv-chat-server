@@ -87,7 +87,7 @@ EXECUTE FUNCTION limit_user_per_account();
 ---- Default data ----
 INSERT INTO goat.public.accounts (public_id, email, account, password, status)
 VALUES (gen_random_uuid(),
-        'hiro@gmail.com',
+        'hiromichi.liang@gmail.com',
         'hiro',
         'eRB2soJ8fMdiEoUmOafq1Q:GhpLtQK6dDnFDumbl1MNs6NU9yOt5QpuXGpIKBG7Az0',
         'active');

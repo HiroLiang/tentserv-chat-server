@@ -10,6 +10,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/useridentitykey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/usersignedprekey"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 )
 
 type UploadSignedPreKeyInput struct {
@@ -43,6 +44,7 @@ func (u *UploadSignedPreKeyUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[UploadSignedPreKeyInput],
 ) (*UploadSignedPreKeyOutput, error) {
+	logger.Log.Info("get device id: " + input.Data.DeviceID)
 	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid device id: %w", err)

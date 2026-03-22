@@ -9,6 +9,7 @@ import (
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
@@ -153,17 +154,19 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	}
 
 	// Send login notification email (fire-and-forget)
-	go func() {
-		bgCtx := context.Background()
-		builder := uc.mailBuilderFactory(
-			string(accountData.Email),
-			accountData.AccountName,
-			input.Data.DeviceID,
-			input.Base.Request.IP.String(),
-			time.Now(),
-		)
-		_ = uc.emailService.Send(bgCtx, builder)
-	}()
+	if config.Env("APP_ENV", "dev") != "dev" {
+		go func() {
+			bgCtx := context.Background()
+			builder := uc.mailBuilderFactory(
+				string(accountData.Email),
+				accountData.AccountName,
+				input.Data.DeviceID,
+				input.Base.Request.IP.String(),
+				time.Now(),
+			)
+			_ = uc.emailService.Send(bgCtx, builder)
+		}()
+	}
 
 	return LoginOutput{TokenPair: tokenPair}, tx.Commit()
 }
