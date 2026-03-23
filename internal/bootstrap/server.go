@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
+	ollamahttp "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/ollama"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -53,6 +54,10 @@ func NewServer(addr string, useCases *UseCases, dependencies *Dependencies) *htt
 	hub, wsRouter := BuildWsComponents(dependencies, useCases)
 	RegisterWsRoutes(r, hub, wsRouter, dependencies)
 
+	// Register Ollama streaming proxy (no auth middleware)
+	ollamaHandler := ollamahttp.NewOllamaChatHandler(dependencies.RedisCache)
+	r.GET("/api/chat/stream", ollamaHandler.Stream)
+
 	// Setting server
 	return &http.Server{
 		Addr:           addr,
@@ -85,7 +90,7 @@ func initConfig(r *gin.Engine) {
 			return false
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Accept", "Content-Type", "Authorization", "X-Requested-With", "X-Device-ID"},
+		AllowHeaders:     []string{"Origin", "Accept", "Content-Type", "Authorization", "X-Requested-With", "X-Device-ID", "X-Chat-Api-Key"},
 		ExposeHeaders:    []string{"Content-Length", "Authorization", "X-Request-Id", "X-Device-ID"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
