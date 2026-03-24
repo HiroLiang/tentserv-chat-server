@@ -1,7 +1,7 @@
 databases:
   postgres:
     driver: pgx
-    dsn: "postgres://root:1234@localhost:5432/goat?sslmode=disable"
+    dsn: "postgres://root:1234@localhost:5432/tentserv?sslmode=disable"
     pool:
       max_open_conns: 30
       max_idle_conns: 15

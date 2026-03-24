@@ -19,7 +19,7 @@ func TestRoleRepository_FindByCode(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewRoleRepository(sqlx.NewDb(db, "postgres"))
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, code, name, description, created_by, created_at, updated_at FROM goat.public.roles WHERE code = $1 LIMIT 1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, code, name, description, created_by, created_at, updated_at FROM public.roles WHERE code = $1 LIMIT 1`)).
 		WithArgs("user").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "description", "created_by", "created_at", "updated_at"}).
 			AddRow(1, "user", "User", nil, int64(1), time.Now(), time.Now()))
@@ -37,7 +37,7 @@ func TestRoleRepository_Create_Duplicate(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewRoleRepository(sqlx.NewDb(db, "postgres"))
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO goat.public.roles (code,name,description,created_by) VALUES ($1,$2,$3,$4)`)).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO public.roles (code,name,description,created_by) VALUES ($1,$2,$3,$4)`)).
 		WithArgs("user", "User", (*string)(nil), (*int64)(nil)).
 		WillReturnError(errors.New(`duplicate key value violates unique constraint "roles_code_key"`))
 
@@ -49,7 +49,7 @@ func TestRoleRepository_FindAll(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewRoleRepository(sqlx.NewDb(db, "postgres"))
 
-	mock.ExpectQuery(`SELECT .* FROM goat.public.roles`).
+	mock.ExpectQuery(`SELECT .* FROM public.roles`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "description", "created_by", "created_at", "updated_at"}).
 			AddRow(1, "user", "User", nil, int64(1), time.Now(), time.Now()).
 			AddRow(2, "admin", "Administrator", nil, int64(1), time.Now(), time.Now()))
@@ -66,7 +66,7 @@ func TestRoleRepository_Update_NotFound(t *testing.T) {
 	repo := NewRoleRepository(sqlx.NewDb(db, "postgres"))
 
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`UPDATE goat.public.roles SET code = $1, name = $2, description = $3, created_by = $4, updated_at = now() WHERE id = $5 RETURNING id`,
+		`UPDATE public.roles SET code = $1, name = $2, description = $3, created_by = $4, updated_at = now() WHERE id = $5 RETURNING id`,
 	)).
 		WithArgs("user", "User", (*string)(nil), (*int64)(nil), int64(999)).
 		WillReturnError(sql.ErrNoRows)

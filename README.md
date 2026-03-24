@@ -21,17 +21,17 @@ A Go REST API + WebSocket server for the Tentserv Chat desktop application. Pers
 ### 1. Start dependencies
 
 ```shell
-docker network create goat-net
+docker network create tentserv-net
 
 # Redis (optional: add -v ~/data/redis:/data for persistence)
-docker run -d --name redis --network goat-net \
+docker run -d --name redis --network tentserv-net \
   -p 6379:6379 \
   docker.io/library/redis:8 \
   redis-server --appendonly yes --requirepass "1234"
 
-# PostgreSQL (optional: add -v ~/data/postgres:/data for persistence)
-docker run -d --name postgres --network goat-net \
-  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=goat \
+# Postgres (optional: add -v ~/data/postgres:/data for persistence)
+docker run -d --name postgres --network tentserv-net \
+  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=tentserv \
   -p 5432:5432 \
   docker.io/library/postgres:18
 ```
@@ -102,10 +102,10 @@ go test ./internal/path/to/pkg/... -v -run TestFunctionName
 
 ```shell
 # Build image
-docker build -t goat-server:latest .
+docker build -t tentserv-chat-server:latest .
 
 # Run container (uses goat-net network for DB/Redis access)
-docker run -d --name goat-server --network goat-net \
+docker run -d --name tentserv-chat-server --network goat-net \
   -p 8080:8080 \
   -v ./config:/app/config:ro \
   -v .env:/app/.env:ro \

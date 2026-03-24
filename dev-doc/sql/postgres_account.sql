@@ -6,7 +6,7 @@ CREATE TYPE account_status AS ENUM ('active','inactive','banned','applying', 'de
 ---- Tables ----
 
 -- Accounts
-CREATE TABLE IF NOT EXISTS goat.public.accounts
+CREATE TABLE IF NOT EXISTS public.accounts
 (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     public_id  UUID           NOT NULL UNIQUE,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS goat.public.accounts
 );
 
 -- Users
-CREATE TABLE IF NOT EXISTS goat.public.users
+CREATE TABLE IF NOT EXISTS public.users
 (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     account_id BIGINT REFERENCES accounts (id) ON DELETE CASCADE,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS goat.public.users
 );
 
 -- Roles Table
-CREATE TABLE IF NOT EXISTS goat.public.roles
+CREATE TABLE IF NOT EXISTS public.roles
 (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code        TEXT      NOT NULL UNIQUE, -- machine name
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS goat.public.roles
 );
 
 -- Roles Users Table
-CREATE TABLE IF NOT EXISTS goat.public.users_roles
+CREATE TABLE IF NOT EXISTS public.users_roles
 (
     user_id BIGINT REFERENCES users (id) ON DELETE CASCADE,
     role_id BIGINT REFERENCES roles (id) ON DELETE CASCADE,
@@ -80,12 +80,12 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_limit_user
     BEFORE INSERT
-    ON goat.public.users
+    ON public.users
     FOR EACH ROW
 EXECUTE FUNCTION limit_user_per_account();
 
 ---- Default data ----
-INSERT INTO goat.public.accounts (public_id, email, account, password, status)
+INSERT INTO public.accounts (public_id, email, account, password, status)
 VALUES (gen_random_uuid(),
         'hiromichi.liang@gmail.com',
         'hiro',
@@ -93,16 +93,16 @@ VALUES (gen_random_uuid(),
         'active');
 
 
-INSERT INTO goat.public.users (account_id, name)
+INSERT INTO public.users (account_id, name)
 VALUES (1, 'Hiro Liang');
 
-INSERT INTO goat.public.roles (code, name, description, created_by)
+INSERT INTO public.roles (code, name, description, created_by)
 VALUES ('admin', 'Administrator', 'Manager of this platform', 1),
        ('user', 'User', 'Authorized user', 1),
        ('vendor', 'Vendor', 'Vendor of service', 1),
        ('client', 'Client', 'Unauthed client', 1);
 
-INSERT INTO goat.public.users_roles (user_id, role_id)
+INSERT INTO public.users_roles (user_id, role_id)
 VALUES (1, 1),
        (1, 2),
        (1, 3);

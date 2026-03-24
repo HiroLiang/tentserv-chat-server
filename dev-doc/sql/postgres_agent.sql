@@ -12,7 +12,7 @@ CREATE TYPE agent_engine AS ENUM ('gguf', 'onnx', 'api', 'cloud', 'mlc', 'webGPU
 ---- Tables ----
 
 -- Agents Table
-CREATE TABLE IF NOT EXISTS goat.public.agents
+CREATE TABLE IF NOT EXISTS public.agents
 (
     id         BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     name       TEXT         NOT NULL,

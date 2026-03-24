@@ -242,7 +242,7 @@ func (r *AccountRepo) getAccountDevices(ctx context.Context, accountID shared.Ac
 var _ account.Repository = (*AccountRepo)(nil)
 
 var Table = postgres.Table{
-	Name: "goat.public.accounts",
+	Name: "public.accounts",
 	Columns: []string{
 		"id",
 		"public_id",
@@ -257,7 +257,7 @@ var Table = postgres.Table{
 }
 
 var JoinTable = postgres.Table{
-	Name: "goat.public.accounts_devices",
+	Name: "public.accounts_devices",
 	Columns: []string{
 		"account_id",
 		"device_id",

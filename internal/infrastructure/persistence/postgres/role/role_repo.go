@@ -15,7 +15,7 @@ import (
 )
 
 var Table = postgres.Table{
-	Name: "goat.public.roles",
+	Name: "public.roles",
 	Columns: []string{
 		"id",
 		"code",

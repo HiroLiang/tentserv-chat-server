@@ -8,6 +8,7 @@ import (
 	deviceUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/device/usecase"
 	e2eeUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/usecase"
 	friendshipUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/friendship/usecase"
+	ollamaUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/ollama/usecase"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	userUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
@@ -58,6 +59,8 @@ type UseCases struct {
 	AcceptFriendshipUseCase  *friendshipUseCase.AcceptFriendshipUseCase
 	GetFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase
 	RemoveFriendshipUseCase  *friendshipUseCase.RemoveFriendshipUseCase
+
+	StreamChatUseCase *ollamaUseCase.StreamChatUseCase
 }
 
 func BuildUseCases(deps *Dependencies) *UseCases {
@@ -198,5 +201,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		AcceptFriendshipUseCase:  friendshipUseCase.NewAcceptFriendshipUseCase(deps.Uow, deps.FriendshipRepo),
 		GetFriendRequestsUseCase: friendshipUseCase.NewGetFriendRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
 		RemoveFriendshipUseCase:  friendshipUseCase.NewRemoveFriendshipUseCase(deps.FriendshipRepo),
+
+		StreamChatUseCase: ollamaUseCase.NewStreamChatUseCase(deps.RedisCache),
 	}
 }

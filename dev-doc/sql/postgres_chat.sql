@@ -9,7 +9,7 @@ CREATE TYPE chat_message_type AS ENUM ('text', 'image', 'file', 'icon', 'system'
 ---- Tables ----
 
 -- Chat rooms
-CREATE TABLE IF NOT EXISTS goat.public.chat_rooms
+CREATE TABLE IF NOT EXISTS public.chat_rooms
 (
     id          BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     name        TEXT,
@@ -24,11 +24,11 @@ CREATE TABLE IF NOT EXISTS goat.public.chat_rooms
 );
 
 -- Chat members
-CREATE TABLE IF NOT EXISTS goat.public.chat_members
+CREATE TABLE IF NOT EXISTS public.chat_members
 (
     id             BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    room_id        BIGINT           NOT NULL REFERENCES goat.public.chat_rooms (id) ON DELETE NO ACTION,
-    participant_id BIGINT           NOT NULL REFERENCES goat.public.participants (id) ON DELETE NO ACTION,
+    room_id        BIGINT           NOT NULL REFERENCES public.chat_rooms (id) ON DELETE NO ACTION,
+    participant_id BIGINT           NOT NULL REFERENCES public.participants (id) ON DELETE NO ACTION,
     role           chat_member_role NOT NULL DEFAULT 'member',
     is_muted       BOOLEAN          NOT NULL DEFAULT false,
     is_delete      BOOLEAN          NOT NULL DEFAULT false,
@@ -40,11 +40,11 @@ CREATE TABLE IF NOT EXISTS goat.public.chat_members
     UNIQUE (room_id, participant_id)
 );
 
-CREATE INDEX idx_chat_group_members_room_participant ON goat.public.chat_members (room_id, participant_id);
-CREATE INDEX idx_chat_group_members_participant ON goat.public.chat_members (participant_id);
+CREATE INDEX idx_chat_group_members_room_participant ON public.chat_members (room_id, participant_id);
+CREATE INDEX idx_chat_group_members_participant ON public.chat_members (participant_id);
 
 -- Chat records
-CREATE TABLE IF NOT EXISTS goat.public.chat_records
+CREATE TABLE IF NOT EXISTS public.chat_records
 (
     id           BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     room_id      BIGINT            NOT NULL REFERENCES chat_rooms (id) ON DELETE CASCADE,
@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS goat.public.chat_records
     updated_at   TIMESTAMP         NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_chat_records_room_created ON goat.public.chat_records (room_id, created_at DESC);
-CREATE INDEX idx_chat_records_room_sender ON goat.public.chat_records (room_id, sender_id);
+CREATE INDEX idx_chat_records_room_created ON public.chat_records (room_id, created_at DESC);
+CREATE INDEX idx_chat_records_room_sender ON public.chat_records (room_id, sender_id);
 
 ---- Trigger ----
 
@@ -73,14 +73,14 @@ DECLARE
 BEGIN
     SELECT r.max_members
     INTO max_limit
-    FROM goat.public.chat_rooms r
+    FROM public.chat_rooms r
     WHERE r.id = NEW.room_id
         FOR UPDATE;
 
     SELECT count(1)
     INTO current_count
-    FROM goat.public.chat_members m
-             JOIN goat.public.participants p ON p.id = m.participant_id
+    FROM public.chat_members m
+             JOIN public.participants p ON p.id = m.participant_id
     WHERE m.room_id = NEW.room_id
       AND p.type != 'system';
 
@@ -94,6 +94,6 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_limit_member
     BEFORE INSERT
-    ON goat.public.chat_members
+    ON public.chat_members
     FOR EACH ROW
 EXECUTE FUNCTION limit_member_of_room();

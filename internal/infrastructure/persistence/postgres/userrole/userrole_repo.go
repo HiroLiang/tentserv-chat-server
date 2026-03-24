@@ -14,7 +14,7 @@ import (
 )
 
 var JoinTable = postgres.Table{
-	Name: "goat.public.users_roles",
+	Name: "public.users_roles",
 	Columns: []string{
 		"user_id",
 		"role_id",
@@ -22,7 +22,7 @@ var JoinTable = postgres.Table{
 }
 
 var RolesTable = postgres.Table{
-	Name:    "goat.public.roles",
+	Name:    "public.roles",
 	Columns: postgresRole.Table.Columns,
 }
 
@@ -39,21 +39,21 @@ func NewUserRoleRepository(db *sqlx.DB) *UserRoleRepository {
 }
 
 func (r *UserRoleRepository) Assign(ctx context.Context, userID shared.UserID, roleCode role.Code) error {
-	query := `INSERT INTO goat.public.users_roles (user_id, role_id)
-SELECT $1, id FROM goat.public.roles WHERE code = $2
+	query := `INSERT INTO public.users_roles (user_id, role_id)
+SELECT $1, id FROM public.roles WHERE code = $2
 ON CONFLICT DO NOTHING`
 	return postgres.Exec(ctx, r.GetDB(ctx), query, userID, roleCode)
 }
 
 func (r *UserRoleRepository) Revoke(ctx context.Context, userID shared.UserID, roleCode role.Code) error {
-	query := `DELETE FROM goat.public.users_roles
-WHERE user_id = $1 AND role_id = (SELECT id FROM goat.public.roles WHERE code = $2)`
+	query := `DELETE FROM public.users_roles
+WHERE user_id = $1 AND role_id = (SELECT id FROM public.roles WHERE code = $2)`
 	return postgres.Exec(ctx, r.GetDB(ctx), query, userID, roleCode)
 }
 
 func (r *UserRoleRepository) Exists(ctx context.Context, userID shared.UserID, roleCode role.Code) bool {
-	query := `SELECT 1 FROM goat.public.users_roles ur
-JOIN goat.public.roles ro ON ro.id = ur.role_id
+	query := `SELECT 1 FROM public.users_roles ur
+JOIN public.roles ro ON ro.id = ur.role_id
 WHERE ur.user_id = $1 AND ro.code = $2`
 	return postgres.Exists(ctx, r.GetDB(ctx), query, userID, roleCode)
 }
@@ -64,8 +64,8 @@ func (r *UserRoleRepository) FindRolesByUser(ctx context.Context, userID shared.
 			"ro.id", "ro.code", "ro.name", "ro.description",
 			"ro.created_by", "ro.created_at", "ro.updated_at",
 		).
-		From("goat.public.users_roles ur").
-		Join("goat.public.roles ro ON ro.id = ur.role_id").
+		From("public.users_roles ur").
+		Join("public.roles ro ON ro.id = ur.role_id").
 		Where(squirrel.Eq{"ur.user_id": userID}).
 		ToSql()
 	if err != nil {

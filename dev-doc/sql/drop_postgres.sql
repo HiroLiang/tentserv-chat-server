@@ -1,16 +1,16 @@
 ---- Drop Trigger Query ----
 
 -- Chats
-DROP TRIGGER IF EXISTS trg_limit_member ON goat.public.chat_members;
+DROP TRIGGER IF EXISTS trg_limit_member ON public.chat_members;
 
 -- Accounts
-DROP TRIGGER IF EXISTS trg_limit_user ON goat.public.users;
+DROP TRIGGER IF EXISTS trg_limit_user ON public.users;
 
 ---- Drop Indexes Query ----
 
 -- Friendship
-DROP TRIGGER IF EXISTS idx_user_friendships_friend_id ON goat.public.chat_members;
-DROP TRIGGER IF EXISTS idx_user_friendships_user_id ON goat.public.chat_members;
+DROP TRIGGER IF EXISTS idx_user_friendships_friend_id ON public.chat_members;
+DROP TRIGGER IF EXISTS idx_user_friendships_user_id ON public.chat_members;
 
 -- X3DH
 DROP INDEX IF EXISTS idx_member_sender_keys_member;
@@ -36,49 +36,49 @@ DROP INDEX IF EXISTS idx_participants_type;
 ---- Drop Tables Query ----
 
 -- Friendship
-DROP TABLE IF EXISTS goat.public.user_friendships CASCADE;
+DROP TABLE IF EXISTS public.user_friendships CASCADE;
 
 -- X3DH
-DROP TABLE IF EXISTS goat.public.user_identity_keys CASCADE;
-DROP TABLE IF EXISTS goat.public.user_signed_pre_keys CASCADE;
-DROP TABLE IF EXISTS goat.public.user_one_time_pre_keys CASCADE;
-DROP TABLE IF EXISTS goat.public.member_sender_keys CASCADE;
+DROP TABLE IF EXISTS public.user_identity_keys CASCADE;
+DROP TABLE IF EXISTS public.user_signed_pre_keys CASCADE;
+DROP TABLE IF EXISTS public.user_one_time_pre_keys CASCADE;
+DROP TABLE IF EXISTS public.member_sender_keys CASCADE;
 
 -- Delivery queue
-DROP TABLE IF EXISTS goat.public.delivery_queue CASCADE;
+DROP TABLE IF EXISTS public.delivery_queue CASCADE;
 
 -- Chat invitations
-DROP TABLE IF EXISTS goat.public.chat_invitations CASCADE;
+DROP TABLE IF EXISTS public.chat_invitations CASCADE;
 
 -- Chats
-DROP TABLE IF EXISTS goat.public.chat_records CASCADE;
-DROP TABLE IF EXISTS goat.public.chat_members CASCADE;
-DROP TABLE IF EXISTS goat.public.chat_rooms CASCADE;
+DROP TABLE IF EXISTS public.chat_records CASCADE;
+DROP TABLE IF EXISTS public.chat_members CASCADE;
+DROP TABLE IF EXISTS public.chat_rooms CASCADE;
 
 -- Participants
-DROP TABLE IF EXISTS goat.public.participant_systems CASCADE;
-DROP TABLE IF EXISTS goat.public.participant_agents CASCADE;
-DROP TABLE IF EXISTS goat.public.participant_users CASCADE;
-DROP TABLE IF EXISTS goat.public.participants CASCADE;
-DROP TABLE IF EXISTS goat.public.participant_system_types CASCADE;
+DROP TABLE IF EXISTS public.participant_systems CASCADE;
+DROP TABLE IF EXISTS public.participant_agents CASCADE;
+DROP TABLE IF EXISTS public.participant_users CASCADE;
+DROP TABLE IF EXISTS public.participants CASCADE;
+DROP TABLE IF EXISTS public.participant_system_types CASCADE;
 
 -- Agents
-DROP TABLE IF EXISTS goat.public.agents CASCADE;
+DROP TABLE IF EXISTS public.agents CASCADE;
 
 -- Emails
-DROP TABLE IF EXISTS goat.public.email_logs CASCADE;
+DROP TABLE IF EXISTS public.email_logs CASCADE;
 
 -- Devices
-DROP TABLE IF EXISTS goat.public.account_login_events CASCADE;
-DROP TABLE IF EXISTS goat.public.account_sessions CASCADE;
-DROP TABLE IF EXISTS goat.public.accounts_devices CASCADE;
-DROP TABLE IF EXISTS goat.public.devices CASCADE;
+DROP TABLE IF EXISTS public.account_login_events CASCADE;
+DROP TABLE IF EXISTS public.account_sessions CASCADE;
+DROP TABLE IF EXISTS public.accounts_devices CASCADE;
+DROP TABLE IF EXISTS public.devices CASCADE;
 
 -- Accounts
-DROP TABLE IF EXISTS goat.public.users_roles CASCADE;
-DROP TABLE IF EXISTS goat.public.roles CASCADE;
-DROP TABLE IF EXISTS goat.public.users CASCADE;
-DROP TABLE IF EXISTS goat.public.accounts CASCADE;
+DROP TABLE IF EXISTS public.users_roles CASCADE;
+DROP TABLE IF EXISTS public.roles CASCADE;
+DROP TABLE IF EXISTS public.users CASCADE;
+DROP TABLE IF EXISTS public.accounts CASCADE;
 
 ---- Drop Enums Query ----
 
