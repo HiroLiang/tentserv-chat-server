@@ -128,8 +128,8 @@ var searchColumns = []string{
 
 func (r *UserRepository) searchJoinQuery(ctx context.Context, cond squirrel.Sqlizer) ([]*user.UserSearchResult, error) {
 	query, args, err := squirrel.Select(searchColumns...).
-		From("goat.public.users u").
-		Join("goat.public.accounts a ON u.account_id = a.id").
+		From("public.users u").
+		Join("public.accounts a ON u.account_id = a.id").
 		Where(cond).
 		PlaceholderFormat(squirrel.Dollar).
 		ToSql()
@@ -222,7 +222,7 @@ func isUniqueViolation(err error) bool {
 }
 
 var Table = postgres.Table{
-	Name: "goat.public.users",
+	Name: "public.users",
 	Columns: []string{
 		"id",
 		"account_id",
@@ -234,7 +234,7 @@ var Table = postgres.Table{
 }
 
 var JoinTable = postgres.Table{
-	Name: "goat.public.users_roles",
+	Name: "public.users_roles",
 	Columns: []string{
 		"user_id",
 		"role_id",

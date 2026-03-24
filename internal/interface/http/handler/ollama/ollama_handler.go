@@ -2,40 +2,15 @@ package ollama
 
 import (
 	"bufio"
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
-	"time"
 
-	"github.com/HiroLiang/tentserv-chat-server/internal/domain/cache"
+	ollamaUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/ollama/usecase"
 	"github.com/gin-gonic/gin"
 )
-
-const historyTTL = 24 * time.Hour
-
-type OllamaChatHandler struct {
-	cache cache.Cache
-}
-
-func NewOllamaChatHandler(cache cache.Cache) *OllamaChatHandler {
-	return &OllamaChatHandler{cache: cache}
-}
-
-type ollamaMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type ollamaRequest struct {
-	Model    string          `json:"model"`
-	Messages []ollamaMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
-}
 
 type ollamaChunk struct {
 	Choices []struct {
@@ -45,20 +20,15 @@ type ollamaChunk struct {
 	} `json:"choices"`
 }
 
-func trimHistory(messages []ollamaMessage, n int) []ollamaMessage {
-	if len(messages) <= n {
-		return messages
-	}
-	return messages[len(messages)-n:]
+type OllamaChatHandler struct {
+	streamChatUseCase *ollamaUseCase.StreamChatUseCase
+}
+
+func NewOllamaChatHandler(uc *ollamaUseCase.StreamChatUseCase) *OllamaChatHandler {
+	return &OllamaChatHandler{streamChatUseCase: uc}
 }
 
 func (h *OllamaChatHandler) Stream(c *gin.Context) {
-	apiKey := os.Getenv("CHAT_API_KEY")
-	if apiKey == "" || c.GetHeader("X-Chat-Api-Key") != apiKey {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
 	message := c.Query("message")
 	sessionID := c.Query("session_id")
 	model := c.Query("model")
@@ -68,42 +38,23 @@ func (h *OllamaChatHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
-
-	history, err := h.loadHistory(ctx, sessionID)
-	if err != nil {
-		history = []ollamaMessage{}
-	}
-	history = trimHistory(history, 3)
-
-	var messages []ollamaMessage
-	if systemPrompt := os.Getenv("OLLAMA_SYSTEM_PROMPT"); systemPrompt != "" {
-		messages = append(messages, ollamaMessage{Role: "system", Content: systemPrompt})
-	}
-	messages = append(messages, history...)
-	messages = append(messages, ollamaMessage{Role: "user", Content: message})
-
-	ollamaURL := fmt.Sprintf("%s/v1/chat/completions", os.Getenv("OLLAMA_URL"))
-	reqBody, _ := json.Marshal(ollamaRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   true,
+	output, err := h.streamChatUseCase.Execute(c.Request.Context(), ollamaUseCase.StreamChatInput{
+		Message:   message,
+		SessionID: sessionID,
+		Model:     model,
+		APIKey:    c.GetHeader("X-Chat-Api-Key"),
 	})
-
-	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaURL, bytes.NewReader(reqBody))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upstream request"})
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(upstreamReq)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach upstream"})
+		switch err {
+		case ollamaUseCase.ErrUnauthorized:
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		default:
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach upstream"})
+		}
 		return
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
+		if err := output.Stream.Close(); err != nil {
 			log.Printf("ollama: failed to close response body: %v", err)
 		}
 	}()
@@ -114,7 +65,7 @@ func (h *OllamaChatHandler) Stream(c *gin.Context) {
 	c.Status(http.StatusOK)
 
 	var assistantContent strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(output.Stream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -144,29 +95,5 @@ func (h *OllamaChatHandler) Stream(c *gin.Context) {
 		}
 	}
 
-	if assistantContent.Len() > 0 {
-		history = append(history, ollamaMessage{Role: "user", Content: message})
-		history = append(history, ollamaMessage{Role: "assistant", Content: assistantContent.String()})
-		_ = h.saveHistory(ctx, sessionID, trimHistory(history, 3))
-	}
-}
-
-func (h *OllamaChatHandler) loadHistory(ctx context.Context, sessionID string) ([]ollamaMessage, error) {
-	data, ok, err := h.cache.Get(ctx, "ollama:session:"+sessionID)
-	if err != nil || !ok {
-		return nil, err
-	}
-	var messages []ollamaMessage
-	if err := json.Unmarshal(data, &messages); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-func (h *OllamaChatHandler) saveHistory(ctx context.Context, sessionID string, messages []ollamaMessage) error {
-	data, err := json.Marshal(messages)
-	if err != nil {
-		return err
-	}
-	return h.cache.Set(ctx, "ollama:session:"+sessionID, data, historyTTL)
+	_ = output.CommitFunc(c.Request.Context(), assistantContent.String())
 }

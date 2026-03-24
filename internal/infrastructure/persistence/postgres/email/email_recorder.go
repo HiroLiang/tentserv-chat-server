@@ -12,7 +12,7 @@ import (
 )
 
 var Table = postgres.Table{
-	Name: "goat.public.email_logs",
+	Name: "public.email_logs",
 	Columns: []string{
 		"id",
 		"sender",

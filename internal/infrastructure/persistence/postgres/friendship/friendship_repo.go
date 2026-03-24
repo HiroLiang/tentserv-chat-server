@@ -19,7 +19,7 @@ type FriendshipRepository struct {
 var _ friendship.Repository = (*FriendshipRepository)(nil)
 
 var Table = postgres.Table{
-	Name: "goat.public.user_friendships",
+	Name: "public.user_friendships",
 	Columns: []string{
 		"id",
 		"user_id",

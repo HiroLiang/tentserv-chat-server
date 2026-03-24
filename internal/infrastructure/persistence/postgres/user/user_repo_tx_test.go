@@ -24,7 +24,7 @@ func TestUserRepository_Create_Success(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewUserRepository(sqlx.NewDb(db, "postgres"))
 
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO goat.public.users (account_id,name) VALUES ($1,$2) RETURNING id`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO public.users (account_id,name) VALUES ($1,$2) RETURNING id`)).
 		WithArgs(int64(1), "hiro").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(10))
 
@@ -40,7 +40,7 @@ func TestUserRepository_Create_Duplicate(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewUserRepository(sqlx.NewDb(db, "postgres"))
 
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO goat.public.users (account_id,name) VALUES ($1,$2) RETURNING id`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO public.users (account_id,name) VALUES ($1,$2) RETURNING id`)).
 		WithArgs(int64(1), "hiro").
 		WillReturnError(errors.New(`duplicate key value violates unique constraint "users_account_id_key"`))
 
@@ -55,11 +55,11 @@ func TestUserRepository_FindByID(t *testing.T) {
 	repo := NewUserRepository(sqlx.NewDb(db, "postgres"))
 
 	now := time.Now()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, account_id, name, avatar, created_at, updated_at FROM goat.public.users WHERE id = $1 LIMIT 1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, account_id, name, avatar, created_at, updated_at FROM public.users WHERE id = $1 LIMIT 1`)).
 		WithArgs(int64(10)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "name", "avatar", "created_at", "updated_at"}).
 			AddRow(10, 1, "hiro", nil, now, now))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT roles.code FROM goat.public.users_roles JOIN roles ON roles.id = users_roles.role_id WHERE user_id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT roles.code FROM public.users_roles JOIN roles ON roles.id = users_roles.role_id WHERE user_id = $1`)).
 		WithArgs(int64(10)).
 		WillReturnRows(sqlmock.NewRows([]string{"code"}))
 

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
-	ollamahttp "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/ollama"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -53,10 +52,6 @@ func NewServer(addr string, useCases *UseCases, dependencies *Dependencies) *htt
 	// Register WebSocket routes
 	hub, wsRouter := BuildWsComponents(dependencies, useCases)
 	RegisterWsRoutes(r, hub, wsRouter, dependencies)
-
-	// Register Ollama streaming proxy (no auth middleware)
-	ollamaHandler := ollamahttp.NewOllamaChatHandler(dependencies.RedisCache)
-	r.GET("/api/chat/stream", ollamaHandler.Stream)
 
 	// Setting server
 	return &http.Server{

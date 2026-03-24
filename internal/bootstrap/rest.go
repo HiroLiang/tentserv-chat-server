@@ -6,6 +6,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/e2ee"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/health"
+	ollamaHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/ollama"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/user"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
@@ -99,4 +100,9 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 	// Future: admin-only participant routes
 	// adminGroup := group.Group("/admin/participant", middleware.RequireAuthMiddleware(), middleware.RequireRoleMiddleware(role.Admin))
 	// participantHandler.RegisterAdminParticipantRoutes(adminGroup)
+
+	// Ollama streaming proxy — protected by GlobalRateLimit + IPRateLimit from group middleware
+	// Authentication uses X-Chat-Api-Key header (not JWT), so RequireAuthMiddleware is not applied
+	var ollamaStreamHandler = ollamaHandler.NewOllamaChatHandler(useCases.StreamChatUseCase)
+	group.GET("/ollama/stream", ollamaStreamHandler.Stream)
 }
