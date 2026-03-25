@@ -70,7 +70,7 @@ func initConfig(r *gin.Engine) {
 	r.Use(cors.New(cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 
-			if strings.HasSuffix(origin, "hiroliang.com") {
+			if strings.HasSuffix(origin, ".hiroliang.com") || origin == "https://hiroliang.com" {
 				return true
 			}
 
@@ -84,8 +84,16 @@ func initConfig(r *gin.Engine) {
 
 			return false
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Accept", "Content-Type", "Authorization", "X-Requested-With", "X-Device-ID", "X-Chat-Api-Key"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin",
+			"Accept",
+			"Content-Type",
+			"Authorization",
+			"X-Requested-With",
+			"X-Device-ID",
+			"X-Chat-Api-Key",
+		},
 		ExposeHeaders:    []string{"Content-Length", "Authorization", "X-Request-Id", "X-Device-ID"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
