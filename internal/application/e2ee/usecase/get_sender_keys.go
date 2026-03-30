@@ -10,6 +10,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 )
 
 type GetSenderKeysInput struct {
@@ -30,17 +31,20 @@ type GetSenderKeysUseCase struct {
 	participantRepo     participant.Repository
 	chatMemberRepo      chatmember.Repository
 	memberSenderKeyRepo membersenderkey.Repository
+	distributionRepo    senderkeydistribution.Repository
 }
 
 func NewGetSenderKeysUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
 	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
 ) *GetSenderKeysUseCase {
 	return &GetSenderKeysUseCase{
 		participantRepo:     participantRepo,
 		chatMemberRepo:      chatMemberRepo,
 		memberSenderKeyRepo: memberSenderKeyRepo,
+		distributionRepo:    distributionRepo,
 	}
 }
 
@@ -54,7 +58,7 @@ func (u *GetSenderKeysUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
-	_, err = u.chatMemberRepo.FindByRoomAndParticipant(ctx, chatroom.ID(input.Data.RoomID), callerParticipant.ID)
+	callerMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, chatroom.ID(input.Data.RoomID), callerParticipant.ID)
 	if err != nil {
 		return nil, ErrNotRoomMember
 	}
@@ -83,5 +87,33 @@ func (u *GetSenderKeysUseCase) Execute(
 		})
 	}
 
+	// Record ACK: caller has fetched each sender's key at its current chain_id.
+	// Fire best-effort; do not fail the response if this write fails.
+	go u.recordDistributions(context.Background(), callerMember.ID, senderKeys)
+
 	return &GetSenderKeysOutput{Keys: items}, nil
+}
+
+func (u *GetSenderKeysUseCase) recordDistributions(
+	ctx context.Context,
+	receiverMemberID chatmember.ID,
+	keys []*membersenderkey.MemberSenderKey,
+) {
+	if len(keys) == 0 {
+		return
+	}
+
+	dists := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(keys))
+	for _, sk := range keys {
+		if sk.ChatMemberID == receiverMemberID {
+			continue // do not record self-fetching own key
+		}
+		dists = append(dists, &senderkeydistribution.SenderKeyDistribution{
+			SenderMemberID:   sk.ChatMemberID,
+			ReceiverMemberID: receiverMemberID,
+			ChainID:          int(sk.ChainID),
+		})
+	}
+
+	_ = u.distributionRepo.UpsertBatch(ctx, dists)
 }

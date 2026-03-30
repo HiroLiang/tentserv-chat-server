@@ -14,7 +14,7 @@ type ChatMemberRecord struct {
 	ParticipantID participant.ID  `db:"participant_id"`
 	Role          chatmember.Role `db:"role"`
 	IsMuted       bool            `db:"is_muted"`
-	IsDeleted     bool            `db:"is_delete"`
+	IsDeleted     bool            `db:"is_deleted"`
 	LastReadAt    *time.Time      `db:"last_read_at"`
 	JoinedAt      time.Time       `db:"joined_at"`
 	UpdatedAt     time.Time       `db:"updated_at"`

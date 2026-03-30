@@ -14,5 +14,8 @@ type Repository interface {
 	FindByParticipant(ctx context.Context, participantID participant.ID) ([]*ChatMember, error)
 	Add(ctx context.Context, member *ChatMember) error
 	Update(ctx context.Context, member *ChatMember) error
+	// SoftDelete marks a member as deleted without removing the row.
+	SoftDelete(ctx context.Context, id ID) error
+	// Remove permanently deletes the member row (hard delete).
 	Remove(ctx context.Context, roomID chatroom.ID, participantID participant.ID) error
 }

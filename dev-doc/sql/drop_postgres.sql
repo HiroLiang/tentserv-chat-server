@@ -13,9 +13,12 @@ DROP TRIGGER IF EXISTS idx_user_friendships_friend_id ON public.chat_members;
 DROP TRIGGER IF EXISTS idx_user_friendships_user_id ON public.chat_members;
 
 -- X3DH
+DROP INDEX IF EXISTS idx_sender_key_distributions_receiver;
+DROP INDEX IF EXISTS idx_sender_key_distributions_sender;
 DROP INDEX IF EXISTS idx_member_sender_keys_member;
 DROP INDEX IF EXISTS idx_user_one_time_pre_keys_lookup;
 DROP INDEX IF EXISTS idx_user_signed_pre_keys_active;
+DROP INDEX IF EXISTS idx_chat_direct_keys_room;
 
 -- Delivery queue
 DROP INDEX IF EXISTS idx_delivery_queue_user_status;
@@ -39,10 +42,12 @@ DROP INDEX IF EXISTS idx_participants_type;
 DROP TABLE IF EXISTS public.user_friendships CASCADE;
 
 -- X3DH
+DROP TABLE IF EXISTS public.sender_key_distributions CASCADE;
 DROP TABLE IF EXISTS public.user_identity_keys CASCADE;
 DROP TABLE IF EXISTS public.user_signed_pre_keys CASCADE;
 DROP TABLE IF EXISTS public.user_one_time_pre_keys CASCADE;
 DROP TABLE IF EXISTS public.member_sender_keys CASCADE;
+DROP TABLE IF EXISTS public.chat_direct_keys CASCADE;
 
 -- Delivery queue
 DROP TABLE IF EXISTS public.delivery_queue CASCADE;

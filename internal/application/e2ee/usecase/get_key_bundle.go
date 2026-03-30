@@ -60,9 +60,19 @@ func (u *GetKeyBundleUseCase) Execute(
 		return nil, fmt.Errorf("invalid target user id: %w", err)
 	}
 
-	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid device id: %w", err)
+	var deviceID shared.DeviceID
+	if input.Data.DeviceID == "" {
+		// No device_id supplied: pick the first registered device for the user.
+		keys, err := u.identityKeyRepo.FindByUser(ctx, targetUserID)
+		if err != nil || len(keys) == 0 {
+			return nil, ErrIdentityNotFound
+		}
+		deviceID = keys[0].DeviceID
+	} else {
+		deviceID, err = shared.ParseDeviceID(input.Data.DeviceID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid device id: %w", err)
+		}
 	}
 
 	identityKey, err := u.identityKeyRepo.FindByUserAndDevice(ctx, targetUserID, deviceID)

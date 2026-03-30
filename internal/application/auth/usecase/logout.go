@@ -25,7 +25,9 @@ func (uc *LogoutUseCase) Execute(
 	ctx context.Context,
 	input *appShared.UseCaseInput[LogoutInput],
 ) (LogoutOutput, error) {
-	_ = uc.sessionManager.Revoke(ctx, input.Base.Auth.AccessToken)
+	if err := uc.sessionManager.Revoke(ctx, input.Base.Auth.AccessToken); err != nil {
+		return LogoutOutput{}, ErrLogoutFailed
+	}
 
 	return LogoutOutput{}, nil
 }

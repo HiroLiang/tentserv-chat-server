@@ -36,7 +36,7 @@ func (uc *GetUserParticipantUseCase) Execute(
 		if errors.Is(err, participant.ErrNotFound) {
 			return GetUserParticipantOutput{}, ErrParticipantNotFound
 		}
-		return GetUserParticipantOutput{}, err
+		return GetUserParticipantOutput{}, ErrGetParticipant
 	}
 
 	return GetUserParticipantOutput{

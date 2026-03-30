@@ -31,13 +31,13 @@ var ChatMessageTable = postgres.Table{
 }
 
 type ChatMessageRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ chatmessage.Repository = (*ChatMessageRepository)(nil)
 
 func NewChatMessageRepository(db *sqlx.DB) *ChatMessageRepository {
-	return &ChatMessageRepository{db: db}
+	return &ChatMessageRepository{BaseRepo: postgres.NewBaseRepo(db)}
 }
 
 func (r *ChatMessageRepository) FindByID(ctx context.Context, id chatmessage.ID) (*chatmessage.ChatMessage, error) {
@@ -49,7 +49,7 @@ func (r *ChatMessageRepository) FindByID(ctx context.Context, id chatmessage.ID)
 		return nil, fmt.Errorf("build chat message query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[ChatMessageRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatmessage.ErrNotFound
@@ -75,7 +75,7 @@ func (r *ChatMessageRepository) FindByRoom(
 		return nil, fmt.Errorf("build chat messages query: %w", err)
 	}
 
-	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("scan chat messages: %w", err)
 	}
@@ -111,7 +111,7 @@ func (r *ChatMessageRepository) FindByRoomBefore(
 		return nil, fmt.Errorf("build chat messages before query: %w", err)
 	}
 
-	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("scan chat messages before: %w", err)
 	}
@@ -146,7 +146,7 @@ func (r *ChatMessageRepository) FindLatestByRoom(
 		return nil, fmt.Errorf("build latest message query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[ChatMessageRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatmessage.ErrNotFound
@@ -175,7 +175,7 @@ func (r *ChatMessageRepository) CountByRoomAfter(
 	}
 
 	var count int64
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+	if err := r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count messages after: %w", err)
 	}
 
@@ -194,7 +194,7 @@ func (r *ChatMessageRepository) FindBySender(
 		return nil, fmt.Errorf("build chat messages query: %w", err)
 	}
 
-	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("scan chat messages: %w", err)
 	}
@@ -223,7 +223,7 @@ func (r *ChatMessageRepository) Create(ctx context.Context, msg *chatmessage.Cha
 		return fmt.Errorf("build insert chat message: %w", err)
 	}
 
-	return r.db.QueryRowxContext(ctx, query, args...).Scan(&msg.ID, &msg.CreatedAt)
+	return r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&msg.ID, &msg.CreatedAt)
 }
 
 func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.ChatMessage) error {
@@ -239,7 +239,7 @@ func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.Cha
 		return fmt.Errorf("build update chat message: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *ChatMessageRepository) SoftDelete(ctx context.Context, id chatmessage.ID) error {
@@ -252,5 +252,5 @@ func (r *ChatMessageRepository) SoftDelete(ctx context.Context, id chatmessage.I
 		return fmt.Errorf("build soft delete chat message: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }

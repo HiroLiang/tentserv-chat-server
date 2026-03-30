@@ -37,7 +37,7 @@ func NewAuthHandler(
 func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
 	r.POST("/register", h.register)
 	r.POST("/login", h.login)
-	r.POST("/logout", h.logout, middleware.RequireAuthMiddleware())
+	r.POST("/logout", middleware.RequireAuthMiddleware(), h.logout)
 	r.GET("/profile", middleware.RequireAuthMiddleware(), h.getProfile)
 	r.GET("/verify-email", h.verifyEmail)
 }

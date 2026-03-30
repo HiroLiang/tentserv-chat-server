@@ -21,7 +21,7 @@ var ChatMemberTable = postgres.Table{
 		"participant_id",
 		"role",
 		"is_muted",
-		"is_delete",
+		"is_deleted",
 		"last_read_at",
 		"joined_at",
 		"updated_at",
@@ -30,13 +30,13 @@ var ChatMemberTable = postgres.Table{
 }
 
 type ChatMemberRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ chatmember.Repository = (*ChatMemberRepository)(nil)
 
 func NewChatMemberRepository(db *sqlx.DB) *ChatMemberRepository {
-	return &ChatMemberRepository{db: db}
+	return &ChatMemberRepository{BaseRepo: postgres.NewBaseRepo(db)}
 }
 
 func (r *ChatMemberRepository) FindByID(ctx context.Context, id chatmember.ID) (*chatmember.ChatMember, error) {
@@ -48,7 +48,7 @@ func (r *ChatMemberRepository) FindByID(ctx context.Context, id chatmember.ID) (
 		return nil, fmt.Errorf("build chat member query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[ChatMemberRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ChatMemberRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatmember.ErrNotFound
@@ -72,7 +72,7 @@ func (r *ChatMemberRepository) FindByRoomAndParticipant(
 		return nil, fmt.Errorf("build chat member query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[ChatMemberRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ChatMemberRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatmember.ErrNotFound
@@ -91,20 +91,20 @@ func (r *ChatMemberRepository) FindByParticipant(ctx context.Context, participan
 	return r.findAll(ctx, squirrel.Eq{"participant_id": participantID})
 }
 
+// Add inserts a new member or restores a previously soft-deleted one (C-2: upsert on conflict).
 func (r *ChatMemberRepository) Add(ctx context.Context, m *chatmember.ChatMember) error {
 	rec := toChatMemberRecord(m)
 
 	query, args, err := ChatMemberTable.Insert().
 		Columns("room_id", "participant_id", "role").
 		Values(rec.RoomID, rec.ParticipantID, rec.Role).
-		Suffix("RETURNING id, joined_at").
+		Suffix("ON CONFLICT (room_id, participant_id) DO UPDATE SET is_deleted = false, deleted_at = NULL, joined_at = CASE WHEN chat_members.is_deleted THEN now() ELSE chat_members.joined_at END, updated_at = now() RETURNING id, joined_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert chat member: %w", err)
 	}
 
-	row := r.db.QueryRowContext(ctx, query, args...)
-	if err := row.Scan(&m.ID, &m.JoinedAt); err != nil {
+	if err := r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&m.ID, &m.JoinedAt); err != nil {
 		return fmt.Errorf("insert chat member: %w", err)
 	}
 	return nil
@@ -124,7 +124,20 @@ func (r *ChatMemberRepository) Update(ctx context.Context, m *chatmember.ChatMem
 		return fmt.Errorf("build update chat member: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+func (r *ChatMemberRepository) SoftDelete(ctx context.Context, id chatmember.ID) error {
+	query, args, err := ChatMemberTable.Update().
+		Set("is_deleted", true).
+		Set("deleted_at", squirrel.Expr("now()")).
+		Set("updated_at", squirrel.Expr("now()")).
+		Where(squirrel.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build soft delete chat member: %w", err)
+	}
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *ChatMemberRepository) Remove(ctx context.Context, roomID chatroom.ID, participantID participant.ID) error {
@@ -135,7 +148,7 @@ func (r *ChatMemberRepository) Remove(ctx context.Context, roomID chatroom.ID, p
 		return fmt.Errorf("build remove chat member: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *ChatMemberRepository) findAll(
@@ -150,7 +163,7 @@ func (r *ChatMemberRepository) findAll(
 		return nil, fmt.Errorf("build chat members query: %w", err)
 	}
 
-	records, err := postgres.ScanAll[ChatMemberRecord](ctx, r.db, query, args...)
+	records, err := postgres.ScanAll[ChatMemberRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("scan chat members: %w", err)
 	}

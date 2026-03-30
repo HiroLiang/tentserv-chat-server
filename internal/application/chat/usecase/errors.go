@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrCreateParticipant        = errors.New("failed to create participant")
+	ErrGetParticipant           = errors.New("failed to get participant")
 	ErrParticipantAlreadyExists = errors.New("participant already exists")
 	ErrParticipantNotFound      = errors.New("participant not found")
 
@@ -16,6 +17,12 @@ var (
 	ErrInvitationAlreadyResolved = errors.New("invitation already resolved")
 	ErrNotRoomAdmin              = errors.New("caller is not room owner or admin")
 	ErrNotRoomMember             = errors.New("not a member of this room")
+	ErrUserBlocked               = errors.New("user has blocked you")
+
+	ErrInvalidInvitationAction = errors.New("invalid invitation action")
+	ErrInvalidInvitationType   = errors.New("invitation is not of the expected type")
+	ErrNotInvitee              = errors.New("caller is not the invitee of this invitation")
+	ErrNotAllowed              = errors.New("action not allowed for your role")
 
 	ErrInvalidMessageType = errors.New("invalid message type")
 	ErrSendMessage        = errors.New("failed to send message")

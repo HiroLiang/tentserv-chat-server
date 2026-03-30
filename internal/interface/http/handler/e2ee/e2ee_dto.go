@@ -50,7 +50,7 @@ type KeyBundleResponse struct {
 	OTPPreKeyID     *uint32 `json:"otp_pre_key_id,omitempty"`
 }
 
-// Sender Key
+// Sender Key (used for both direct and group rooms)
 type UploadSenderKeyRequest struct {
 	RoomID              int64  `json:"room_id" binding:"required"`
 	SenderKeyPublic     string `json:"sender_key_public" binding:"required"`
@@ -65,4 +65,12 @@ type SenderKeyItemResponse struct {
 
 type GetSenderKeysResponse struct {
 	Keys []SenderKeyItemResponse `json:"keys"`
+}
+
+// Sender Key Distribution Status
+type GetSenderKeyDistributionStatusResponse struct {
+	// PendingReceivers: member IDs in the room who have not yet fetched my latest sender key.
+	PendingReceivers []int64 `json:"pending_receivers"`
+	// PendingFromMembers: member IDs whose latest sender key I have not yet fetched.
+	PendingFromMembers []int64 `json:"pending_from_members"`
 }

@@ -37,7 +37,12 @@ Clean Architecture with strict unidirectional dependency: `domain → applicatio
 - `*_dto.go` — request/response structs
 - `*_error_translator.go` — maps domain errors → HTTP status codes
 
-**`internal/interface/ws/`** — Gorilla WebSocket handlers for real-time chat and game events.
+**`internal/interface/ws/`** — Gorilla WebSocket real-time layer:
+- `hub.go` — Hub manages `clients map[*Client]bool` and `userClients map[string][]*Client` for per-user message routing; tracks pending ACKs for delivery guarantees
+- `client.go` — One goroutine pair per connection: `ReadPump` dispatches inbound messages to the router; `WritePump` drains the send channel to the socket
+- `router.go` — Registers message-type → handler mappings
+- Handlers: `handler/chat/` (chat messages), `handler/game/` (game moves), `handler/system/` (ACK acknowledgments)
+- `bootstrap/ws.go` starts a background retry scheduler that replays the delivery queue for offline clients
 
 **`internal/bootstrap/`** — DI wiring: `BuildDeps()` constructs all repos/services; `usecases.go` wires use cases.
 

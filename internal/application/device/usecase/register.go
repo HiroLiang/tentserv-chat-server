@@ -65,14 +65,18 @@ func (uc *RegisterUseCase) Execute(
 		input.Data.Name,
 	)
 
-	// Idempotent: return existing if already registered
+	// Idempotent: if device already exists, return existing device
 	if err := uc.deviceRepo.Create(ctx, newDevice); err != nil {
-		switch {
-		case errors.Is(err, device.ErrDeviceAlreadyExists):
-			return RegisterOutput{}, ErrDeviceExist
-		default:
+		if !errors.Is(err, device.ErrDeviceAlreadyExists) {
 			return RegisterOutput{}, ErrRegisterFailed
 		}
+		// Device already registered — fetch and return existing
+		existing, findErr := uc.deviceRepo.FindByID(ctx, deviceID)
+		if findErr != nil {
+			return RegisterOutput{}, ErrRegisterFailed
+		}
+		_ = tx.Rollback()
+		return uc.toOutput(existing), nil
 	}
 
 	// Return the device profile

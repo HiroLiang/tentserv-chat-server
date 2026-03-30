@@ -38,5 +38,15 @@ func (uc *RemoveFriendshipUseCase) Execute(
 		return friendship.ErrForbidden
 	}
 
-	return uc.friendshipRepo.Delete(ctx, f.ID)
+	// Delete the primary record
+	if err := uc.friendshipRepo.Delete(ctx, f.ID); err != nil {
+		return err
+	}
+
+	// Delete the reverse record (created on acceptance) to keep data consistent
+	if reverse, err := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, f.FriendID, f.UserID); err == nil {
+		_ = uc.friendshipRepo.Delete(ctx, reverse.ID)
+	}
+
+	return nil
 }

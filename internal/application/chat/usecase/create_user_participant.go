@@ -59,6 +59,9 @@ func (uc *CreateUserParticipantUseCase) Execute(
 	}
 
 	if err := uc.participantRepo.Create(ctx, &p); err != nil {
+		if errors.Is(err, participant.ErrAlreadyExists) {
+			return CreateUserParticipantOutput{}, ErrParticipantAlreadyExists
+		}
 		return CreateUserParticipantOutput{}, ErrCreateParticipant
 	}
 

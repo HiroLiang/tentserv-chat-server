@@ -89,7 +89,7 @@ jobs:
             --zone="$GCP_ZONE" \
             --tunnel-through-iap \
             --command "
-              sudo -iu hiroliang bash << EOF
+              sudo -iu hiroliang bash <<- EOF
                 cd ${WORK_DIR}
                 echo 'Stopping and removing old container...'
                 podman stop ${GOAT_SERVER_NAME} || true
@@ -107,5 +107,5 @@ jobs:
                   -v ./uploads:/app/uploads:rw \
                   docker.io/${IMAGE_NAME}:${TAG}
                 echo 'Done!'
-              EOF
+                EOF
             "

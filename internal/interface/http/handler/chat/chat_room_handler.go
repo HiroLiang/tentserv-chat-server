@@ -20,6 +20,8 @@ type ChatRoomHandler struct {
 	createChatRoomUseCase      *usecase.CreateChatRoomUseCase
 	joinChatRoomUseCase        *usecase.JoinChatRoomUseCase
 	approveJoinRequestUseCase  *usecase.ApproveJoinRequestUseCase
+	getMyRoomInvitationUseCase *usecase.GetMyRoomInvitationUseCase
+	respondToInvitationUseCase *usecase.RespondToInvitationUseCase
 	getUserChatRoomsUseCase    *usecase.GetUserChatRoomsUseCase
 	getChatRoomDetailUseCase   *usecase.GetChatRoomDetailUseCase
 	getChatRoomMessagesUseCase *usecase.GetChatRoomMessagesUseCase
@@ -33,6 +35,8 @@ func NewChatRoomHandler(
 	createChatRoomUseCase *usecase.CreateChatRoomUseCase,
 	joinChatRoomUseCase *usecase.JoinChatRoomUseCase,
 	approveJoinRequestUseCase *usecase.ApproveJoinRequestUseCase,
+	getMyRoomInvitationUseCase *usecase.GetMyRoomInvitationUseCase,
+	respondToInvitationUseCase *usecase.RespondToInvitationUseCase,
 	getUserChatRoomsUseCase *usecase.GetUserChatRoomsUseCase,
 	getChatRoomDetailUseCase *usecase.GetChatRoomDetailUseCase,
 	getChatRoomMessagesUseCase *usecase.GetChatRoomMessagesUseCase,
@@ -45,6 +49,8 @@ func NewChatRoomHandler(
 		createChatRoomUseCase:      createChatRoomUseCase,
 		joinChatRoomUseCase:        joinChatRoomUseCase,
 		approveJoinRequestUseCase:  approveJoinRequestUseCase,
+		getMyRoomInvitationUseCase: getMyRoomInvitationUseCase,
+		respondToInvitationUseCase: respondToInvitationUseCase,
 		getUserChatRoomsUseCase:    getUserChatRoomsUseCase,
 		getChatRoomDetailUseCase:   getChatRoomDetailUseCase,
 		getChatRoomMessagesUseCase: getChatRoomMessagesUseCase,
@@ -60,7 +66,9 @@ func (h *ChatRoomHandler) RegisterChatRoomRoutes(r *gin.RouterGroup) {
 	r.POST("/room", h.createRoom)
 	r.POST("/room/:room_id/join", h.joinRoom)
 	r.PATCH("/room/invitations/:invitation_id", h.resolveInvitation)
+	r.PATCH("/room/invitations/:invitation_id/respond", h.respondToInvitation)
 	r.GET("/room/:room_id", h.getChatRoomDetail)
+	r.GET("/room/:room_id/my-invitation", h.getMyRoomInvitation)
 	r.GET("/room/:room_id/messages", h.getChatRoomMessages)
 	r.PATCH("/room/:room_id/member/status", h.updateMemberStatus)
 	r.POST("/room/:room_id/messages", h.sendMessage)
@@ -99,6 +107,7 @@ func (h *ChatRoomHandler) createRoom(c *gin.Context) {
 		Type:        chatroom.RoomType(req.Type),
 		MaxMembers:  req.MaxMembers,
 		AllowAgent:  req.AllowAgent,
+		MemberIDs:   req.MemberIDs,
 	})
 	out, err := h.createChatRoomUseCase.Execute(c.Request.Context(), input)
 	if err != nil {
@@ -106,13 +115,18 @@ func (h *ChatRoomHandler) createRoom(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, CreateRoomResponse{
-		ID:         out.ID,
-		Name:       out.Name,
-		Type:       out.Type,
-		MaxMembers: out.MaxMembers,
-		AllowAgent: out.AllowAgent,
-		CreatedAt:  out.CreatedAt,
+	status := http.StatusCreated
+	if out.AlreadyExisted {
+		status = http.StatusOK
+	}
+	c.JSON(status, CreateRoomResponse{
+		ID:             out.ID,
+		Name:           out.Name,
+		Type:           out.Type,
+		MaxMembers:     out.MaxMembers,
+		AllowAgent:     out.AllowAgent,
+		CreatedAt:      out.CreatedAt,
+		AlreadyExisted: out.AlreadyExisted,
 	})
 }
 
@@ -520,6 +534,94 @@ func (h *ChatRoomHandler) resolveInvitation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ResolveInvitationResponse{
+		InvitationID: out.InvitationID,
+		Status:       out.Status,
+		MemberID:     out.MemberID,
+		Role:         out.Role,
+		JoinedAt:     out.JoinedAt,
+	})
+}
+
+// @Summary Get my pending invitation for a chat room
+// @Description Returns the current user's pending invitation status for the given room (as inviter or invitee).
+// @Tags Chat
+// @Produce json
+// @Security BearerAuth
+// @Param room_id path int true "Room ID"
+// @Success 200 {object} GetMyRoomInvitationResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/chat/room/{room_id}/my-invitation [get]
+func (h *ChatRoomHandler) getMyRoomInvitation(c *gin.Context) {
+	roomID, err := h.getRoomID(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid room_id"})
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.GetMyRoomInvitationInput{RoomID: roomID})
+	out, err := h.getMyRoomInvitationUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	resp := GetMyRoomInvitationResponse{Found: out.Found}
+	if out.Found {
+		invID := out.InvitationID
+		role := out.Role
+		resp.InvitationID = &invID
+		resp.Role = &role
+		if out.Role == "invitee" && out.InviterName != "" {
+			resp.InviterName = &out.InviterName
+			resp.InviterAvatar = out.InviterAvatar
+			resp.InviterUserID = out.InviterUserID
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// @Summary Respond to an invitation (invitee only)
+// @Description Accept, reject, or block a pending invitation. Only the invitee can call this endpoint.
+// @Tags Chat
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param invitation_id path int true "Invitation ID"
+// @Param payload body RespondInvitationRequest true "Response action"
+// @Success 200 {object} RespondInvitationResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 404 {object} response.ErrorResponse "Invitation Not Found"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/chat/room/invitations/{invitation_id}/respond [patch]
+func (h *ChatRoomHandler) respondToInvitation(c *gin.Context) {
+	invIDStr := c.Param("invitation_id")
+	invID, err := strconv.ParseInt(invIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "invalid invitation_id"})
+		return
+	}
+
+	var req RespondInvitationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.RespondToInvitationInput{
+		InvitationID: invID,
+		Action:       req.Action,
+	})
+	out, err := h.respondToInvitationUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, RespondInvitationResponse{
 		InvitationID: out.InvitationID,
 		Status:       out.Status,
 		MemberID:     out.MemberID,

@@ -9,11 +9,13 @@ import (
 )
 
 type ChatInvitationRecord struct {
-	ID        chatinvitation.ID     `db:"id"`
-	RoomID    chatroom.ID           `db:"room_id"`
-	InviterID participant.ID        `db:"inviter_id"`
-	InviteeID participant.ID        `db:"invitee_id"`
-	Status    chatinvitation.Status `db:"status"`
-	CreatedAt time.Time             `db:"created_at"`
-	UpdatedAt time.Time             `db:"updated_at"`
+	ID             chatinvitation.ID             `db:"id"`
+	RoomID         chatroom.ID                   `db:"room_id"`
+	InviterID      participant.ID                `db:"inviter_id"`
+	InviteeID      participant.ID                `db:"invitee_id"`
+	Status         chatinvitation.Status         `db:"status"`
+	InvitationType chatinvitation.InvitationType `db:"invitation_type"`
+	ExpiresAt      *time.Time                    `db:"expires_at"`
+	CreatedAt      time.Time                     `db:"created_at"`
+	UpdatedAt      time.Time                     `db:"updated_at"`
 }

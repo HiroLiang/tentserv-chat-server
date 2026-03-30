@@ -5,10 +5,12 @@ import (
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/shared/timeutil"
 )
 
 type UpdateDeviceInput struct {
+	DeviceID string
 	Name     string
 	Platform string
 }
@@ -35,8 +37,14 @@ func (uc *UpdateDeviceUseCase) Execute(
 	input appShared.UseCaseInput[UpdateDeviceInput],
 ) (*UpdateDeviceOutput, error) {
 
+	// Parse device ID from URL param
+	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
+	if err != nil {
+		return nil, ErrInvalidID
+	}
+
 	// Find Device
-	deviceData, err := uc.deviceRepo.FindByID(ctx, input.Base.Request.DeviceID)
+	deviceData, err := uc.deviceRepo.FindByID(ctx, deviceID)
 	if err != nil {
 		return nil, ErrDeviceNotFound
 	}

@@ -105,12 +105,18 @@ func (h *UserHandler) updateProfile(c *gin.Context) {
 		RoleCodes: req.RoleCodes,
 	})
 
-	if _, err := h.updateProfileUseCase.Execute(c.Request.Context(), input); err != nil {
+	out, err := h.updateProfileUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
 		HandleError(c, err)
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, UpdateProfileResponse{
+		ID:        out.ID,
+		Name:      out.Name,
+		Avatar:    out.Avatar,
+		RoleCodes: out.RoleCodes,
+	})
 }
 
 // @Summary Upload avatar
@@ -198,11 +204,15 @@ func (h *UserHandler) searchUsers(c *gin.Context) {
 	name := c.Query("name")
 	account := c.Query("account")
 	publicID := c.Query("public_id")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
 	input := adapter.BuildInput(c, usecase.SearchUsersInput{
 		Name:     name,
 		Account:  account,
 		PublicID: publicID,
+		Limit:    limit,
+		Offset:   offset,
 	})
 
 	out, err := h.searchUsersUseCase.Execute(c.Request.Context(), input)

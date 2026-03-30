@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
@@ -44,5 +45,12 @@ func (uc *ApplyFriendshipUseCase) Execute(
 		return err
 	}
 
-	return uc.friendshipRepo.Create(ctx, currentUserID, friendID)
+	// Catch DB unique violation from concurrent requests and surface a friendly error
+	if err := uc.friendshipRepo.Create(ctx, currentUserID, friendID); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate key value") {
+			return friendship.ErrFriendshipAlreadyExists
+		}
+		return err
+	}
+	return nil
 }
