@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
-	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
@@ -45,12 +45,12 @@ func (r *DeviceRepository) FindByID(ctx context.Context, deviceID device.ID) (*d
 	return toDomain(rec)
 }
 
-func (r *DeviceRepository) FindAllByUserID(ctx context.Context, userID user.ID) ([]*device.Device, error) {
+func (r *DeviceRepository) FindAllByAccountID(ctx context.Context, accountID shared.AccountID) ([]*device.Device, error) {
 	query, args, err := postgres.Builder.
 		Select("d.id", "d.platform", "d.name", "d.created_at", "d.updated_at").
 		From("public.devices d").
-		Join("public.device_user du ON d.id = du.device_id").
-		Where(squirrel.Eq{"du.user_id": userID}).
+		Join("public.accounts_devices ad ON d.id = ad.device_id").
+		Where(squirrel.Eq{"ad.account_id": int64(accountID)}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build devices query: %w", err)
@@ -102,11 +102,11 @@ func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
-func (r *DeviceRepository) BindUser(ctx context.Context, deviceID device.ID, userID user.ID) error {
+func (r *DeviceRepository) BindAccount(ctx context.Context, deviceID device.ID, accountID shared.AccountID) error {
 	query, args, err := postgres.Builder.
-		Insert("public.devices_users").
-		Columns("device_id", "user_id").
-		Values(deviceID.String(), userID).
+		Insert("public.accounts_devices").
+		Columns("device_id", "account_id").
+		Values(deviceID.String(), int64(accountID)).
 		Suffix("ON CONFLICT DO NOTHING").
 		ToSql()
 	if err != nil {
@@ -114,6 +114,38 @@ func (r *DeviceRepository) BindUser(ctx context.Context, deviceID device.ID, use
 	}
 
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+func (r *DeviceRepository) DeleteByAccount(ctx context.Context, deviceID device.ID, accountID shared.AccountID) error {
+	query, args, err := postgres.Builder.
+		Delete("public.devices").
+		Where(
+			squirrel.And{
+				squirrel.Eq{"id": deviceID.String()},
+				squirrel.Expr(
+					"EXISTS (SELECT 1 FROM public.accounts_devices WHERE device_id = ? AND account_id = ?)",
+					deviceID.String(), int64(accountID),
+				),
+			},
+		).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete device query: %w", err)
+	}
+
+	result, err := r.GetDB(ctx).ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete device rows affected: %w", err)
+	}
+	if rows == 0 {
+		return device.ErrDeviceNotFound
+	}
+	return nil
 }
 
 var Table = postgres.Table{

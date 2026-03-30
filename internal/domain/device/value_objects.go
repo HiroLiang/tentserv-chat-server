@@ -14,13 +14,14 @@ const (
 	Windows Platform = "windows"
 	MacOS   Platform = "macos"
 	Linux   Platform = "linux"
+	Browser Platform = "browser"
 	Unknown Platform = "unknown"
 )
 
 // ParsePlatform validates and returns a Platform value.
 func ParsePlatform(s string) (Platform, error) {
 	switch Platform(s) {
-	case Android, IOS, Windows, MacOS, Linux, Unknown:
+	case Android, IOS, Windows, MacOS, Linux, Browser, Unknown:
 		return Platform(s), nil
 	}
 	return "", ErrInvalidPlatform

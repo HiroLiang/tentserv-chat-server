@@ -29,13 +29,13 @@ var ChatRoomTable = postgres.Table{
 }
 
 type ChatRoomRepository struct {
-	db *sqlx.DB
+	postgres.BaseRepo
 }
 
 var _ chatroom.Repository = (*ChatRoomRepository)(nil)
 
 func NewChatRoomRepository(db *sqlx.DB) *ChatRoomRepository {
-	return &ChatRoomRepository{db: db}
+	return &ChatRoomRepository{BaseRepo: postgres.NewBaseRepo(db)}
 }
 
 func (r *ChatRoomRepository) FindByID(ctx context.Context, id chatroom.ID) (*chatroom.ChatRoom, error) {
@@ -47,7 +47,7 @@ func (r *ChatRoomRepository) FindByID(ctx context.Context, id chatroom.ID) (*cha
 		return nil, fmt.Errorf("build chat room query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[ChatRoomRecord](ctx, r.db, query, args...)
+	rec, err := postgres.ScanOne[ChatRoomRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatroom.ErrNotFound
@@ -71,13 +71,16 @@ func (r *ChatRoomRepository) Create(ctx context.Context, room *chatroom.ChatRoom
 	}
 
 	var id chatroom.ID
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+	if err := r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&id); err != nil {
 		return fmt.Errorf("insert chat room: %w", err)
 	}
 	room.ID = id
 	return nil
 }
 
+// FindDirectByParticipants finds an active direct room shared by both participants.
+// Only considers members where is_deleted = false to avoid returning rooms where
+// a participant has been soft-deleted (C-3).
 func (r *ChatRoomRepository) FindDirectByParticipants(
 	ctx context.Context,
 	p1ID, p2ID participant.ID,
@@ -86,12 +89,12 @@ func (r *ChatRoomRepository) FindDirectByParticipants(
 		SELECT cr.id, cr.name, cr.description, cr.avatar_name, cr.type, cr.max_members,
 		       cr.allow_agent, cr.is_deleted, cr.created_at, cr.updated_at
 		FROM public.chat_rooms cr
-		JOIN public.chat_members m1 ON cr.id = m1.room_id AND m1.participant_id = $1
-		JOIN public.chat_members m2 ON cr.id = m2.room_id AND m2.participant_id = $2
+		JOIN public.chat_members m1 ON cr.id = m1.room_id AND m1.participant_id = $1 AND m1.is_deleted = false
+		JOIN public.chat_members m2 ON cr.id = m2.room_id AND m2.participant_id = $2 AND m2.is_deleted = false
 		WHERE cr.type = 'direct' AND NOT cr.is_deleted
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ChatRoomRecord](ctx, r.db, query, p1ID, p2ID)
+	rec, err := postgres.ScanOne[ChatRoomRecord](ctx, r.GetDB(ctx), query, p1ID, p2ID)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, chatroom.ErrNotFound
@@ -118,7 +121,7 @@ func (r *ChatRoomRepository) Update(ctx context.Context, room *chatroom.ChatRoom
 		return fmt.Errorf("build update chat room: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
 func (r *ChatRoomRepository) SoftDelete(ctx context.Context, id chatroom.ID) error {
@@ -131,5 +134,5 @@ func (r *ChatRoomRepository) SoftDelete(ctx context.Context, id chatroom.ID) err
 		return fmt.Errorf("build soft delete chat room: %w", err)
 	}
 
-	return postgres.Exec(ctx, r.db, query, args...)
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }

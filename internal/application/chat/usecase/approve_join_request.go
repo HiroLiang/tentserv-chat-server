@@ -71,6 +71,10 @@ func (uc *ApproveJoinRequestUseCase) Execute(
 		return ApproveJoinRequestOutput{}, ErrInvitationAlreadyResolved
 	}
 
+	if inv.InvitationType != chatinvitation.JoinRequest {
+		return ApproveJoinRequestOutput{}, ErrInvalidInvitationType
+	}
+
 	callerParticipant, err := uc.participantRepo.FindByUserID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, participant.ErrNotFound) {
@@ -101,6 +105,12 @@ func (uc *ApproveJoinRequestUseCase) Execute(
 			InvitationID: int64(inv.ID),
 			Status:       string(chatinvitation.Rejected),
 		}, nil
+	}
+
+	// Guard against active membership before upsert (H-7).
+	existing, err := uc.chatMemberRepo.FindByRoomAndParticipant(ctx, inv.RoomID, inv.InviteeID)
+	if err == nil && !existing.IsDeleted {
+		return ApproveJoinRequestOutput{}, ErrAlreadyMember
 	}
 
 	member := &chatmember.ChatMember{

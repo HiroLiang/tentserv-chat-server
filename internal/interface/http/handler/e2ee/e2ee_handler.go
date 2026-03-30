@@ -10,13 +10,14 @@ import (
 )
 
 type E2EEHandler struct {
-	uploadIdentityKey  *usecase.UploadIdentityKeyUseCase
-	uploadSignedPreKey *usecase.UploadSignedPreKeyUseCase
-	uploadOTPPreKeys   *usecase.UploadOTPPreKeysUseCase
-	countOTPPreKeys    *usecase.CountOTPPreKeysUseCase
-	getKeyBundle       *usecase.GetKeyBundleUseCase
-	uploadSenderKey    *usecase.UploadSenderKeyUseCase
-	getSenderKeys      *usecase.GetSenderKeysUseCase
+	uploadIdentityKey              *usecase.UploadIdentityKeyUseCase
+	uploadSignedPreKey             *usecase.UploadSignedPreKeyUseCase
+	uploadOTPPreKeys               *usecase.UploadOTPPreKeysUseCase
+	countOTPPreKeys                *usecase.CountOTPPreKeysUseCase
+	getKeyBundle                   *usecase.GetKeyBundleUseCase
+	uploadSenderKey                *usecase.UploadSenderKeyUseCase
+	getSenderKeys                  *usecase.GetSenderKeysUseCase
+	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase
 }
 
 func NewE2EEHandler(
@@ -27,15 +28,17 @@ func NewE2EEHandler(
 	getKeyBundle *usecase.GetKeyBundleUseCase,
 	uploadSenderKey *usecase.UploadSenderKeyUseCase,
 	getSenderKeys *usecase.GetSenderKeysUseCase,
+	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase,
 ) *E2EEHandler {
 	return &E2EEHandler{
-		uploadIdentityKey:  uploadIdentityKey,
-		uploadSignedPreKey: uploadSignedPreKey,
-		uploadOTPPreKeys:   uploadOTPPreKeys,
-		countOTPPreKeys:    countOTPPreKeys,
-		getKeyBundle:       getKeyBundle,
-		uploadSenderKey:    uploadSenderKey,
-		getSenderKeys:      getSenderKeys,
+		uploadIdentityKey:              uploadIdentityKey,
+		uploadSignedPreKey:             uploadSignedPreKey,
+		uploadOTPPreKeys:               uploadOTPPreKeys,
+		countOTPPreKeys:                countOTPPreKeys,
+		getKeyBundle:                   getKeyBundle,
+		uploadSenderKey:                uploadSenderKey,
+		getSenderKeys:                  getSenderKeys,
+		getSenderKeyDistributionStatus: getSenderKeyDistributionStatus,
 	}
 }
 
@@ -47,6 +50,7 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.GET("/key-bundle/:user_id", h.getKeyBundle_)
 	r.POST("/sender-key", h.uploadSenderKey_)
 	r.GET("/sender-keys/:room_id", h.getSenderKeys_)
+	r.GET("/sender-key-distributions/:room_id", h.getSenderKeyDistributionStatus_)
 }
 
 // @Summary Upload identity key
@@ -167,7 +171,7 @@ func (h *E2EEHandler) countOTPPreKeys_(c *gin.Context) {
 }
 
 // @Summary Get key bundle for X3DH
-// @Description Fetch the identity key, signed pre-key, and one optional OTP pre-key for a target user/device. Used by the initiating party to perform X3DH key agreement.
+// @Description Fetch the identity key, signed pre-key, and one optional OTP pre-key for a target user/device.
 // @Tags E2EE
 // @Produce json
 // @Security BearerAuth
@@ -203,8 +207,11 @@ func (h *E2EEHandler) getKeyBundle_(c *gin.Context) {
 	})
 }
 
-// @Summary Upload sender key for a group room
-// @Description Upload the authenticated member's sender key and SKDM distribution message for a group/channel room.
+// @Summary Upload sender key for a room
+// @Description Upload the authenticated member's sender key and SKDM distribution message.
+//
+//	Works for both direct and group rooms — every member has their own Sender Key.
+//
 // @Tags E2EE
 // @Accept json
 // @Produce json
@@ -233,8 +240,11 @@ func (h *E2EEHandler) uploadSenderKey_(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// @Summary Get sender keys for a group room
-// @Description Retrieve all members' sender keys and distribution messages for the given room. Used when joining or re-keying a group session.
+// @Summary Get sender keys for a room
+// @Description Retrieve all members' sender keys for the given room (direct or group).
+//
+//	Also records that the caller has fetched each key (distribution ACK).
+//
 // @Tags E2EE
 // @Produce json
 // @Security BearerAuth
@@ -265,4 +275,39 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, GetSenderKeysResponse{Keys: items})
+}
+
+// @Summary Get sender key distribution status for a room
+// @Description Returns two lists: members who have not yet fetched my latest key (pending_receivers),
+//
+//	and members whose latest key I have not yet fetched (pending_from_members).
+//
+// @Tags E2EE
+// @Produce json
+// @Security BearerAuth
+// @Param room_id path int true "Room ID"
+// @Success 200 {object} GetSenderKeyDistributionStatusResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/sender-key-distributions/{room_id} [get]
+func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
+	roomID, err := strconv.ParseInt(c.Param("room_id"), 10, 64)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.GetSenderKeyDistributionStatusInput{RoomID: roomID})
+	out, err := h.getSenderKeyDistributionStatus.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
+		PendingReceivers:   out.PendingReceivers,
+		PendingFromMembers: out.PendingFromMembers,
+	})
 }

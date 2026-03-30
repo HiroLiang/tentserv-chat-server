@@ -8,6 +8,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -82,14 +83,15 @@ func (r *ParticipantRepository) FindByAgentID(ctx context.Context, agentID int64
 	return toParticipantDomain(rec)
 }
 
-func (r *ParticipantRepository) FindSystem(ctx context.Context) (*participant.Participant, error) {
+func (r *ParticipantRepository) FindSystemByType(ctx context.Context, systemType string) (*participant.Participant, error) {
 	query := `
 		SELECT p.id, p.type, NULL::bigint AS user_id, NULL::bigint AS agent_id, ps.system_type, p.created_at
 		FROM public.participants p
 		JOIN public.participant_systems ps ON ps.participant_id = p.id
+		WHERE ps.system_type = $1
 		LIMIT 1`
 
-	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query)
+	rec, err := postgres.ScanOne[ParticipantRecord](ctx, r.GetDB(ctx), query, systemType)
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, participant.ErrNotFound
@@ -104,16 +106,16 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 
 	// Insert into participants
 	var id participant.ID
-	err := r.GetDB(ctx).QueryRowxContext(ctx,
-		`INSERT INTO public.participants (type) VALUES ($1) RETURNING id`,
+	if err := r.GetDB(ctx).QueryRowxContext(ctx,
+		`INSERT INTO public.participants (type) VALUES ($1) RETURNING id, created_at`,
 		p.Type,
-	).Scan(&id)
-	if err != nil {
+	).Scan(&id, &p.CreatedAt); err != nil {
 		return fmt.Errorf("insert participant: %w", err)
 	}
 	p.ID = id
 
 	// Insert into the corresponding join table
+	var err error
 	switch p.Type {
 	case participant.UserType:
 		if p.UserID == nil {
@@ -143,6 +145,10 @@ func (r *ParticipantRepository) Create(ctx context.Context, p *participant.Parti
 		return fmt.Errorf("unknown participant type: %s", p.Type)
 	}
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return participant.ErrAlreadyExists
+		}
 		return fmt.Errorf("insert participant detail: %w", err)
 	}
 

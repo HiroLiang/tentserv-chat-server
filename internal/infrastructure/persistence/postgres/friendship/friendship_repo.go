@@ -58,10 +58,18 @@ func (r *FriendshipRepository) FindByUserID(ctx context.Context, userID shared.U
 }
 
 func (r *FriendshipRepository) Create(ctx context.Context, userID, friendID shared.UserID) error {
+	return r.createWithStatus(ctx, userID, friendID, friendship.StatusPending)
+}
+
+func (r *FriendshipRepository) CreateBlocked(ctx context.Context, userID, friendID shared.UserID) error {
+	return r.createWithStatus(ctx, userID, friendID, friendship.StatusBlocked)
+}
+
+func (r *FriendshipRepository) createWithStatus(ctx context.Context, userID, friendID shared.UserID, status friendship.Status) error {
 	query, args, err := squirrel.
 		Insert(Table.Name).
 		Columns("user_id", "friend_id", "status").
-		Values(userID, friendID, string(friendship.StatusPending)).
+		Values(userID, friendID, string(status)).
 		PlaceholderFormat(squirrel.Dollar).
 		ToSql()
 	if err != nil {
@@ -128,6 +136,54 @@ func (r *FriendshipRepository) FindBetweenUsers(ctx context.Context, userID1, us
 		return nil, fmt.Errorf("scan friendship: %w", err)
 	}
 	return toDomain(rec), nil
+}
+
+func (r *FriendshipRepository) FindAllByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	query, args, err := Table.
+		Select(Table.Columns...).
+		Where(squirrel.Or{
+			squirrel.Eq{"user_id": userID},
+			squirrel.Eq{"friend_id": userID},
+		}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build all friendships query: %w", err)
+	}
+
+	records, err := postgres.ScanAll[FriendshipRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan all friendships: %w", err)
+	}
+
+	result := make([]*friendship.Friendship, 0, len(records))
+	for i := range records {
+		result = append(result, toDomain(&records[i]))
+	}
+	return result, nil
+}
+
+func (r *FriendshipRepository) FindPendingByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	query, args, err := Table.
+		Select(Table.Columns...).
+		Where(squirrel.Eq{
+			"user_id": userID,
+			"status":  string(friendship.StatusPending),
+		}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build pending sent friendships query: %w", err)
+	}
+
+	records, err := postgres.ScanAll[FriendshipRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan pending sent friendships: %w", err)
+	}
+
+	result := make([]*friendship.Friendship, 0, len(records))
+	for i := range records {
+		result = append(result, toDomain(&records[i]))
+	}
+	return result, nil
 }
 
 func (r *FriendshipRepository) FindPendingByFriendID(ctx context.Context, friendID shared.UserID) ([]*friendship.Friendship, error) {

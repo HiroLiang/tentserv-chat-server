@@ -31,6 +31,9 @@ type UseCases struct {
 	RegisterDeviceUseCase   *deviceUseCase.RegisterUseCase
 	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase
 	UpdateDeviceUseCase     *deviceUseCase.UpdateDeviceUseCase
+	ListDevicesUseCase      *deviceUseCase.ListDevicesUseCase
+	BindAccountUseCase      *deviceUseCase.BindAccountUseCase
+	DeleteDeviceUseCase     *deviceUseCase.DeleteDeviceUseCase
 
 	CreateUserParticipantUseCase *chatUseCase.CreateUserParticipantUseCase
 	GetUserParticipantUseCase    *chatUseCase.GetUserParticipantUseCase
@@ -38,18 +41,21 @@ type UseCases struct {
 	CreateChatRoomUseCase      *chatUseCase.CreateChatRoomUseCase
 	JoinChatRoomUseCase        *chatUseCase.JoinChatRoomUseCase
 	ApproveJoinRequestUseCase  *chatUseCase.ApproveJoinRequestUseCase
+	GetMyRoomInvitationUseCase *chatUseCase.GetMyRoomInvitationUseCase
+	RespondToInvitationUseCase *chatUseCase.RespondToInvitationUseCase
 	GetUserChatRoomsUseCase    *chatUseCase.GetUserChatRoomsUseCase
 	GetChatRoomDetailUseCase   *chatUseCase.GetChatRoomDetailUseCase
 	GetChatRoomMessagesUseCase *chatUseCase.GetChatRoomMessagesUseCase
 	UpdateMemberStatusUseCase  *chatUseCase.UpdateMemberStatusUseCase
 
-	UploadIdentityKeyUseCase  *e2eeUseCase.UploadIdentityKeyUseCase
-	UploadSignedPreKeyUseCase *e2eeUseCase.UploadSignedPreKeyUseCase
-	UploadOTPPreKeysUseCase   *e2eeUseCase.UploadOTPPreKeysUseCase
-	CountOTPPreKeysUseCase    *e2eeUseCase.CountOTPPreKeysUseCase
-	GetKeyBundleUseCase       *e2eeUseCase.GetKeyBundleUseCase
-	UploadSenderKeyUseCase    *e2eeUseCase.UploadSenderKeyUseCase
-	GetSenderKeysUseCase      *e2eeUseCase.GetSenderKeysUseCase
+	UploadIdentityKeyUseCase                  *e2eeUseCase.UploadIdentityKeyUseCase
+	UploadSignedPreKeyUseCase                 *e2eeUseCase.UploadSignedPreKeyUseCase
+	UploadOTPPreKeysUseCase                   *e2eeUseCase.UploadOTPPreKeysUseCase
+	CountOTPPreKeysUseCase                    *e2eeUseCase.CountOTPPreKeysUseCase
+	GetKeyBundleUseCase                       *e2eeUseCase.GetKeyBundleUseCase
+	UploadSenderKeyUseCase                    *e2eeUseCase.UploadSenderKeyUseCase
+	GetSenderKeysUseCase                      *e2eeUseCase.GetSenderKeysUseCase
+	GetSenderKeyDistributionStatusUseCase     *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
 
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
@@ -59,6 +65,10 @@ type UseCases struct {
 	AcceptFriendshipUseCase  *friendshipUseCase.AcceptFriendshipUseCase
 	GetFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase
 	RemoveFriendshipUseCase  *friendshipUseCase.RemoveFriendshipUseCase
+	GetSentRequestsUseCase   *friendshipUseCase.GetSentRequestsUseCase
+	CancelSentRequestUseCase *friendshipUseCase.CancelSentRequestUseCase
+	BlockUserUseCase         *friendshipUseCase.BlockUserUseCase
+	UnblockUserUseCase       *friendshipUseCase.UnblockUserUseCase
 
 	StreamChatUseCase *ollamaUseCase.StreamChatUseCase
 }
@@ -95,7 +105,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		GetAccountProfileUseCase: authUseCase.NewGetProfileUseCase(deps.AccountRepo, deps.UserRepo),
 		VerifyEmailUseCase:       authUseCase.NewVerifyEmailUseCase(deps.VerificationStore, deps.AccountRepo),
 
-		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo),
+		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo, deps.UserRoleRepo),
 		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),
 		GetUserProfileUseCase:    userUseCase.NewGetProfileUseCase(deps.UserRepo),
 		SearchUsersUseCase:       userUseCase.NewSearchUsersUseCase(deps.UserRepo, deps.FriendshipRepo),
@@ -103,6 +113,9 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		RegisterDeviceUseCase:   deviceUseCase.NewRegisterUseCase(deps.Uow, deps.DeviceRepo),
 		GetDeviceProfileUseCase: deviceUseCase.NewGetProfileUseCase(deps.Uow, deps.DeviceRepo),
 		UpdateDeviceUseCase:     deviceUseCase.NewUpdateDeviceUseCase(deps.DeviceRepo),
+		ListDevicesUseCase:      deviceUseCase.NewListDevicesUseCase(deps.DeviceRepo),
+		BindAccountUseCase:      deviceUseCase.NewBindAccountUseCase(deps.DeviceRepo),
+		DeleteDeviceUseCase:     deviceUseCase.NewDeleteDeviceUseCase(deps.DeviceRepo),
 
 		CreateUserParticipantUseCase: chatUseCase.NewCreateUserParticipantUseCase(deps.Uow, deps.ParticipantRepository),
 		GetUserParticipantUseCase:    chatUseCase.NewGetUserParticipantUseCase(deps.ParticipantRepository),
@@ -112,6 +125,8 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatRoomRepo,
 			deps.ChatMemberRepo,
 			deps.ParticipantRepository,
+			deps.FriendshipRepo,
+			deps.ChatInvitationRepo,
 		),
 		JoinChatRoomUseCase: chatUseCase.NewJoinChatRoomUseCase(
 			deps.Uow,
@@ -125,6 +140,18 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.ParticipantRepository,
 			deps.ChatInvitationRepo,
+		),
+		GetMyRoomInvitationUseCase: chatUseCase.NewGetMyRoomInvitationUseCase(
+			deps.ParticipantRepository,
+			deps.ChatInvitationRepo,
+			deps.UserRepo,
+		),
+		RespondToInvitationUseCase: chatUseCase.NewRespondToInvitationUseCase(
+			deps.Uow,
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.ChatInvitationRepo,
+			deps.FriendshipRepo,
 		),
 		GetUserChatRoomsUseCase: chatUseCase.NewGetUserChatRoomsUseCase(
 			deps.ParticipantRepository,
@@ -182,6 +209,13 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
+		),
+		GetSenderKeyDistributionStatusUseCase: e2eeUseCase.NewGetSenderKeyDistributionStatusUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
 		),
 
 		SendMessageUseCase: chatUseCase.NewSendMessageUseCase(
@@ -198,9 +232,19 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 
 		GetFriendsUseCase:        friendshipUseCase.NewGetFriendsUseCase(deps.FriendshipRepo, deps.UserRepo),
 		ApplyFriendshipUseCase:   friendshipUseCase.NewApplyFriendshipUseCase(deps.FriendshipRepo),
-		AcceptFriendshipUseCase:  friendshipUseCase.NewAcceptFriendshipUseCase(deps.Uow, deps.FriendshipRepo),
-		GetFriendRequestsUseCase: friendshipUseCase.NewGetFriendRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
-		RemoveFriendshipUseCase:  friendshipUseCase.NewRemoveFriendshipUseCase(deps.FriendshipRepo),
+		AcceptFriendshipUseCase: friendshipUseCase.NewAcceptFriendshipUseCase(
+			deps.Uow,
+			deps.FriendshipRepo,
+			deps.ParticipantRepository,
+			deps.ChatRoomRepo,
+			deps.ChatMemberRepo,
+		),
+		GetFriendRequestsUseCase:   friendshipUseCase.NewGetFriendRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
+		RemoveFriendshipUseCase:    friendshipUseCase.NewRemoveFriendshipUseCase(deps.FriendshipRepo),
+		GetSentRequestsUseCase:     friendshipUseCase.NewGetSentRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
+		CancelSentRequestUseCase:   friendshipUseCase.NewCancelSentRequestUseCase(deps.FriendshipRepo),
+		BlockUserUseCase:           friendshipUseCase.NewBlockUserUseCase(deps.FriendshipRepo),
+		UnblockUserUseCase:         friendshipUseCase.NewUnblockUserUseCase(deps.FriendshipRepo),
 
 		StreamChatUseCase: ollamaUseCase.NewStreamChatUseCase(deps.RedisCache),
 	}

@@ -60,3 +60,23 @@ CREATE TABLE IF NOT EXISTS public.member_sender_keys
 );
 CREATE INDEX IF NOT EXISTS idx_member_sender_keys_member
     ON public.member_sender_keys (chat_member_id);
+
+-- Sender key distribution acknowledgement
+-- Records the latest chain_id of sender_member_id's key that receiver_member_id has fetched.
+-- Written by GET /api/e2ee/sender-keys when a member retrieves the room's keys.
+-- Used to answer:
+--   "Who has already received my latest key?" (pending_receivers)
+--   "Whose key haven't I fetched yet?"        (pending_from_members)
+CREATE TABLE IF NOT EXISTS public.sender_key_distributions
+(
+    id                 BIGINT    PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    sender_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    receiver_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    chain_id           INT       NOT NULL, -- chain_id of member_sender_keys that was fetched
+    distributed_at     TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (sender_member_id, receiver_member_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_sender
+    ON public.sender_key_distributions (sender_member_id);
+CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_receiver
+    ON public.sender_key_distributions (receiver_member_id);

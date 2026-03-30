@@ -35,17 +35,17 @@ func (u *UserRepo) Update(ctx context.Context, usr *user.User) error {
 	panic("implement me")
 }
 
-func (u *UserRepo) SearchByName(ctx context.Context, keyword string) ([]*user.UserSearchResult, error) {
+func (u *UserRepo) SearchByName(ctx context.Context, keyword string, limit, offset int) ([]*user.UserSearchResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u *UserRepo) FindByAccountName(ctx context.Context, accountName string) ([]*user.UserSearchResult, error) {
+func (u *UserRepo) FindByAccountName(ctx context.Context, accountName string, limit, offset int) ([]*user.UserSearchResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (u *UserRepo) FindByPublicID(ctx context.Context, publicID string) ([]*user.UserSearchResult, error) {
+func (u *UserRepo) FindByPublicID(ctx context.Context, publicID string, limit, offset int) ([]*user.UserSearchResult, error) {
 	//TODO implement me
 	panic("implement me")
 }

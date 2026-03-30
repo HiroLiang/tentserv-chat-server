@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"go.uber.org/zap"
+
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
@@ -11,6 +13,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 )
 
 type ChatRoomSummary struct {
@@ -90,8 +93,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			continue
 		}
 
-		displayName := uc.resolveDisplayName(ctx, room, callerParticipant.ID)
-		avatarURL := uc.resolveAvatarURL(ctx, room, callerParticipant.ID)
+		displayName, avatarURL := uc.resolveRoomDisplay(ctx, room, callerParticipant.ID)
 
 		var latestMsg *string
 		if msg, err := uc.chatMessageRepo.FindLatestByRoom(ctx, room.ID); err == nil {
@@ -102,7 +104,10 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		if member.LastReadAt != nil {
 			since = *member.LastReadAt
 		}
-		unreadCount, _ := uc.chatMessageRepo.CountByRoomAfter(ctx, room.ID, since)
+		unreadCount, err := uc.chatMessageRepo.CountByRoomAfter(ctx, room.ID, since)
+		if err != nil {
+			logger.Log.Warn("CountByRoomAfter failed", zap.Int64("room_id", int64(room.ID)), zap.Error(err))
+		}
 
 		summary := ChatRoomSummary{
 			RoomID:      int64(room.ID),
@@ -150,75 +155,51 @@ func (uc *GetUserChatRoomsUseCase) findOtherParticipant(
 	return nil, errors.New("other participant not found")
 }
 
-func (uc *GetUserChatRoomsUseCase) resolveDisplayName(
+// resolveRoomDisplay returns the display name and avatar URL for a room, calling
+// findOtherParticipant only once for DIRECT/Bot rooms (H-3: eliminates double N+1).
+func (uc *GetUserChatRoomsUseCase) resolveRoomDisplay(
 	ctx context.Context,
 	room *chatroom.ChatRoom,
 	callerParticipantID participant.ID,
-) string {
+) (displayName string, avatarURL *string) {
 	switch room.Type {
-	case chatroom.Channel, chatroom.Group:
-		return room.Name
+	case chatroom.Group, chatroom.Channel:
+		displayName = room.Name
+		if room.AvatarName != "" {
+			s := room.AvatarName
+			avatarURL = &s
+		}
+		return
 
 	case chatroom.Direct, chatroom.Bot:
 		p, err := uc.findOtherParticipant(ctx, room, callerParticipantID)
 		if err != nil {
-			return room.Name
+			return room.Name, nil
 		}
 
 		if room.Type == chatroom.Direct && p.UserID != nil {
 			u, err := uc.userRepo.FindByID(ctx, *p.UserID)
 			if err != nil {
-				return room.Name
+				return room.Name, nil
 			}
-			return u.Name
+			displayName = u.Name
+			if u.Avatar != "" {
+				avatarURL = &u.Avatar
+			}
+			return
 		}
 
 		if room.Type == chatroom.Bot && p.AgentID != nil {
 			a, err := uc.agentRepo.FindByID(ctx, agent.ID(*p.AgentID))
 			if err != nil {
-				return room.Name
+				return room.Name, nil
 			}
-			return a.Name
+			displayName = a.Name
+			return
 		}
 
-		return room.Name
+		return room.Name, nil
 	}
 
-	return room.Name
-}
-
-func (uc *GetUserChatRoomsUseCase) resolveAvatarURL(
-	ctx context.Context,
-	room *chatroom.ChatRoom,
-	callerParticipantID participant.ID,
-) *string {
-	switch room.Type {
-	case chatroom.Group, chatroom.Channel:
-		if room.AvatarName != "" {
-			s := room.AvatarName
-			return &s
-		}
-		return nil
-
-	case chatroom.Direct, chatroom.Bot:
-		p, err := uc.findOtherParticipant(ctx, room, callerParticipantID)
-		if err != nil {
-			return nil
-		}
-
-		if room.Type == chatroom.Direct && p.UserID != nil {
-			u, err := uc.userRepo.FindByID(ctx, *p.UserID)
-			if err != nil {
-				return nil
-			}
-			if u.Avatar == "" {
-				return nil
-			}
-			return &u.Avatar
-		}
-
-		return nil
-	}
-
-	return nil
+	return room.Name, nil
 }

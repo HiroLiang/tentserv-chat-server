@@ -8,4 +8,6 @@ var (
 	ErrFriendshipAlreadyExists = errors.New("friendship already exists")
 	ErrFriendshipNotPending    = errors.New("friendship is not pending")
 	ErrForbidden               = errors.New("forbidden")
+	ErrAlreadyBlocked          = errors.New("user is already blocked")
+	ErrNotBlocked              = errors.New("user is not blocked")
 )

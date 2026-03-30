@@ -126,13 +126,21 @@ var searchColumns = []string{
 	"u.id", "u.name", "u.avatar", "u.account_id", "u.created_at", "u.updated_at", "a.public_id", "a.account",
 }
 
-func (r *UserRepository) searchJoinQuery(ctx context.Context, cond squirrel.Sqlizer) ([]*user.UserSearchResult, error) {
-	query, args, err := squirrel.Select(searchColumns...).
+func (r *UserRepository) searchJoinQuery(ctx context.Context, cond squirrel.Sqlizer, limit, offset int) ([]*user.UserSearchResult, error) {
+	q := squirrel.Select(searchColumns...).
 		From("public.users u").
 		Join("public.accounts a ON u.account_id = a.id").
 		Where(cond).
-		PlaceholderFormat(squirrel.Dollar).
-		ToSql()
+		PlaceholderFormat(squirrel.Dollar)
+
+	if limit > 0 {
+		q = q.Limit(uint64(limit))
+	}
+	if offset > 0 {
+		q = q.Offset(uint64(offset))
+	}
+
+	query, args, err := q.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build search query: %w", err)
 	}
@@ -149,16 +157,16 @@ func (r *UserRepository) searchJoinQuery(ctx context.Context, cond squirrel.Sqli
 	return results, nil
 }
 
-func (r *UserRepository) SearchByName(ctx context.Context, keyword string) ([]*user.UserSearchResult, error) {
-	return r.searchJoinQuery(ctx, squirrel.ILike{"u.name": "%" + keyword + "%"})
+func (r *UserRepository) SearchByName(ctx context.Context, keyword string, limit, offset int) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.ILike{"u.name": "%" + keyword + "%"}, limit, offset)
 }
 
-func (r *UserRepository) FindByAccountName(ctx context.Context, accountName string) ([]*user.UserSearchResult, error) {
-	return r.searchJoinQuery(ctx, squirrel.Eq{"a.account": accountName})
+func (r *UserRepository) FindByAccountName(ctx context.Context, accountName string, limit, offset int) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.Eq{"a.account": accountName}, limit, offset)
 }
 
-func (r *UserRepository) FindByPublicID(ctx context.Context, publicID string) ([]*user.UserSearchResult, error) {
-	return r.searchJoinQuery(ctx, squirrel.Eq{"a.public_id": publicID})
+func (r *UserRepository) FindByPublicID(ctx context.Context, publicID string, limit, offset int) ([]*user.UserSearchResult, error) {
+	return r.searchJoinQuery(ctx, squirrel.Eq{"a.public_id": publicID}, limit, offset)
 }
 
 func (r *UserRepository) findOneBy(
@@ -177,7 +185,7 @@ func (r *UserRepository) findOneBy(
 
 	rec, err := postgres.ScanOne[UserRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
-		logger.Log.Error(fmt.Sprintf("find user: %d", err))
+		logger.Log.Error(fmt.Sprintf("find user: %v", err))
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, user.ErrUserNotFound
 		}

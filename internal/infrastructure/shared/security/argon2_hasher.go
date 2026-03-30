@@ -32,8 +32,8 @@ func (h *Argon2Hasher) HashBytes(password []byte) (string, error) {
 	return encodedSalt + ":" + encoded, nil
 }
 
-func (h *Argon2Hasher) Verify(hashed, plain string) bool {
-	parts := strings.Split(plain, ":")
+func (h *Argon2Hasher) Verify(password, storedHash string) bool {
+	parts := strings.Split(storedHash, ":")
 	if len(parts) != 2 {
 		return false
 	}
@@ -48,7 +48,7 @@ func (h *Argon2Hasher) Verify(hashed, plain string) bool {
 		return false
 	}
 
-	newHash := h.getArgon2Hash([]byte(hashed), salt)
+	newHash := h.getArgon2Hash([]byte(password), salt)
 	return subtle.ConstantTimeCompare(hash, newHash) == 1
 }
 

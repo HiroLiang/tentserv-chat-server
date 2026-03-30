@@ -117,10 +117,11 @@ func (uc *JoinChatRoomUseCase) Execute(
 	}
 
 	inv := &chatinvitation.ChatInvitation{
-		RoomID:    roomID,
-		InviterID: p.ID,
-		InviteeID: p.ID,
-		Status:    chatinvitation.Pending,
+		RoomID:         roomID,
+		InviterID:      p.ID,
+		InviteeID:      p.ID,
+		Status:         chatinvitation.Pending,
+		InvitationType: chatinvitation.JoinRequest,
 	}
 	if err := uc.invitationRepo.Create(ctx, inv); err != nil {
 		return JoinChatRoomOutput{}, ErrInvitationCreate

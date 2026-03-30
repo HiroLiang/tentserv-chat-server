@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS public.chat_rooms
     max_members INTEGER        NOT NULL DEFAULT 2,
     allow_agent BOOLEAN        NOT NULL DEFAULT false,
     is_deleted  BOOLEAN        NOT NULL DEFAULT false,
-    created_at  TIMESTAMP      NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMP      NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ    NOT NULL DEFAULT now()
 );
 
 -- Chat members
@@ -31,11 +31,11 @@ CREATE TABLE IF NOT EXISTS public.chat_members
     participant_id BIGINT           NOT NULL REFERENCES public.participants (id) ON DELETE NO ACTION,
     role           chat_member_role NOT NULL DEFAULT 'member',
     is_muted       BOOLEAN          NOT NULL DEFAULT false,
-    is_delete      BOOLEAN          NOT NULL DEFAULT false,
-    last_read_at   TIMESTAMP,
-    joined_at      TIMESTAMP        NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMP        NOT NULL DEFAULT now(),
-    deleted_at     TIMESTAMP,
+    is_deleted     BOOLEAN          NOT NULL DEFAULT false,
+    last_read_at   TIMESTAMPTZ,
+    joined_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    deleted_at     TIMESTAMPTZ,
 
     UNIQUE (room_id, participant_id)
 );
@@ -54,11 +54,12 @@ CREATE TABLE IF NOT EXISTS public.chat_records
     reply_to_id  BIGINT            REFERENCES chat_records (id) ON DELETE SET NULL,
     is_edited    BOOLEAN           NOT NULL DEFAULT FALSE,
     is_deleted   BOOLEAN           NOT NULL DEFAULT FALSE,
-    created_at   TIMESTAMP         NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMP         NOT NULL DEFAULT now()
+    created_at   TIMESTAMPTZ       NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_chat_records_room_created ON public.chat_records (room_id, created_at DESC);
+CREATE INDEX idx_chat_records_room_id ON public.chat_records (room_id, id DESC);
 CREATE INDEX idx_chat_records_room_sender ON public.chat_records (room_id, sender_id);
 
 ---- Trigger ----
@@ -82,6 +83,7 @@ BEGIN
     FROM public.chat_members m
              JOIN public.participants p ON p.id = m.participant_id
     WHERE m.room_id = NEW.room_id
+      AND m.is_deleted = false
       AND p.type != 'system';
 
     IF current_count >= max_limit THEN

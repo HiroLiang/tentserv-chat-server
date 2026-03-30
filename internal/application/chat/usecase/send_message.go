@@ -4,9 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -73,6 +79,10 @@ func (uc *SendMessageUseCase) Execute(
 		return SendMessageOutput{}, ErrNotRoomMember
 	}
 
+	if !chatmember.CanSendMessage(callerMember.Role) {
+		return SendMessageOutput{}, ErrNotAllowed
+	}
+
 	msgType := chatmessage.MessageType(input.Data.Type)
 	switch msgType {
 	case chatmessage.Text, chatmessage.Image, chatmessage.File:
@@ -81,9 +91,18 @@ func (uc *SendMessageUseCase) Execute(
 		return SendMessageOutput{}, ErrInvalidMessageType
 	}
 
-	// Defense-in-depth: for file/image, reject path traversal attempts
+	// Defense-in-depth: for file/image, reject path traversal attempts.
+	// Decode percent-encoding first to catch %2e%2e and %2f variants, then
+	// clean the path and reject any remaining traversal indicators.
 	if msgType == chatmessage.Image || msgType == chatmessage.File {
-		if strings.Contains(input.Data.Content, "..") || strings.HasPrefix(input.Data.Content, "/") {
+		decoded, err := url.PathUnescape(input.Data.Content)
+		if err != nil {
+			return SendMessageOutput{}, ErrInvalidMessageType
+		}
+		cleaned := path.Clean(decoded)
+		if strings.Contains(cleaned, "..") ||
+			strings.HasPrefix(cleaned, "/") ||
+			strings.Contains(cleaned, "\\") {
 			return SendMessageOutput{}, ErrInvalidMessageType
 		}
 	}
@@ -140,6 +159,12 @@ type wsEnvelope struct {
 }
 
 func (uc *SendMessageUseCase) fanOut(out SendMessageOutput) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Log.Error("fanOut panic recovered", zap.Any("recover", r))
+		}
+	}()
+
 	ctx := context.Background()
 
 	members, err := uc.chatMemberRepo.FindByRoom(ctx, chatroom.ID(out.RoomID))

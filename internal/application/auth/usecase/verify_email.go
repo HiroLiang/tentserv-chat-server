@@ -39,6 +39,11 @@ func (uc *VerifyEmailUseCase) Execute(
 		return VerifyEmailOutput{}, ErrTokenInvalid
 	}
 
+	// Delete token before processing to prevent concurrent reuse
+	if err := uc.verificationStore.Delete(ctx, input.Data.Token); err != nil {
+		return VerifyEmailOutput{}, ErrRegisterFailed
+	}
+
 	acc, err := uc.accountRepo.FindByID(ctx, shared.AccountID(accountID))
 	if err != nil {
 		return VerifyEmailOutput{}, ErrTokenInvalid
@@ -52,8 +57,6 @@ func (uc *VerifyEmailUseCase) Execute(
 	if err := uc.accountRepo.Update(ctx, acc); err != nil {
 		return VerifyEmailOutput{}, ErrRegisterFailed
 	}
-
-	_ = uc.verificationStore.Delete(ctx, input.Data.Token)
 
 	return VerifyEmailOutput{}, nil
 }

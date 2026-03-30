@@ -3,20 +3,22 @@ package chat
 import "time"
 
 type CreateRoomRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Type        string `json:"type"`
-	MaxMembers  int    `json:"max_members"`
-	AllowAgent  bool   `json:"allow_agent"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Type        string  `json:"type"`
+	MaxMembers  int     `json:"max_members"`
+	AllowAgent  bool    `json:"allow_agent"`
+	MemberIDs   []int64 `json:"member_ids"`
 }
 
 type CreateRoomResponse struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`
-	MaxMembers int       `json:"max_members"`
-	AllowAgent bool      `json:"allow_agent"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	Type           string    `json:"type"`
+	MaxMembers     int       `json:"max_members"`
+	AllowAgent     bool      `json:"allow_agent"`
+	CreatedAt      time.Time `json:"created_at"`
+	AlreadyExisted bool      `json:"already_existed"`
 }
 
 type JoinRoomResponse struct {
@@ -124,4 +126,25 @@ type UploadRoomMediaResponse struct {
 	URL      string `json:"url"`
 	MimeType string `json:"mime_type"`
 	Size     int64  `json:"size"`
+}
+
+type GetMyRoomInvitationResponse struct {
+	Found         bool    `json:"found"`
+	InvitationID  *int64  `json:"invitation_id,omitempty"`
+	Role          *string `json:"role,omitempty"`
+	InviterName   *string `json:"inviter_name,omitempty"`
+	InviterAvatar *string `json:"inviter_avatar,omitempty"`
+	InviterUserID *int64  `json:"inviter_user_id,omitempty"`
+}
+
+type RespondInvitationRequest struct {
+	Action string `json:"action" binding:"required,oneof=accept reject block"`
+}
+
+type RespondInvitationResponse struct {
+	InvitationID int64      `json:"invitation_id"`
+	Status       string     `json:"status"`
+	MemberID     *int64     `json:"member_id,omitempty"`
+	Role         *string    `json:"role,omitempty"`
+	JoinedAt     *time.Time `json:"joined_at,omitempty"`
 }

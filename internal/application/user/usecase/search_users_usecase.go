@@ -6,8 +6,11 @@ import (
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 )
+
+const defaultSearchLimit = 50
 
 var ErrInvalidSearchInput = errors.New("exactly one search parameter is required")
 
@@ -15,6 +18,8 @@ type SearchUsersInput struct {
 	Name     string
 	Account  string
 	PublicID string
+	Limit    int
+	Offset   int
 }
 
 type UserSearchResultWithStatus struct {
@@ -55,17 +60,26 @@ func (uc *SearchUsersUseCase) Execute(
 		return nil, ErrInvalidSearchInput
 	}
 
+	limit := d.Limit
+	if limit <= 0 {
+		limit = defaultSearchLimit
+	}
+	offset := d.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
 	var (
 		results []*user.UserSearchResult
 		err     error
 	)
 	switch {
 	case d.Name != "":
-		results, err = uc.userRepo.SearchByName(ctx, d.Name)
+		results, err = uc.userRepo.SearchByName(ctx, d.Name, limit, offset)
 	case d.Account != "":
-		results, err = uc.userRepo.FindByAccountName(ctx, d.Account)
+		results, err = uc.userRepo.FindByAccountName(ctx, d.Account, limit, offset)
 	default:
-		results, err = uc.userRepo.FindByPublicID(ctx, d.PublicID)
+		results, err = uc.userRepo.FindByPublicID(ctx, d.PublicID, limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -73,16 +87,36 @@ func (uc *SearchUsersUseCase) Execute(
 
 	var currentUserID = input.Base.Auth.UserID
 
+	// Fetch all friendships for current user in one query to avoid N+1
+	friendshipMap := uc.buildFriendshipMap(ctx, currentUserID)
+
 	out := make([]*UserSearchResultWithStatus, 0, len(results))
 	for _, r := range results {
 		item := &UserSearchResultWithStatus{UserSearchResult: r}
-		f, ferr := uc.friendshipRepo.FindBetweenUsers(ctx, currentUserID, r.ID)
-		if ferr == nil {
-			s := string(f.Status)
+		if status, ok := friendshipMap[r.ID]; ok {
+			s := string(status)
 			item.FriendshipStatus = &s
 		}
 		out = append(out, item)
 	}
 
 	return &SearchUsersOutput{Users: out}, nil
+}
+
+// buildFriendshipMap returns a map of otherUserID → friendship.Status for all friendships
+// involving the current user. Errors are silently ignored (friendship status is best-effort).
+func (uc *SearchUsersUseCase) buildFriendshipMap(ctx context.Context, userID shared.UserID) map[shared.UserID]friendship.Status {
+	result := make(map[shared.UserID]friendship.Status)
+	friendships, err := uc.friendshipRepo.FindAllByUserID(ctx, userID)
+	if err != nil {
+		return result
+	}
+	for _, f := range friendships {
+		other := f.FriendID
+		if f.UserID != userID {
+			other = f.UserID
+		}
+		result[other] = f.Status
+	}
+	return result
 }

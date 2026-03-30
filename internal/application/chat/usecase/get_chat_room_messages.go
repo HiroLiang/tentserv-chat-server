@@ -67,6 +67,16 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 		limit = 100
 	}
 
+	// Build member ID → participant ID map once for sender resolution (H-2).
+	allMembers, err := uc.chatMemberRepo.FindByRoom(ctx, roomID)
+	if err != nil {
+		return GetChatRoomMessagesOutput{}, err
+	}
+	memberParticipantMap := make(map[chatmember.ID]participant.ID, len(allMembers))
+	for _, m := range allMembers {
+		memberParticipantMap[m.ID] = m.ParticipantID
+	}
+
 	msgs, err := uc.chatMessageRepo.FindByRoomBefore(ctx, roomID, chatmessage.ID(input.Data.BeforeID), limit)
 	if err != nil {
 		return GetChatRoomMessagesOutput{}, err
@@ -83,13 +93,14 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 			replyTo = &v
 		}
 		messages = append(messages, ChatMessageInfo{
-			MessageID: int64(msg.ID),
-			SenderID:  int64(msg.SenderID),
-			Content:   msg.Content,
-			Type:      string(msg.Type),
-			ReplyToID: replyTo,
-			IsEdited:  msg.IsEdited,
-			CreatedAt: msg.CreatedAt,
+			MessageID:           int64(msg.ID),
+			SenderID:            int64(msg.SenderID),
+			SenderParticipantID: int64(memberParticipantMap[msg.SenderID]),
+			Content:             msg.Content,
+			Type:                string(msg.Type),
+			ReplyToID:           replyTo,
+			IsEdited:            msg.IsEdited,
+			CreatedAt:           msg.CreatedAt,
 		})
 	}
 

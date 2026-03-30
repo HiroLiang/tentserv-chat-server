@@ -28,7 +28,16 @@ func HandleError(c *gin.Context, err error) {
 			Message: "failed to create participant",
 		})
 
+	case errors.Is(err, usecase.ErrGetParticipant):
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "GET_PARTICIPANT_FAILED",
+			Message: "failed to get participant",
+		})
+
 	default:
-		_ = c.Error(err)
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Message: "internal server error",
+		})
 	}
 }

@@ -29,13 +29,14 @@ type ChatRoomMemberInfo struct {
 }
 
 type ChatMessageInfo struct {
-	MessageID int64
-	SenderID  int64
-	Content   string
-	Type      string
-	ReplyToID *int64
-	IsEdited  bool
-	CreatedAt time.Time
+	MessageID           int64
+	SenderID            int64
+	SenderParticipantID int64
+	Content             string
+	Type                string
+	ReplyToID           *int64
+	IsEdited            bool
+	CreatedAt           time.Time
 }
 
 type GetChatRoomDetailOutput struct {
@@ -104,6 +105,12 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 		return GetChatRoomDetailOutput{}, err
 	}
 
+	// Build member ID → participant ID map for message sender resolution (H-2).
+	memberParticipantMap := make(map[chatmember.ID]participant.ID, len(allMembers))
+	for _, m := range allMembers {
+		memberParticipantMap[m.ID] = m.ParticipantID
+	}
+
 	members := make([]ChatRoomMemberInfo, 0, len(allMembers))
 	for _, m := range allMembers {
 		if m.IsDeleted {
@@ -130,13 +137,14 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 			replyTo = &v
 		}
 		messages = append(messages, ChatMessageInfo{
-			MessageID: int64(msg.ID),
-			SenderID:  int64(msg.SenderID),
-			Content:   msg.Content,
-			Type:      string(msg.Type),
-			ReplyToID: replyTo,
-			IsEdited:  msg.IsEdited,
-			CreatedAt: msg.CreatedAt,
+			MessageID:           int64(msg.ID),
+			SenderID:            int64(msg.SenderID),
+			SenderParticipantID: int64(memberParticipantMap[msg.SenderID]),
+			Content:             msg.Content,
+			Type:                string(msg.Type),
+			ReplyToID:           replyTo,
+			IsEdited:            msg.IsEdited,
+			CreatedAt:           msg.CreatedAt,
 		})
 	}
 
@@ -146,7 +154,7 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 		description = &d
 	}
 
-	avatarURL := uc.resolveRoomAvatarURL(ctx, room, callerParticipant.ID)
+	avatarURL := uc.resolveRoomAvatarURL(ctx, room, callerParticipant.ID, allMembers)
 
 	return GetChatRoomDetailOutput{
 		RoomID:      int64(room.ID),
@@ -200,6 +208,7 @@ func (uc *GetChatRoomDetailUseCase) resolveRoomAvatarURL(
 	ctx context.Context,
 	room *chatroom.ChatRoom,
 	callerParticipantID participant.ID,
+	allMembers []*chatmember.ChatMember,
 ) *string {
 	switch room.Type {
 	case chatroom.Group, chatroom.Channel:
@@ -210,11 +219,7 @@ func (uc *GetChatRoomDetailUseCase) resolveRoomAvatarURL(
 		return nil
 
 	case chatroom.Direct, chatroom.Bot:
-		roomMembers, err := uc.chatMemberRepo.FindByRoom(ctx, room.ID)
-		if err != nil {
-			return nil
-		}
-		for _, m := range roomMembers {
+		for _, m := range allMembers {
 			if m.IsDeleted || m.ParticipantID == callerParticipantID {
 				continue
 			}

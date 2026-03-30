@@ -49,6 +49,12 @@ func HandleError(c *gin.Context, err error) {
 			Message: "not a member of this room",
 		})
 
+	case errors.Is(err, usecase.ErrUserBlocked):
+		c.JSON(http.StatusForbidden, response.ErrorResponse{
+			Code:    "USER_BLOCKED",
+			Message: "user has blocked you",
+		})
+
 	case errors.Is(err, usecase.ErrParticipantNotFound):
 		c.JSON(http.StatusNotFound, response.ErrNotFound("participant"))
 
@@ -56,6 +62,18 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
 			Code:    "INTERNAL_ERROR",
 			Message: "internal server error",
+		})
+
+	case errors.Is(err, usecase.ErrNotInvitee):
+		c.JSON(http.StatusForbidden, response.ErrorResponse{
+			Code:    "NOT_INVITEE",
+			Message: "caller is not the invitee of this invitation",
+		})
+
+	case errors.Is(err, usecase.ErrInvalidInvitationAction):
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_INVITATION_ACTION",
+			Message: "invalid invitation action",
 		})
 
 	case errors.Is(err, usecase.ErrInvalidMessageType), errors.Is(err, usecase.ErrInvalidFileType):

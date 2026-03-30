@@ -83,6 +83,10 @@ func (uc *UploadRoomMediaUseCase) Execute(
 		return UploadRoomMediaOutput{}, ErrNotRoomMember
 	}
 
+	if !chatmember.CanUploadMedia(callerMember.Role) {
+		return UploadRoomMediaOutput{}, ErrNotAllowed
+	}
+
 	if !allowedMIMETypes[input.Data.MimeType] {
 		return UploadRoomMediaOutput{}, ErrInvalidFileType
 	}
