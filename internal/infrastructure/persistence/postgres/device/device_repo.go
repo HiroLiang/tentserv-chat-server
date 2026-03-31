@@ -78,12 +78,25 @@ func (r *DeviceRepository) Create(ctx context.Context, d *device.Device) error {
 	query, args, err := Table.Insert().
 		Columns("id", "platform", "name").
 		Values(rec.ID, rec.Platform, rec.Name).
+		Suffix("ON CONFLICT (id) DO NOTHING").
 		ToSql()
 	if err != nil {
 		return err
 	}
 
-	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+	result, err := r.GetDB(ctx).ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("create device: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("create device rows affected: %w", err)
+	}
+	if rows == 0 {
+		return device.ErrDeviceAlreadyExists
+	}
+	return nil
 }
 
 func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {

@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gorilla/websocket"
 )
+
+func TestMain(m *testing.M) {
+	logger.InitTestEnv()
+	os.Exit(m.Run())
+}
 
 // mockHandler is a test double for MessageHandler.
 type mockHandler struct {

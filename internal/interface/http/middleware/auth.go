@@ -25,6 +25,9 @@ func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository
 			}
 		}
 		DeviceID := c.GetHeader("X-Device-ID")
+	if DeviceID == "" {
+		DeviceID = c.Query("device_id") // WebSocket fallback (browser cannot set custom headers)
+	}
 
 		// Validate token if exists
 		var token auth.AccessToken = ""
