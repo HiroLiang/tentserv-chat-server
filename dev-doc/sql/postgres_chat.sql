@@ -86,7 +86,7 @@ BEGIN
       AND m.is_deleted = false
       AND p.type != 'system';
 
-    IF current_count >= max_limit THEN
+    IF max_limit > 0 AND current_count >= max_limit THEN
         RAISE EXCEPTION 'User limit exceeded for this account';
     END IF;
 

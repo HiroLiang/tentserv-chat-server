@@ -38,16 +38,15 @@ func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.Mes
 func RegisterWsRoutes(r *gin.Engine, hub *ws.Hub, router *ws.MessageRouter, deps *Dependencies) {
 	r.GET("/ws/",
 		middleware.AuthMiddleware(deps.SessionManager, deps.UserRepo),
+		middleware.RequireAuthMiddleware(),
 		func(c *gin.Context) {
 			conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 			if err != nil {
 				return
 			}
 
-			userID := ""
-			if v, ok := c.Get("authContext"); ok {
-				userID = strconv.FormatInt(int64(v.(*shared.AuthContext).UserID), 10)
-			}
+			v, _ := c.Get("authContext")
+			userID := strconv.FormatInt(int64(v.(*shared.AuthContext).UserID), 10)
 
 			client := ws.NewClient(hub, conn, userID)
 			hub.Register <- client

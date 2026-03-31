@@ -113,7 +113,7 @@ func (uc *AcceptFriendshipUseCase) Execute(
 
 	_, err = uc.chatRoomRepo.FindDirectByParticipants(context.Background(), accepterP.ID, requesterP.ID)
 	if errors.Is(err, chatroom.ErrNotFound) {
-		room := &chatroom.ChatRoom{Type: chatroom.Direct}
+		room := &chatroom.ChatRoom{Type: chatroom.Direct, MaxMembers: 2}
 		if createErr := uc.chatRoomRepo.Create(context.Background(), room); createErr != nil {
 			logger.Log.Warn("accept friendship: failed to create direct chat room", zap.Error(createErr))
 			return nil

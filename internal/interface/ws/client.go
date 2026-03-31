@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 const (
@@ -86,13 +88,6 @@ func (c *Client) WritePump() {
 			}
 			_, _ = w.Write(message)
 
-			// Drain any queued messages into the same frame.
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				_, _ = w.Write([]byte{'\n'})
-				_, _ = w.Write(<-c.send)
-			}
-
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -106,10 +101,11 @@ func (c *Client) WritePump() {
 	}
 }
 
-// Send enqueues msg for delivery. Drops silently if the buffer is full.
+// Send enqueues msg for delivery. Drops with a warning log if the buffer is full.
 func (c *Client) Send(msg []byte) {
 	select {
 	case c.send <- msg:
 	default:
+		logger.Log.Warn("ws: send buffer full, dropping message", zap.String("user_id", c.UserID))
 	}
 }

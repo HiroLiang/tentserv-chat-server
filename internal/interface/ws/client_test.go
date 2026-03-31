@@ -163,15 +163,12 @@ func TestClient_WritePump_DeliversMultipleMessages(t *testing.T) {
 		client.Send(m)
 	}
 
-	clientConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-
-	// All messages should arrive (possibly batched into one frame separated by '\n').
-	_, frame, err := clientConn.ReadMessage()
-	assert.NoError(t, err)
-
-	combined := string(frame)
-	for _, m := range messages {
-		assert.Contains(t, combined, string(m))
+	// Each message arrives in its own frame.
+	for _, want := range messages {
+		clientConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, got, err := clientConn.ReadMessage()
+		assert.NoError(t, err)
+		assert.Equal(t, want, got)
 	}
 }
 
