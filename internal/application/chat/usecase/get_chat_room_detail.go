@@ -21,6 +21,7 @@ type GetChatRoomDetailInput struct {
 type ChatRoomMemberInfo struct {
 	MemberID      int64
 	ParticipantID int64
+	UserID        *int64
 	DisplayName   string
 	AvatarURL     *string
 	Role          string
@@ -182,6 +183,8 @@ func (uc *GetChatRoomDetailUseCase) buildMemberInfo(ctx context.Context, m *chat
 	}
 
 	if p.UserID != nil {
+		uid := int64(*p.UserID)
+		info.UserID = &uid
 		u, err := uc.userRepo.FindByID(ctx, *p.UserID)
 		if err != nil {
 			return info

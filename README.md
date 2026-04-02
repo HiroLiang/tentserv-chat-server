@@ -1,5 +1,9 @@
 # Tentserv Chat Server
 
+<p align="center">
+  English | <a href="docs/i18n/zh-TW/README.md">中文</a> | <a href="docs/i18n/ja/README.md">日本語</a>
+</p>
+
 A Go REST API + WebSocket server for the Tentserv Chat desktop application. Personal practice project.
 
 ## Stack

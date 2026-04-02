@@ -77,7 +77,18 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 		memberParticipantMap[m.ID] = m.ParticipantID
 	}
 
-	msgs, err := uc.chatMessageRepo.FindByRoomBefore(ctx, roomID, chatmessage.ID(input.Data.BeforeID), limit)
+	var msgs []*chatmessage.ChatMessage
+	if input.Data.BeforeID == 0 {
+		// Initial load: fetch latest messages, then reverse to ascending order.
+		msgs, err = uc.chatMessageRepo.FindByRoom(ctx, roomID, limit, 0)
+		if err == nil {
+			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+				msgs[i], msgs[j] = msgs[j], msgs[i]
+			}
+		}
+	} else {
+		msgs, err = uc.chatMessageRepo.FindByRoomBefore(ctx, roomID, chatmessage.ID(input.Data.BeforeID), limit)
+	}
 	if err != nil {
 		return GetChatRoomMessagesOutput{}, err
 	}
