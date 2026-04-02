@@ -240,6 +240,7 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 		members = append(members, ChatRoomMemberInfoResponse{
 			MemberID:      m.MemberID,
 			ParticipantID: m.ParticipantID,
+			UserID:        m.UserID,
 			DisplayName:   m.DisplayName,
 			AvatarURL:     m.AvatarURL,
 			Role:          m.Role,

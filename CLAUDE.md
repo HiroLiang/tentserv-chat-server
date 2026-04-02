@@ -88,7 +88,7 @@ DB migration: `dev-doc/sql/migrate_add_e2ee.sql`.
 ```bash
 # PostgreSQL
 docker run -d --name postgres --network goat-net \
-  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=goat \
+  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=tentserv \
   -p 5432:5432 postgres:18
 
 # Redis

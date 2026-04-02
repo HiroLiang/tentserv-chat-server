@@ -53,6 +53,7 @@ type ChatRoomSummaryResponse struct {
 type ChatRoomMemberInfoResponse struct {
 	MemberID      int64      `json:"member_id"`
 	ParticipantID int64      `json:"participant_id"`
+	UserID        *int64     `json:"user_id,omitempty"`
 	DisplayName   string     `json:"display_name"`
 	AvatarURL     *string    `json:"avatar_url"`
 	Role          string     `json:"role"`
