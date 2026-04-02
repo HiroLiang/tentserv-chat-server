@@ -11,6 +11,7 @@ var (
 	ErrChatRoomNotFound          = errors.New("chat room not found")
 	ErrChatRoomCreate            = errors.New("failed to create chat room")
 	ErrAlreadyMember             = errors.New("already a member of this room")
+	ErrInvitationQuery           = errors.New("failed to get invitation")
 	ErrInvitationNotFound        = errors.New("invitation not found")
 	ErrInvitationCreate          = errors.New("failed to create invitation")
 	ErrInvitationAlreadyExists   = errors.New("join request already pending")

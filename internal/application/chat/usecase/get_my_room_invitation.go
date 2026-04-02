@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
@@ -54,7 +55,7 @@ func (uc *GetMyRoomInvitationUseCase) Execute(
 		if errors.Is(err, participant.ErrNotFound) {
 			return GetMyRoomInvitationOutput{}, ErrParticipantNotFound
 		}
-		return GetMyRoomInvitationOutput{}, ErrInvitationCreate
+		return GetMyRoomInvitationOutput{}, fmt.Errorf("%w: find participant for user %d: %w", ErrInvitationQuery, userID, err)
 	}
 
 	// Check if caller is the invitee of a pending invitation
@@ -69,7 +70,13 @@ func (uc *GetMyRoomInvitationUseCase) Execute(
 		return out, nil
 	}
 	if !errors.Is(err, chatinvitation.ErrNotFound) {
-		return GetMyRoomInvitationOutput{}, ErrInvitationCreate
+		return GetMyRoomInvitationOutput{}, fmt.Errorf(
+			"%w: find invitee invitation for room %d participant %d: %w",
+			ErrInvitationQuery,
+			roomID,
+			callerParticipant.ID,
+			err,
+		)
 	}
 
 	// Check if caller is the inviter of a pending invitation (to someone else)
@@ -85,7 +92,13 @@ func (uc *GetMyRoomInvitationUseCase) Execute(
 		}
 	}
 	if err != nil && !errors.Is(err, chatinvitation.ErrNotFound) {
-		return GetMyRoomInvitationOutput{}, ErrInvitationCreate
+		return GetMyRoomInvitationOutput{}, fmt.Errorf(
+			"%w: find inviter invitation for room %d participant %d: %w",
+			ErrInvitationQuery,
+			roomID,
+			callerParticipant.ID,
+			err,
+		)
 	}
 
 	return GetMyRoomInvitationOutput{Found: false}, nil

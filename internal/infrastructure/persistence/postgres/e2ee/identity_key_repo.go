@@ -36,7 +36,7 @@ func (r *IdentityKeyRepository) FindByUserAndDevice(
 	deviceID device.ID,
 ) (*useridentitykey.UserIdentityKey, error) {
 	query, args, err := identityKeyTable.Select(identityKeyTable.Columns...).
-		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID.String()}).
 		Limit(1).
 		ToSql()
 	if err != nil {

@@ -110,7 +110,7 @@ func (u *GetSenderKeyDistributionStatusUseCase) pendingFromMembers(
 		return nil, fmt.Errorf("find room members: %w", err)
 	}
 
-	var pending []int64
+	pending := make([]int64, 0)
 	for _, m := range members {
 		if m.ID == callerMemberID || m.IsDeleted {
 			continue

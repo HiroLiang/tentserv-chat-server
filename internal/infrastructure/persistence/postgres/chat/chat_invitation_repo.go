@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
@@ -31,7 +32,7 @@ var ChatInvitationTable = postgres.Table{
 // notExpired is the squirrel condition that filters out expired invitations.
 var notExpired = squirrel.Or{
 	squirrel.Eq{"expires_at": nil},
-	squirrel.Gt{"expires_at": squirrel.Expr("now()")},
+	squirrel.Gt{"expires_at": time.Now()},
 }
 
 type ChatInvitationRepository struct {

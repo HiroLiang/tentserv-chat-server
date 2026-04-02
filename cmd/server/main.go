@@ -1,7 +1,7 @@
 // @title Tentservv Chat Server
 // @version 1.0.0
 // @description Server for my all Goat application
-// @host dev.hiroliang.com
+// @host localhost:8080
 // @basePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header

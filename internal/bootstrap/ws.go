@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -30,6 +31,11 @@ func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.Mes
 	router.Register("chat.send", wsChat.NewMessageHandler(useCases.SendMessageUseCase))
 	router.Register("game.move", wsGame.NewMoveHandler())
 	router.Register("system.ack", wsSystem.NewAckHandler(deps.Hub))
+
+	// On each new WS connection, push any pending sender key requests to the provider.
+	deps.Hub.SetOnConnect(func(userID string) {
+		useCases.NotifyPendingSenderKeyRequestsUseCase.Execute(context.Background(), userID)
+	})
 
 	return deps.Hub, router
 }

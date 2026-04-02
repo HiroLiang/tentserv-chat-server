@@ -65,7 +65,7 @@ func (u *UploadSignedPreKeyUseCase) Execute(
 		return nil, ErrIdentityNotFound
 	}
 
-	if !u.keyVerifier.VerifySignedPreKey(identityKey.PublicKey[:], pubBytes, sigBytes) {
+	if !u.keyVerifier.VerifySignedPreKey(identityKey.SignPublicKey[:], pubBytes, sigBytes) {
 		return nil, ErrInvalidSignature
 	}
 
