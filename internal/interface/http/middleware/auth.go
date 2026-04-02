@@ -11,11 +11,13 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // AuthMiddleware try to validate auth token from the header
 func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		isWebSocketRequest := strings.HasPrefix(c.Request.URL.Path, "/ws")
 
 		// Get auth token from the header, falling back to query param for WebSocket
 		authHeader := c.GetHeader("Authorization")
@@ -24,10 +26,10 @@ func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository
 				authHeader = "Bearer " + t
 			}
 		}
-		DeviceID := c.GetHeader("X-Device-ID")
-	if DeviceID == "" {
-		DeviceID = c.Query("device_id") // WebSocket fallback (browser cannot set custom headers)
-	}
+		deviceID := c.GetHeader("X-Device-ID")
+		if deviceID == "" {
+			deviceID = c.Query("device_id") // WebSocket fallback (browser cannot set custom headers)
+		}
 
 		// Validate token if exists
 		var token auth.AccessToken = ""
@@ -37,7 +39,23 @@ func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository
 
 			// Verify and get current session by token
 			session, err := sessionManager.FindByToken(c.Request.Context(), token)
-			if err == nil && session.DeviceID.Equal(DeviceID) {
+			if err != nil {
+				if isWebSocketRequest {
+					logger.Log.Debug("websocket auth failed: session lookup failed",
+						zap.String("path", c.Request.URL.Path),
+						zap.String("device_id", deviceID),
+						zap.Error(err),
+					)
+				}
+			} else if !session.DeviceID.Equal(deviceID) {
+				if isWebSocketRequest {
+					logger.Log.Debug("websocket auth failed: device_id mismatch",
+						zap.String("path", c.Request.URL.Path),
+						zap.String("device_id", deviceID),
+						zap.String("session_device_id", session.DeviceID.String()),
+					)
+				}
+			} else {
 				validSession = session
 
 				// Find current user
@@ -48,8 +66,19 @@ func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository
 						Roles:       userData.RoleCodes,
 						AccessToken: token,
 					})
+				} else if isWebSocketRequest {
+					logger.Log.Debug("websocket auth failed: user lookup failed",
+						zap.String("path", c.Request.URL.Path),
+						zap.Int64("user_id", int64(session.UserID)),
+						zap.Error(err),
+					)
 				}
 			}
+		} else if isWebSocketRequest {
+			logger.Log.Debug("websocket auth failed: bearer token missing",
+				zap.String("path", c.Request.URL.Path),
+				zap.String("device_id", deviceID),
+			)
 		}
 
 		c.Next()

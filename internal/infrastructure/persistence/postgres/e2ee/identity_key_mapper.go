@@ -3,6 +3,7 @@ package e2ee
 import (
 	"fmt"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/useridentitykey"
 )
 
@@ -13,6 +14,12 @@ func toIdentityKeyDomain(rec *IdentityKeyRecord) (*useridentitykey.UserIdentityK
 	if len(rec.SignPublicKey) != 32 {
 		return nil, fmt.Errorf("identity key: invalid sign public key length %d", len(rec.SignPublicKey))
 	}
+
+	deviceID, err := shared.ParseDeviceID(rec.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("identity key: invalid device id %q: %w", rec.DeviceID, err)
+	}
+
 	var pub useridentitykey.PublicKey
 	copy(pub[:], rec.PublicKey)
 	var signPub useridentitykey.SignPublicKey
@@ -21,7 +28,7 @@ func toIdentityKeyDomain(rec *IdentityKeyRecord) (*useridentitykey.UserIdentityK
 	return &useridentitykey.UserIdentityKey{
 		ID:            rec.ID,
 		UserID:        rec.UserID,
-		DeviceID:      rec.DeviceID,
+		DeviceID:      deviceID,
 		PublicKey:     pub,
 		SignPublicKey: signPub,
 		Fingerprint:   useridentitykey.Fingerprint(rec.Fingerprint),
@@ -33,7 +40,7 @@ func toIdentityKeyRecord(k *useridentitykey.UserIdentityKey) *IdentityKeyRecord 
 	return &IdentityKeyRecord{
 		ID:            k.ID,
 		UserID:        k.UserID,
-		DeviceID:      k.DeviceID,
+		DeviceID:      k.DeviceID.String(),
 		PublicKey:     k.PublicKey[:],
 		SignPublicKey: k.SignPublicKey[:],
 		Fingerprint:   string(k.Fingerprint),

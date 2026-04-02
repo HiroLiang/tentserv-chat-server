@@ -53,9 +53,11 @@ type UseCases struct {
 	UploadOTPPreKeysUseCase                   *e2eeUseCase.UploadOTPPreKeysUseCase
 	CountOTPPreKeysUseCase                    *e2eeUseCase.CountOTPPreKeysUseCase
 	GetKeyBundleUseCase                       *e2eeUseCase.GetKeyBundleUseCase
-	UploadSenderKeyUseCase                    *e2eeUseCase.UploadSenderKeyUseCase
-	GetSenderKeysUseCase                      *e2eeUseCase.GetSenderKeysUseCase
-	GetSenderKeyDistributionStatusUseCase     *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
+	UploadSenderKeyUseCase                        *e2eeUseCase.UploadSenderKeyUseCase
+	GetSenderKeysUseCase                          *e2eeUseCase.GetSenderKeysUseCase
+	GetSenderKeyDistributionStatusUseCase         *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
+	CreateSenderKeyRequestUseCase                 *e2eeUseCase.CreateSenderKeyRequestUseCase
+	NotifyPendingSenderKeyRequestsUseCase         *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
 
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
@@ -204,6 +206,20 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.MemberSenderKeyRepo,
+			deps.SenderKeyRequestRepo,
+			deps.Hub,
+		),
+		CreateSenderKeyRequestUseCase: e2eeUseCase.NewCreateSenderKeyRequestUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.SenderKeyRequestRepo,
+			deps.Hub,
+		),
+		NotifyPendingSenderKeyRequestsUseCase: e2eeUseCase.NewNotifyPendingSenderKeyRequestsUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.SenderKeyRequestRepo,
+			deps.Hub,
 		),
 		GetSenderKeysUseCase: e2eeUseCase.NewGetSenderKeysUseCase(
 			deps.ParticipantRepository,

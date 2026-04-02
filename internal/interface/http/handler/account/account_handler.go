@@ -175,11 +175,11 @@ func (h *AuthHandler) getProfile(c *gin.Context) {
 }
 
 // @Summary Verify email address
-// @Description Verify account email using the token sent during registration
+// @Description Verify account email using the token sent during registration. Returns an HTML page on success.
 // @Tags Auth
-// @Produce json
+// @Produce html
 // @Param token query string true "Verification token"
-// @Success 200 {object} VerifyEmailResponse
+// @Success 200 {string} string "Verified HTML page"
 // @Failure 400 {object} response.ErrorResponse "Bad Request"
 // @Router /api/auth/verify-email [get]
 func (h *AuthHandler) verifyEmail(c *gin.Context) {
@@ -196,5 +196,5 @@ func (h *AuthHandler) verifyEmail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, VerifyEmailResponse{})
+	c.Data(http.StatusOK, "text/html; charset=utf-8", authUseCase.EmailVerifiedHTML)
 }

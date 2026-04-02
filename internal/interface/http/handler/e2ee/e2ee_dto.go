@@ -67,6 +67,12 @@ type GetSenderKeysResponse struct {
 	Keys []SenderKeyItemResponse `json:"keys"`
 }
 
+// Sender Key Request
+type CreateSenderKeyRequestRequest struct {
+	RoomID           int64 `json:"room_id"            binding:"required"`
+	ProviderMemberID int64 `json:"provider_member_id" binding:"required"`
+}
+
 // Sender Key Distribution Status
 type GetSenderKeyDistributionStatusResponse struct {
 	// PendingReceivers: member IDs in the room who have not yet fetched my latest sender key.

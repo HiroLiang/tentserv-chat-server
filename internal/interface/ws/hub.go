@@ -27,6 +27,10 @@ type Hub struct {
 	// pendingAcks tracks in-flight deliveries waiting for client ACK.
 	pendingAcks map[int64]chan struct{}
 	ackMu       sync.Mutex
+
+	// onConnect is an optional hook called (in a goroutine) when a new client connects.
+	// userID is the string user ID of the newly connected client.
+	onConnect func(userID string)
 }
 
 // NewHub creates a new Hub.
@@ -51,6 +55,9 @@ func (h *Hub) Run() {
 				h.mu.Lock()
 				h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
 				h.mu.Unlock()
+				if h.onConnect != nil {
+					go h.onConnect(client.UserID)
+				}
 			}
 
 		case client := <-h.Unregister:
@@ -128,6 +135,11 @@ func (h *Hub) ResolveAck(deliveryID int64) {
 		default:
 		}
 	}
+}
+
+// SetOnConnect registers a hook function called (in a goroutine) each time a new client connects.
+func (h *Hub) SetOnConnect(fn func(userID string)) {
+	h.onConnect = fn
 }
 
 // removeUserClient removes target from h.userClients[userID].

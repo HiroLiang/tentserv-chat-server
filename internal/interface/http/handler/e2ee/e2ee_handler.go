@@ -18,6 +18,7 @@ type E2EEHandler struct {
 	uploadSenderKey                *usecase.UploadSenderKeyUseCase
 	getSenderKeys                  *usecase.GetSenderKeysUseCase
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase
+	createSenderKeyRequest         *usecase.CreateSenderKeyRequestUseCase
 }
 
 func NewE2EEHandler(
@@ -29,6 +30,7 @@ func NewE2EEHandler(
 	uploadSenderKey *usecase.UploadSenderKeyUseCase,
 	getSenderKeys *usecase.GetSenderKeysUseCase,
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase,
+	createSenderKeyRequest *usecase.CreateSenderKeyRequestUseCase,
 ) *E2EEHandler {
 	return &E2EEHandler{
 		uploadIdentityKey:              uploadIdentityKey,
@@ -39,6 +41,7 @@ func NewE2EEHandler(
 		uploadSenderKey:                uploadSenderKey,
 		getSenderKeys:                  getSenderKeys,
 		getSenderKeyDistributionStatus: getSenderKeyDistributionStatus,
+		createSenderKeyRequest:         createSenderKeyRequest,
 	}
 }
 
@@ -51,6 +54,7 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.POST("/sender-key", h.uploadSenderKey_)
 	r.GET("/sender-keys/:room_id", h.getSenderKeys_)
 	r.GET("/sender-key-distributions/:room_id", h.getSenderKeyDistributionStatus_)
+	r.POST("/sender-key-request", h.createSenderKeyRequest_)
 }
 
 // @Summary Upload identity key
@@ -307,7 +311,46 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
-		PendingReceivers:   out.PendingReceivers,
-		PendingFromMembers: out.PendingFromMembers,
+		PendingReceivers:   normalizeMemberIDs(out.PendingReceivers),
+		PendingFromMembers: normalizeMemberIDs(out.PendingFromMembers),
 	})
+}
+
+// @Summary Request sender key from another member
+// @Description Creates a request for provider_member_id to upload their sender key for the given room.
+//
+//	Also pushes a real-time e2ee.sender_key_needed notification to the provider if they are online.
+//
+// @Tags E2EE
+// @Accept json
+// @Security BearerAuth
+// @Param payload body CreateSenderKeyRequestRequest true "Request payload"
+// @Success 204
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/sender-key-request [post]
+func (h *E2EEHandler) createSenderKeyRequest_(c *gin.Context) {
+	var req CreateSenderKeyRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
+	}
+	input := adapter.BuildInput(c, usecase.CreateSenderKeyRequestInput{
+		RoomID:           req.RoomID,
+		ProviderMemberID: req.ProviderMemberID,
+	})
+	if _, err := h.createSenderKeyRequest.Execute(c.Request.Context(), input); err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func normalizeMemberIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }

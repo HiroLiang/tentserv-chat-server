@@ -62,5 +62,10 @@ func (u *UploadOTPPreKeysUseCase) Execute(
 		return nil, fmt.Errorf("add otp prekeys: %w", err)
 	}
 
-	return &UploadOTPPreKeysOutput{Count: len(keys)}, nil
+	count, err := u.otpPreKeyRepo.CountAvailable(ctx, input.Base.Auth.UserID, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("count otp prekeys after upload: %w", err)
+	}
+
+	return &UploadOTPPreKeysOutput{Count: count}, nil
 }

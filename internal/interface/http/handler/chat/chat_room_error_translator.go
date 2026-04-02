@@ -22,6 +22,12 @@ func HandleError(c *gin.Context, err error) {
 			Message: "already a member of this room",
 		})
 
+	case errors.Is(err, usecase.ErrInvitationQuery):
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Message: "internal server error",
+		})
+
 	case errors.Is(err, usecase.ErrInvitationAlreadyExists):
 		c.JSON(http.StatusConflict, response.ErrorResponse{
 			Code:    "INVITATION_EXISTS",

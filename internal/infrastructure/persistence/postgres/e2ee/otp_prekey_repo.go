@@ -11,7 +11,6 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/userotpprekey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
-	"github.com/gofrs/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -51,7 +50,7 @@ WHERE public.user_one_time_pre_keys.id = victim.id
 RETURNING id, user_id, device_id, key_id, public_key, uploaded_at`
 
 	db := r.GetDB(ctx)
-	rec, err := postgres.ScanOne[OTPPreKeyRecord](ctx, db, query, userID, deviceID)
+	rec, err := postgres.ScanOne[OTPPreKeyRecord](ctx, db, query, userID, deviceID.String())
 	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return nil, userotpprekey.ErrPoolEmpty
@@ -89,7 +88,7 @@ func (r *OTPPreKeyRepository) CountAvailable(
 	query, args, err := postgres.Builder.
 		Select("COUNT(*)").
 		From(otpPreKeyTable.Name).
-		Where(squirrel.Eq{"user_id": userID, "device_id": uuid.UUID(deviceID)}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID.String()}).
 		ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("build count otp prekeys: %w", err)

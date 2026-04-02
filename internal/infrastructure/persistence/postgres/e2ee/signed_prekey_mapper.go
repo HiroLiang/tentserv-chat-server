@@ -3,6 +3,7 @@ package e2ee
 import (
 	"fmt"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/usersignedprekey"
 )
 
@@ -14,6 +15,11 @@ func toSignedPreKeyDomain(rec *SignedPreKeyRecord) (*usersignedprekey.UserSigned
 		return nil, fmt.Errorf("signed prekey: invalid signature length %d", len(rec.Signature))
 	}
 
+	deviceID, err := shared.ParseDeviceID(rec.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("signed prekey: invalid device id %q: %w", rec.DeviceID, err)
+	}
+
 	var pub usersignedprekey.PublicKey
 	copy(pub[:], rec.PublicKey)
 
@@ -23,7 +29,7 @@ func toSignedPreKeyDomain(rec *SignedPreKeyRecord) (*usersignedprekey.UserSigned
 	return &usersignedprekey.UserSignedPreKey{
 		ID:        rec.ID,
 		UserID:    rec.UserID,
-		DeviceID:  rec.DeviceID,
+		DeviceID:  deviceID,
 		KeyID:     rec.KeyID,
 		PublicKey: pub,
 		Signature: sig,
@@ -37,7 +43,7 @@ func toSignedPreKeyRecord(k *usersignedprekey.UserSignedPreKey) *SignedPreKeyRec
 	return &SignedPreKeyRecord{
 		ID:        k.ID,
 		UserID:    k.UserID,
-		DeviceID:  k.DeviceID,
+		DeviceID:  k.DeviceID.String(),
 		KeyID:     k.KeyID,
 		PublicKey: k.PublicKey[:],
 		Signature: k.Signature[:],

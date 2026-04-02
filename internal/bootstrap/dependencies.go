@@ -19,8 +19,9 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
-	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -88,6 +89,7 @@ type Dependencies struct {
 	OTPPreKeyRepo              userotpprekey.Repository
 	MemberSenderKeyRepo        membersenderkey.Repository
 	SenderKeyDistributionRepo  senderkeydistribution.Repository
+	SenderKeyRequestRepo       senderkeyrequest.Repository
 
 	Hub               *ws.Hub
 	DeliveryQueueRepo deliveryqueue.Repository
@@ -161,6 +163,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 		OTPPreKeyRepo:         postgresE2EE.NewOTPPreKeyRepository(postgresDB),
 		MemberSenderKeyRepo:       postgresE2EE.NewSenderKeyRepository(postgresDB),
 		SenderKeyDistributionRepo: postgresE2EE.NewSenderKeyDistributionRepository(postgresDB),
+		SenderKeyRequestRepo:      postgresE2EE.NewSenderKeyRequestRepository(postgresDB),
 		Hub:                   hub,
 		DeliveryQueueRepo:     deliveryQueueRepo,
 		PushDispatcher:        pushDispatcher,

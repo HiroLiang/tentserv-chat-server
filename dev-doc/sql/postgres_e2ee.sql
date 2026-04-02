@@ -80,3 +80,21 @@ CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_sender
     ON public.sender_key_distributions (sender_member_id);
 CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_receiver
     ON public.sender_key_distributions (receiver_member_id);
+
+-- Sender key requests
+-- Records that requester_member_id needs provider_member_id to upload their sender key.
+-- Created when a member enters a room and finds pending_from_members is not empty.
+-- Fulfilled (and deleted) when the provider uploads their sender key.
+-- Used as a reliable fallback so offline providers are notified on reconnect.
+CREATE TABLE IF NOT EXISTS public.sender_key_requests
+(
+    id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    requester_member_id  BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    provider_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    created_at           TIMESTAMP NOT NULL DEFAULT now(),
+    fulfilled_at         TIMESTAMP,
+    UNIQUE (requester_member_id, provider_member_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sender_key_requests_provider
+    ON public.sender_key_requests (provider_member_id)
+    WHERE fulfilled_at IS NULL;

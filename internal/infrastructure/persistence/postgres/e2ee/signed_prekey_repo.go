@@ -37,7 +37,7 @@ func (r *SignedPreKeyRepository) FindActive(
 	deviceID device.ID,
 ) (*usersignedprekey.UserSignedPreKey, error) {
 	query, args, err := signedPreKeyTable.Select(signedPreKeyTable.Columns...).
-		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID, "is_active": true}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID.String(), "is_active": true}).
 		Limit(1).
 		ToSql()
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *SignedPreKeyRepository) FindByKeyID(
 	keyID usersignedprekey.KeyID,
 ) (*usersignedprekey.UserSignedPreKey, error) {
 	query, args, err := signedPreKeyTable.Select(signedPreKeyTable.Columns...).
-		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID, "key_id": keyID}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID.String(), "key_id": keyID}).
 		Limit(1).
 		ToSql()
 	if err != nil {
@@ -107,7 +107,7 @@ func (r *SignedPreKeyRepository) DeactivateAll(
 ) error {
 	query, args, err := signedPreKeyTable.Update().
 		Set("is_active", false).
-		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID, "is_active": true}).
+		Where(squirrel.Eq{"user_id": userID, "device_id": deviceID.String(), "is_active": true}).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build deactivate signed prekeys: %w", err)
