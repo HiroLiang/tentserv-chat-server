@@ -26,9 +26,10 @@ func ContextMiddleware() gin.HandlerFunc {
 		// Set context
 		c.Set("context", &appShared.BaseContext{
 			Request: appShared.RequestContext{
-				IP:       net.ParseIP(c.ClientIP()),
-				TraceID:  c.GetHeader("traceparent"),
-				DeviceID: deviceID,
+				IP:        net.ParseIP(c.ClientIP()),
+				TraceID:   c.GetHeader("traceparent"),
+				DeviceID:  deviceID,
+				UserAgent: c.Request.UserAgent(),
 			},
 			Auth: authCtx,
 		})

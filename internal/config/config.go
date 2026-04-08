@@ -47,6 +47,11 @@ type AppConfig struct {
 		BaseURL       string        `mapstructure:"base_url"`
 		VerifyTTL     time.Duration `mapstructure:"verify_ttl"`
 	} `mapstructure:"email"`
+
+	E2EE struct {
+		OTPPreKeyTargetCount        int `mapstructure:"otp_prekey_target_count"`
+		OTPPreKeyReplenishThreshold int `mapstructure:"otp_prekey_replenish_threshold"`
+	} `mapstructure:"e2ee"`
 }
 
 type DBConfig struct {

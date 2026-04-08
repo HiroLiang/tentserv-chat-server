@@ -1,3 +1,7 @@
 package usecase
 
-const OTPReplenishThreshold = 5
+const (
+	DefaultOTPPreKeyTargetCount        = 20
+	DefaultOTPPreKeyReplenishThreshold = 5
+	OTPReplenishThreshold              = DefaultOTPPreKeyReplenishThreshold
+)

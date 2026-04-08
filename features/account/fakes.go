@@ -5,10 +5,14 @@ import (
 	"sync"
 	"time"
 
+	authPort "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	appSecurity "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	domaindevice "github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
@@ -18,20 +22,26 @@ import (
 )
 
 type Deps struct {
-	accountRepo *bddAccountRepo
-	userRepo    *bddUserRepo
-	roleRepo    *bddUserRoleRepo
-	store       *bddVerificationStore
-	email       *bddEmailService
+	accountRepo     *bddAccountRepo
+	userRepo        *bddUserRepo
+	roleRepo        *bddUserRoleRepo
+	deviceRepo      *bddDeviceRepo
+	participantRepo *bddParticipantRepo
+	sessionManager  *bddSessionManager
+	store           *bddVerificationStore
+	email           *bddEmailService
 }
 
 func NewDeps() *Deps {
 	deps := &Deps{
-		accountRepo: newBDDAccountRepo(),
-		userRepo:    &bddUserRepo{},
-		roleRepo:    &bddUserRoleRepo{},
-		store:       newBDDVerificationStore(),
-		email:       &bddEmailService{},
+		accountRepo:     newBDDAccountRepo(),
+		userRepo:        newBDDUserRepo(),
+		roleRepo:        &bddUserRoleRepo{},
+		deviceRepo:      newBDDDeviceRepo(),
+		participantRepo: newBDDParticipantRepo(),
+		sessionManager:  newBDDSessionManager(),
+		store:           newBDDVerificationStore(),
+		email:           &bddEmailService{},
 	}
 	deps.Reset()
 	return deps
@@ -41,8 +51,39 @@ func (d *Deps) Reset() {
 	d.accountRepo.reset()
 	d.userRepo.reset()
 	d.roleRepo.reset()
+	d.deviceRepo.reset()
+	d.participantRepo.reset()
+	d.sessionManager.reset()
 	d.store.reset()
 	d.email.reset()
+}
+
+func (d *Deps) SessionManager() authPort.SessionManager {
+	return d.sessionManager
+}
+
+func (d *Deps) UserRepo() domainuser.Repository {
+	return d.userRepo
+}
+
+func (d *Deps) LastSessionUserID() shared.UserID {
+	d.sessionManager.mu.Lock()
+	defer d.sessionManager.mu.Unlock()
+
+	if d.sessionManager.lastCreated == nil {
+		return 0
+	}
+	return d.sessionManager.lastCreated.UserID
+}
+
+func (d *Deps) LastSessionDeviceID() shared.DeviceID {
+	d.sessionManager.mu.Lock()
+	defer d.sessionManager.mu.Unlock()
+
+	if d.sessionManager.lastCreated == nil {
+		return shared.DeviceID{}
+	}
+	return d.sessionManager.lastCreated.DeviceID
 }
 
 func (d *Deps) RegisterUseCases(
@@ -65,15 +106,41 @@ func (d *Deps) RegisterUseCases(
 	return registerUseCase, verifyUseCase
 }
 
+func (d *Deps) LoginUseCases(
+	uow transaction.UnitOfWork,
+	hasher appSecurity.Hasher,
+) (*authUseCase.LoginUseCase, *authUseCase.GetProfileUseCase) {
+	loginUseCase := authUseCase.NewLoginUseCase(
+		uow,
+		hasher,
+		d.sessionManager,
+		d.accountRepo,
+		d.userRepo,
+		d.roleRepo,
+		d.deviceRepo,
+		d.participantRepo,
+		d.email,
+		func(string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return bddEmailBuilder{}
+		},
+	)
+	profileUseCase := authUseCase.NewGetProfileUseCase(d.accountRepo, d.userRepo)
+	return loginUseCase, profileUseCase
+}
+
 type bddAccountRepo struct {
-	mu              sync.Mutex
-	nextID          shared.AccountID
-	accountsByID    map[shared.AccountID]*domainaccount.Account
-	accountsByEmail map[shared.EmailAddress]*domainaccount.Account
-	accountsByName  map[string]*domainaccount.Account
-	createCalls     int
-	updateCalls     int
-	lastUpdated     *domainaccount.Account
+	mu                    sync.Mutex
+	nextID                shared.AccountID
+	accountsByID          map[shared.AccountID]*domainaccount.Account
+	accountsByEmail       map[shared.EmailAddress]*domainaccount.Account
+	accountsByName        map[string]*domainaccount.Account
+	createCalls           int
+	updateCalls           int
+	registerDeviceCalls   int
+	recordLoginEventCalls int
+	lastUpdated           *domainaccount.Account
+	lastRegisteredDevice  *domainaccount.AccountDevice
+	lastLoginEvent        *domainaccount.AccountLoginEvent
 }
 
 func newBDDAccountRepo() *bddAccountRepo {
@@ -90,7 +157,11 @@ func (r *bddAccountRepo) reset() {
 	r.accountsByName = map[string]*domainaccount.Account{}
 	r.createCalls = 0
 	r.updateCalls = 0
+	r.registerDeviceCalls = 0
+	r.recordLoginEventCalls = 0
 	r.lastUpdated = nil
+	r.lastRegisteredDevice = nil
+	r.lastLoginEvent = nil
 }
 
 func (r *bddAccountRepo) seed(email shared.EmailAddress, accountName string) {
@@ -110,6 +181,27 @@ func (r *bddAccountRepo) seed(email shared.EmailAddress, accountName string) {
 	r.accountsByID[acc.ID] = acc
 	r.accountsByEmail[email] = acc
 	r.accountsByName[accountName] = acc
+}
+
+func (r *bddAccountRepo) seedLogin(email shared.EmailAddress, accountName, passwordHash string, status domainaccount.Status, userIDs ...shared.UserID) *domainaccount.Account {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID++
+	acc := &domainaccount.Account{
+		ID:          r.nextID,
+		PublicID:    uuid.Nil,
+		Email:       email,
+		AccountName: accountName,
+		Password:    passwordHash,
+		Status:      status,
+		UserLimit:   1,
+		UserIDs:     append([]shared.UserID(nil), userIDs...),
+	}
+	r.accountsByID[acc.ID] = acc
+	r.accountsByEmail[email] = acc
+	r.accountsByName[accountName] = acc
+	return cloneBDDAccount(acc)
 }
 
 func (r *bddAccountRepo) FindByID(_ context.Context, id shared.AccountID) (*domainaccount.Account, error) {
@@ -179,7 +271,23 @@ func (r *bddAccountRepo) Update(_ context.Context, acc *domainaccount.Account) e
 	return nil
 }
 
-func (r *bddAccountRepo) RegisterDevice(context.Context, *domainaccount.AccountDevice) error {
+func (r *bddAccountRepo) RegisterDevice(_ context.Context, device *domainaccount.AccountDevice) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.registerDeviceCalls++
+	copied := *device
+	r.lastRegisteredDevice = &copied
+	return nil
+}
+
+func (r *bddAccountRepo) RecordLoginEvent(_ context.Context, event *domainaccount.AccountLoginEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.recordLoginEventCalls++
+	copied := *event
+	r.lastLoginEvent = &copied
 	return nil
 }
 
@@ -190,8 +298,13 @@ func (r *bddAccountRepo) ReplaceDevices(context.Context, shared.AccountID, []dom
 type bddUserRepo struct {
 	mu          sync.Mutex
 	nextID      shared.UserID
+	usersByID   map[shared.UserID]*domainuser.User
 	createCalls int
 	lastCreated *domainuser.User
+}
+
+func newBDDUserRepo() *bddUserRepo {
+	return &bddUserRepo{}
 }
 
 func (r *bddUserRepo) reset() {
@@ -199,8 +312,25 @@ func (r *bddUserRepo) reset() {
 	defer r.mu.Unlock()
 
 	r.nextID = 500
+	r.usersByID = map[shared.UserID]*domainuser.User{}
 	r.createCalls = 0
 	r.lastCreated = nil
+}
+
+func (r *bddUserRepo) seed(accountID shared.AccountID, userID shared.UserID, name string, roles []role.Code) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u := &domainuser.User{
+		ID:        userID,
+		AccountID: accountID,
+		Name:      name,
+		RoleCodes: append([]role.Code(nil), roles...),
+	}
+	r.usersByID[userID] = u
+	if userID > r.nextID {
+		r.nextID = userID
+	}
 }
 
 func (r *bddUserRepo) Create(_ context.Context, u *domainuser.User) (shared.UserID, error) {
@@ -210,13 +340,24 @@ func (r *bddUserRepo) Create(_ context.Context, u *domainuser.User) (shared.User
 	r.nextID++
 	created := *u
 	created.ID = r.nextID
+	created.RoleCodes = append([]role.Code(nil), u.RoleCodes...)
+	r.usersByID[created.ID] = &created
 	r.lastCreated = &created
 	r.createCalls++
 	return created.ID, nil
 }
 
-func (r *bddUserRepo) FindByID(context.Context, shared.UserID) (*domainuser.User, error) {
-	return nil, domainuser.ErrUserNotFound
+func (r *bddUserRepo) FindByID(_ context.Context, id shared.UserID) (*domainuser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, ok := r.usersByID[id]
+	if !ok {
+		return nil, domainuser.ErrUserNotFound
+	}
+	copied := *u
+	copied.RoleCodes = append([]role.Code(nil), u.RoleCodes...)
+	return &copied, nil
 }
 
 func (r *bddUserRepo) FindByAccountID(context.Context, shared.AccountID) (*[]domainuser.User, error) {
@@ -271,6 +412,241 @@ func (r *bddUserRoleRepo) Assign(_ context.Context, _ shared.UserID, code role.C
 }
 
 func (r *bddUserRoleRepo) Revoke(context.Context, shared.UserID, role.Code) error {
+	return nil
+}
+
+type bddSessionManager struct {
+	mu          sync.Mutex
+	nextID      int64
+	sessions    map[auth.AccessToken]*auth.Session
+	createCalls int
+	findCalls   int
+	lastCreated *auth.Session
+}
+
+func newBDDSessionManager() *bddSessionManager {
+	return &bddSessionManager{}
+}
+
+func (s *bddSessionManager) reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.nextID = 900
+	s.sessions = map[auth.AccessToken]*auth.Session{}
+	s.createCalls = 0
+	s.findCalls = 0
+	s.lastCreated = nil
+}
+
+func (s *bddSessionManager) Create(_ context.Context, input auth.CreateSessionInput) (auth.TokenPair, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.nextID++
+	tokenPair := auth.TokenPair{
+		AccessToken:  auth.AccessToken("bdd-access-token"),
+		RefreshToken: auth.RefreshToken("bdd-refresh-token"),
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+	session := &auth.Session{
+		ID:        "900",
+		AccountID: input.AccountID,
+		UserID:    input.UserID,
+		DeviceID:  input.DeviceID,
+		Token:     tokenPair,
+		CreatedAt: time.Now(),
+	}
+	s.sessions[tokenPair.AccessToken] = session
+	s.createCalls++
+	s.lastCreated = session
+	return tokenPair, nil
+}
+
+func (s *bddSessionManager) FindByToken(_ context.Context, token auth.AccessToken) (*auth.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.findCalls++
+	session, ok := s.sessions[token]
+	if !ok {
+		return nil, auth.ErrSessionNotFound
+	}
+	copied := *session
+	return &copied, nil
+}
+
+func (s *bddSessionManager) Refresh(context.Context, auth.RefreshToken) (auth.TokenPair, error) {
+	return auth.TokenPair{}, nil
+}
+
+func (s *bddSessionManager) Revoke(_ context.Context, token auth.AccessToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.sessions, token)
+	return nil
+}
+
+func (s *bddSessionManager) RevokeAllForUser(context.Context, shared.AccountID) error {
+	return nil
+}
+
+func (s *bddSessionManager) RevokeAll(context.Context) error {
+	return nil
+}
+
+func (s *bddSessionManager) SwitchUser(context.Context, auth.AccessToken, shared.UserID) error {
+	return nil
+}
+
+type bddDeviceRepo struct {
+	mu            sync.Mutex
+	devicesByID   map[string]*domaindevice.Device
+	findByIDCalls int
+}
+
+func newBDDDeviceRepo() *bddDeviceRepo {
+	return &bddDeviceRepo{}
+}
+
+func (r *bddDeviceRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.devicesByID = map[string]*domaindevice.Device{}
+	r.findByIDCalls = 0
+}
+
+func (r *bddDeviceRepo) seed(id shared.DeviceID, name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.devicesByID[id.String()] = &domaindevice.Device{
+		ID:       id,
+		Platform: domaindevice.MacOS,
+		Name:     name,
+	}
+}
+
+func (r *bddDeviceRepo) FindByID(_ context.Context, id shared.DeviceID) (*domaindevice.Device, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.findByIDCalls++
+	d, ok := r.devicesByID[id.String()]
+	if !ok {
+		return nil, domaindevice.ErrDeviceNotFound
+	}
+	copied := *d
+	return &copied, nil
+}
+
+func (r *bddDeviceRepo) FindAllByAccountID(context.Context, shared.AccountID) ([]*domaindevice.Device, error) {
+	return nil, nil
+}
+
+func (r *bddDeviceRepo) Create(context.Context, *domaindevice.Device) error {
+	return nil
+}
+
+func (r *bddDeviceRepo) Update(context.Context, *domaindevice.Device) error {
+	return nil
+}
+
+func (r *bddDeviceRepo) BindAccount(context.Context, shared.DeviceID, shared.AccountID) error {
+	return nil
+}
+
+func (r *bddDeviceRepo) DeleteByAccount(context.Context, shared.DeviceID, shared.AccountID) error {
+	return nil
+}
+
+type bddParticipantRepo struct {
+	mu                 sync.Mutex
+	nextID             participant.ID
+	participantsByUser map[shared.UserID]*participant.Participant
+	findByUserCalls    int
+	createCalls        int
+	lastCreated        *participant.Participant
+}
+
+func newBDDParticipantRepo() *bddParticipantRepo {
+	return &bddParticipantRepo{}
+}
+
+func (r *bddParticipantRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID = 800
+	r.participantsByUser = map[shared.UserID]*participant.Participant{}
+	r.findByUserCalls = 0
+	r.createCalls = 0
+	r.lastCreated = nil
+}
+
+func (r *bddParticipantRepo) seedUser(userID shared.UserID) *participant.Participant {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID++
+	uid := userID
+	p := &participant.Participant{
+		ID:        r.nextID,
+		Type:      participant.UserType,
+		UserID:    &uid,
+		CreatedAt: time.Now(),
+	}
+	r.participantsByUser[userID] = p
+	return p
+}
+
+func (r *bddParticipantRepo) FindByID(context.Context, participant.ID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (r *bddParticipantRepo) FindByUserID(_ context.Context, userID shared.UserID) (*participant.Participant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.findByUserCalls++
+	p, ok := r.participantsByUser[userID]
+	if !ok {
+		return nil, participant.ErrNotFound
+	}
+	copied := *p
+	return &copied, nil
+}
+
+func (r *bddParticipantRepo) FindByAgentID(context.Context, int64) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (r *bddParticipantRepo) FindSystemByType(context.Context, string) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (r *bddParticipantRepo) Create(_ context.Context, p *participant.Participant) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.createCalls++
+	if p.UserID != nil {
+		if _, ok := r.participantsByUser[*p.UserID]; ok {
+			return participant.ErrAlreadyExists
+		}
+	}
+	r.nextID++
+	created := *p
+	created.ID = r.nextID
+	created.CreatedAt = time.Now()
+	r.lastCreated = &created
+	p.ID = created.ID
+	p.CreatedAt = created.CreatedAt
+	if created.UserID != nil {
+		r.participantsByUser[*created.UserID] = &created
+	}
 	return nil
 }
 
@@ -366,6 +742,9 @@ var (
 	_ domainaccount.Repository = (*bddAccountRepo)(nil)
 	_ domainuser.Repository    = (*bddUserRepo)(nil)
 	_ userrole.Repository      = (*bddUserRoleRepo)(nil)
+	_ authPort.SessionManager  = (*bddSessionManager)(nil)
+	_ domaindevice.Repository  = (*bddDeviceRepo)(nil)
+	_ participant.Repository   = (*bddParticipantRepo)(nil)
 	_ appEmail.EmailService    = (*bddEmailService)(nil)
 	_ appEmail.EmailBuilder    = (*bddEmailBuilder)(nil)
 )

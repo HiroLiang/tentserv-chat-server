@@ -37,6 +37,10 @@ func RegisterCommonSteps(ctx *godog.ScenarioContext, apiCtx *APITestContext) {
 }
 
 func (a *APITestContext) DoJSONRequest(method, path string, payload map[string]string) error {
+	return a.DoJSONRequestWithHeaders(method, path, payload, nil)
+}
+
+func (a *APITestContext) DoJSONRequestWithHeaders(method, path string, payload map[string]string, headers map[string]string) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -46,6 +50,9 @@ func (a *APITestContext) DoJSONRequest(method, path string, payload map[string]s
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 
 	resp, err := a.Client.Do(req)
 	if err != nil {
@@ -58,9 +65,16 @@ func (a *APITestContext) DoJSONRequest(method, path string, payload map[string]s
 }
 
 func (a *APITestContext) DoRequest(method, path string) error {
+	return a.DoRequestWithHeaders(method, path, nil)
+}
+
+func (a *APITestContext) DoRequestWithHeaders(method, path string, headers map[string]string) error {
 	req, err := http.NewRequest(method, a.BaseURL+path, nil)
 	if err != nil {
 		return err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 
 	resp, err := a.Client.Do(req)
@@ -99,8 +113,17 @@ func (a *APITestContext) theResponseErrorCodeShouldBe(code string) error {
 	fmt.Println("Action: decode and compare response error code")
 
 	var errResp response.ErrorResponse
-	if err := json.Unmarshal(a.ResponseBody, &errResp); err != nil {
-		return fmt.Errorf("decode response error: %w; body=%s", err, string(a.ResponseBody))
+	if err := json.Unmarshal(a.ResponseBody, &errResp); err != nil || errResp.Code == "" {
+		var wrapped struct {
+			Error response.ErrorResponse `json:"error"`
+		}
+		if wrapErr := json.Unmarshal(a.ResponseBody, &wrapped); wrapErr != nil {
+			if err != nil {
+				return fmt.Errorf("decode response error: %w; body=%s", err, string(a.ResponseBody))
+			}
+			return fmt.Errorf("decode wrapped response error: %w; body=%s", wrapErr, string(a.ResponseBody))
+		}
+		errResp = wrapped.Error
 	}
 
 	fmt.Printf("Output: actual_error_code=%s match=%t\n", errResp.Code, errResp.Code == code)

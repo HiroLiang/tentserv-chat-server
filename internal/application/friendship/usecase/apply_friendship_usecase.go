@@ -28,6 +28,9 @@ func (uc *ApplyFriendshipUseCase) Execute(
 ) error {
 	currentUserID := input.Base.Auth.UserID
 	friendID := shared.UserID(input.Data.FriendID)
+	if friendID == 0 || currentUserID == friendID {
+		return friendship.ErrSelfFriendship
+	}
 
 	_, err := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, currentUserID, friendID)
 	if err == nil {

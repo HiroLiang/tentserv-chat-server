@@ -44,6 +44,14 @@ func HandleError(c *gin.Context, err error) {
 		})
 		return
 
+	case errors.Is(err, usecase.ErrForbidden):
+		logger.Log.Warn(err.Error())
+		c.JSON(http.StatusForbidden, response.ErrorResponse{
+			Code:    "FORBIDDEN",
+			Message: "this operation is not permitted",
+		})
+		return
+
 	default:
 		_ = c.Error(err)
 		return

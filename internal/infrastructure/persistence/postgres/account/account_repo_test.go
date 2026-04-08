@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net"
 	"regexp"
 	"testing"
 	"time"
@@ -154,6 +155,44 @@ func TestAccountRepo_FindByAccountNameNotFoundMapsDomainErrorHasStructuredLog(t 
 
 	if !errors.Is(err, domainaccount.ErrAccountNotFound) {
 		t.Fatalf("expected ErrAccountNotFound, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAccountRepo_RecordLoginEventSuccessHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	db, mock := testutil.SetupDB(t)
+	repo := NewAccountRepo(sqlx.NewDb(db, "postgres"))
+	deviceID, err := shared.ParseDeviceID("11111111-1111-1111-1111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := &domainaccount.AccountLoginEvent{
+		AccountID: 101,
+		DeviceID:  deviceID,
+		IPAddress: net.ParseIP("203.0.113.10"),
+		UserAgent: "TentservDesktop/1.0",
+		Success:   true,
+	}
+
+	t.Log("Given: login event insert succeeds")
+	t.Logf("Input: account_id=%d device_id=%s ip=%s user_agent_present=%t success=%t", event.AccountID, event.DeviceID.String(), event.IPAddress.String(), event.UserAgent != "", event.Success)
+	t.Log("Action: execute AccountRepo.RecordLoginEvent")
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO public.account_login_events (account_id,device_uuid,ip_address,user_agent,success) VALUES ($1,$2,$3,$4,$5)`)).
+		WithArgs(event.AccountID, event.DeviceID.String(), event.IPAddress.String(), event.UserAgent, event.Success).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = repo.RecordLoginEvent(context.Background(), event)
+
+	t.Logf("Output: err=%v", err)
+	t.Log("Mutation: one INSERT statement expected")
+	t.Logf("Duration: %s", time.Since(start))
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

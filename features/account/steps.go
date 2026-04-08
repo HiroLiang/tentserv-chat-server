@@ -2,6 +2,7 @@ package account
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,7 +11,9 @@ import (
 
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	infraSecurity "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
 	"github.com/cucumber/godog"
 )
 
@@ -36,6 +39,18 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the email verification mutation should activate the account and consume the token$`, s.theEmailVerificationMutationShouldActivateTheAccountAndConsumeTheToken)
 	ctx.Step(`^the reused email verification token should remain consumed$`, s.theReusedEmailVerificationTokenShouldRemainConsumed)
 	ctx.Step(`^the email verification mutation should not update an account$`, s.theEmailVerificationMutationShouldNotUpdateAnAccount)
+	ctx.Step(`^login state is clean$`, s.loginStateIsClean)
+	ctx.Step(`^a registered login device "([^"]*)" named "([^"]*)" exists$`, s.aRegisteredLoginDeviceExists)
+	ctx.Step(`^an? "([^"]*)" account exists for login with email "([^"]*)", account "([^"]*)", and password "([^"]*)"$`, s.anAccountExistsForLogin)
+	ctx.Step(`^the login account has an existing participant$`, s.theLoginAccountHasAnExistingParticipant)
+	ctx.Step(`^I login with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iLoginWithIdentifier)
+	ctx.Step(`^I login with an invalid payload$`, s.iLoginWithAnInvalidPayload)
+	ctx.Step(`^login response should include a bearer token$`, s.loginResponseShouldIncludeABearerToken)
+	ctx.Step(`^login mutation should include session, device link, participant, and login event$`, s.loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent)
+	ctx.Step(`^login mutation should reuse the existing participant$`, s.loginMutationShouldReuseTheExistingParticipant)
+	ctx.Step(`^login mutation should stop before session creation$`, s.loginMutationShouldStopBeforeSessionCreation)
+	ctx.Step(`^I request my auth profile using the login token and device "([^"]*)"$`, s.iRequestMyAuthProfileUsingTheLoginToken)
+	ctx.Step(`^auth profile response should describe the current login user$`, s.authProfileResponseShouldDescribeTheCurrentLoginUser)
 }
 
 func (a *steps) accountRegistrationStateIsClean() error {
@@ -274,6 +289,289 @@ func (a *steps) theEmailVerificationMutationShouldNotUpdateAnAccount() error {
 		return fmt.Errorf("expected email verification rejection without account update")
 	}
 	return nil
+}
+
+func (a *steps) loginStateIsClean() error {
+	a.start = time.Now()
+	fmt.Println("Given: login state is clean")
+	fmt.Printf("Input: existing_accounts=%d sessions=%d participants=%d\n",
+		len(a.deps.accountRepo.accountsByID), len(a.deps.sessionManager.sessions), len(a.deps.participantRepo.participantsByUser))
+	fmt.Println("Action: reset in-memory login dependencies")
+	fmt.Println("Output: clean login state")
+	fmt.Printf("Mutation: accounts=%d users=%d devices=%d sessions=%d participants=%d login_events=%d\n",
+		len(a.deps.accountRepo.accountsByID), len(a.deps.userRepo.usersByID), len(a.deps.deviceRepo.devicesByID),
+		len(a.deps.sessionManager.sessions), len(a.deps.participantRepo.participantsByUser), a.deps.accountRepo.recordLoginEventCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) aRegisteredLoginDeviceExists(deviceID, name string) error {
+	a.start = time.Now()
+	fmt.Println("Given: a registered startup device exists")
+	fmt.Printf("Input: device_id=%s device_name=%q\n", deviceID, name)
+	fmt.Println("Action: seed device repository")
+
+	parsed, err := shared.ParseDeviceID(deviceID)
+	if err != nil {
+		return err
+	}
+	a.deps.deviceRepo.seed(parsed, name)
+
+	fmt.Printf("Output: registered_devices=%d\n", len(a.deps.deviceRepo.devicesByID))
+	fmt.Printf("Mutation: devices=%d\n", len(a.deps.deviceRepo.devicesByID))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) anAccountExistsForLogin(statusText, email, accountName, password string) error {
+	a.start = time.Now()
+	fmt.Println("Given: a login account identity is seeded")
+	fmt.Printf("Input: status=%s email=%s account=%s password_present=%t\n", statusText, email, accountName, password != "")
+	fmt.Println("Action: hash password and seed account repository")
+
+	status := domainaccount.Status(statusText)
+	switch status {
+	case domainaccount.Active, domainaccount.Applying, domainaccount.Inactive, domainaccount.Banned, domainaccount.Deleted:
+	default:
+		return fmt.Errorf("unknown login account status %q", statusText)
+	}
+	parsed, err := shared.ParseEmail(email)
+	if err != nil {
+		return err
+	}
+	hash, err := infraSecurity.NewArgon2Hasher().Hash(password)
+	if err != nil {
+		return err
+	}
+	acc := a.deps.accountRepo.seedLogin(parsed, accountName, hash, status)
+
+	fmt.Printf("Output: account_id=%d status=%s user_count=%d\n", acc.ID, acc.Status, len(acc.UserIDs))
+	fmt.Printf("Mutation: accounts=%d\n", len(a.deps.accountRepo.accountsByID))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) theLoginAccountHasAnExistingParticipant() error {
+	start := time.Now()
+	fmt.Println("Given: the latest login account should already have a user participant")
+	fmt.Println("Input: roles=user")
+	fmt.Println("Action: seed user repository and participant repository")
+
+	acc, ok := a.firstLoginAccount()
+	if !ok {
+		return fmt.Errorf("no login account seeded")
+	}
+	userID := shared.UserID(601)
+	a.deps.userRepo.seed(acc.ID, userID, acc.AccountName, []role.Code{role.User})
+
+	a.deps.accountRepo.mu.Lock()
+	accInRepo := a.deps.accountRepo.accountsByID[acc.ID]
+	accInRepo.UserIDs = []shared.UserID{userID}
+	a.deps.accountRepo.mu.Unlock()
+
+	p := a.deps.participantRepo.seedUser(userID)
+
+	fmt.Printf("Output: user_id=%d participant_id=%d\n", userID, p.ID)
+	fmt.Printf("Mutation: users=%d participants=%d\n", len(a.deps.userRepo.usersByID), len(a.deps.participantRepo.participantsByUser))
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (a *steps) iLoginWithIdentifier(identifier, password, deviceID string) error {
+	a.start = time.Now()
+	fmt.Println("Given: login HTTP endpoint is available")
+	fmt.Printf("Input: identifier=%s password_present=%t device_id=%s\n", identifier, password != "", deviceID)
+	fmt.Println("Action: POST /api/auth/login")
+
+	payload := map[string]string{
+		"identifier": identifier,
+		"password":   password,
+		"device_id":  deviceID,
+	}
+	if err := a.DoJSONRequestWithHeaders(http.MethodPost, "/api/auth/login", payload, map[string]string{
+		"User-Agent": "TentservDesktop/BDD",
+	}); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s auth_header_present=%t\n",
+		a.Response.StatusCode, string(a.ResponseBody), a.Response.Header.Get("Authorization") != "")
+	fmt.Printf("Mutation: user_create_calls=%d role_assign_calls=%d device_find_calls=%d register_device_calls=%d session_create_calls=%d participant_create_calls=%d login_event_calls=%d account_update_calls=%d\n",
+		a.deps.userRepo.createCalls, a.deps.roleRepo.assignCalls, a.deps.deviceRepo.findByIDCalls,
+		a.deps.accountRepo.registerDeviceCalls, a.deps.sessionManager.createCalls, a.deps.participantRepo.createCalls,
+		a.deps.accountRepo.recordLoginEventCalls, a.deps.accountRepo.updateCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iLoginWithAnInvalidPayload() error {
+	a.start = time.Now()
+	fmt.Println("Given: login HTTP endpoint is available")
+	fmt.Println("Input: payload_missing_password=true")
+	fmt.Println("Action: POST /api/auth/login")
+
+	payload := map[string]string{
+		"identifier": "login@example.com",
+		"device_id":  "11111111-1111-1111-1111-111111111111",
+	}
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/login", payload); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: session_create_calls=%d login_event_calls=%d\n", a.deps.sessionManager.createCalls, a.deps.accountRepo.recordLoginEventCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) loginResponseShouldIncludeABearerToken() error {
+	start := time.Now()
+	fmt.Println("Given: login response should contain a session token header")
+	fmt.Println("Input: expected_prefix=Bearer token_redacted=true")
+	fmt.Println("Action: inspect Authorization header")
+
+	header := a.Response.Header.Get("Authorization")
+	hasBearer := strings.HasPrefix(header, "Bearer ") && len(header) > len("Bearer ")
+
+	fmt.Printf("Output: bearer_header_present=%t\n", hasBearer)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !hasBearer {
+		return fmt.Errorf("expected Authorization bearer header, got present=%t", header != "")
+	}
+	return nil
+}
+
+func (a *steps) loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent() error {
+	start := time.Now()
+	fmt.Println("Given: successful login should persist all login side effects")
+	fmt.Println("Input: expecting session, device link, participant, and login event")
+	fmt.Println("Action: inspect in-memory dependency counters")
+
+	sessionCreated := a.deps.sessionManager.createCalls == 1
+	deviceLinked := a.deps.accountRepo.registerDeviceCalls == 1 && a.deps.accountRepo.lastRegisteredDevice != nil
+	participantEnsured := len(a.deps.participantRepo.participantsByUser) == 1
+	loginEvent := a.deps.accountRepo.recordLoginEventCalls == 1 && a.deps.accountRepo.lastLoginEvent != nil && a.deps.accountRepo.lastLoginEvent.Success
+	accountUpdated := a.deps.accountRepo.updateCalls == 1
+
+	fmt.Printf("Output: session_created=%t device_linked=%t participant_ensured=%t login_event=%t account_updated=%t\n",
+		sessionCreated, deviceLinked, participantEnsured, loginEvent, accountUpdated)
+	fmt.Printf("Mutation: session_create_calls=%d register_device_calls=%d participant_count=%d login_event_calls=%d account_update_calls=%d\n",
+		a.deps.sessionManager.createCalls, a.deps.accountRepo.registerDeviceCalls, len(a.deps.participantRepo.participantsByUser),
+		a.deps.accountRepo.recordLoginEventCalls, a.deps.accountRepo.updateCalls)
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !sessionCreated || !deviceLinked || !participantEnsured || !loginEvent || !accountUpdated {
+		return fmt.Errorf("expected complete login mutation")
+	}
+	return nil
+}
+
+func (a *steps) loginMutationShouldReuseTheExistingParticipant() error {
+	start := time.Now()
+	fmt.Println("Given: login account already had a participant")
+	fmt.Println("Input: expecting no participant create")
+	fmt.Println("Action: inspect participant counters")
+
+	reused := a.deps.participantRepo.findByUserCalls == 1 && a.deps.participantRepo.createCalls == 0
+	sessionCreated := a.deps.sessionManager.createCalls == 1
+
+	fmt.Printf("Output: participant_reused=%t session_created=%t\n", reused, sessionCreated)
+	fmt.Printf("Mutation: participant_find_calls=%d participant_create_calls=%d session_create_calls=%d\n",
+		a.deps.participantRepo.findByUserCalls, a.deps.participantRepo.createCalls, a.deps.sessionManager.createCalls)
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !reused || !sessionCreated {
+		return fmt.Errorf("expected existing participant to be reused")
+	}
+	return nil
+}
+
+func (a *steps) loginMutationShouldStopBeforeSessionCreation() error {
+	start := time.Now()
+	fmt.Println("Given: login request should fail before session creation")
+	fmt.Println("Input: expecting no token/session/login-event mutation")
+	fmt.Println("Action: inspect login counters")
+
+	noSession := a.deps.sessionManager.createCalls == 0
+	noLoginEvent := a.deps.accountRepo.recordLoginEventCalls == 0
+	noAccountUpdate := a.deps.accountRepo.updateCalls == 0
+
+	fmt.Printf("Output: no_session=%t no_login_event=%t no_account_update=%t\n", noSession, noLoginEvent, noAccountUpdate)
+	fmt.Printf("Mutation: session_create_calls=%d login_event_calls=%d account_update_calls=%d\n",
+		a.deps.sessionManager.createCalls, a.deps.accountRepo.recordLoginEventCalls, a.deps.accountRepo.updateCalls)
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !noSession || !noLoginEvent || !noAccountUpdate {
+		return fmt.Errorf("expected login failure before session creation")
+	}
+	return nil
+}
+
+func (a *steps) iRequestMyAuthProfileUsingTheLoginToken(deviceID string) error {
+	a.start = time.Now()
+	fmt.Println("Given: a login bearer token was returned")
+	fmt.Printf("Input: device_id=%s token_present=%t\n", deviceID, a.Response.Header.Get("Authorization") != "")
+	fmt.Println("Action: GET /api/auth/profile")
+
+	authHeader := a.Response.Header.Get("Authorization")
+	if authHeader == "" {
+		return fmt.Errorf("no Authorization header from login response")
+	}
+	if err := a.DoRequestWithHeaders(http.MethodGet, "/api/auth/profile", map[string]string{
+		"Authorization": authHeader,
+		"X-Device-ID":   deviceID,
+	}); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: session_find_calls=%d\n", a.deps.sessionManager.findCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) authProfileResponseShouldDescribeTheCurrentLoginUser() error {
+	start := time.Now()
+	fmt.Println("Given: profile response should describe the authenticated account and current user")
+	fmt.Println("Input: expecting account_id and current_user")
+	fmt.Println("Action: decode auth profile response")
+
+	var profile struct {
+		AccountID   int64  `json:"account_id"`
+		Email       string `json:"email"`
+		AccountName string `json:"account_name"`
+		CurrentUser struct {
+			ID        int64    `json:"id"`
+			Name      string   `json:"name"`
+			RoleCodes []string `json:"role_codes"`
+		} `json:"current_user"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &profile); err != nil {
+		return err
+	}
+	hasProfile := profile.AccountID != 0 && profile.CurrentUser.ID != 0 && profile.Email != ""
+
+	fmt.Printf("Output: has_profile=%t account_id=%d current_user_id=%d role_count=%d\n",
+		hasProfile, profile.AccountID, profile.CurrentUser.ID, len(profile.CurrentUser.RoleCodes))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !hasProfile {
+		return fmt.Errorf("expected profile to contain account and current user, got %+v", profile)
+	}
+	return nil
+}
+
+func (a *steps) firstLoginAccount() (*domainaccount.Account, bool) {
+	a.deps.accountRepo.mu.Lock()
+	defer a.deps.accountRepo.mu.Unlock()
+
+	for _, acc := range a.deps.accountRepo.accountsByID {
+		return cloneBDDAccount(acc), true
+	}
+	return nil, false
 }
 
 func (a *steps) firstAccountStatus() (domainaccount.Status, bool) {

@@ -42,6 +42,9 @@ func (uc *GetFriendsUseCase) Execute(
 
 	items := make([]FriendItem, 0, len(friendships))
 	for _, f := range friendships {
+		if f.Status != friendship.StatusAccepted && f.Status != friendship.StatusPending {
+			continue
+		}
 		u, err := uc.userRepo.FindByID(ctx, f.FriendID)
 		if err != nil {
 			continue

@@ -16,6 +16,9 @@ import (
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	domaindevice "github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
@@ -58,7 +61,8 @@ func (s *accountHandlerUOWStub) Begin(ctx context.Context) (context.Context, tra
 }
 
 type accountHandlerHasherStub struct {
-	err error
+	err          error
+	verifyResult bool
 }
 
 func (s accountHandlerHasherStub) Hash(string) (string, error) {
@@ -73,13 +77,16 @@ func (s accountHandlerHasherStub) HashBytes(bytes []byte) (string, error) {
 }
 
 func (s accountHandlerHasherStub) Verify(string, string) bool {
-	return false
+	return s.verifyResult
 }
 
 type accountHandlerAccountRepoStub struct {
 	emailExists   bool
 	accountExists bool
 	createErr     error
+	loginPassword string
+	loginStatus   domainaccount.Status
+	loginUserIDs  []shared.UserID
 }
 
 func (s accountHandlerAccountRepoStub) FindByID(context.Context, shared.AccountID) (*domainaccount.Account, error) {
@@ -88,14 +95,22 @@ func (s accountHandlerAccountRepoStub) FindByID(context.Context, shared.AccountI
 
 func (s accountHandlerAccountRepoStub) FindByAccountName(_ context.Context, name string) (*domainaccount.Account, error) {
 	if s.accountExists {
-		return &domainaccount.Account{ID: 1, AccountName: name, Status: domainaccount.Active}, nil
+		status := s.loginStatus
+		if status == "" {
+			status = domainaccount.Active
+		}
+		return &domainaccount.Account{ID: 1, AccountName: name, Password: s.loginPassword, Status: status, UserIDs: append([]shared.UserID(nil), s.loginUserIDs...)}, nil
 	}
 	return nil, domainaccount.ErrAccountNotFound
 }
 
 func (s accountHandlerAccountRepoStub) FindByEmail(_ context.Context, email shared.EmailAddress) (*domainaccount.Account, error) {
 	if s.emailExists {
-		return &domainaccount.Account{ID: 1, Email: email, Status: domainaccount.Active}, nil
+		status := s.loginStatus
+		if status == "" {
+			status = domainaccount.Active
+		}
+		return &domainaccount.Account{ID: 1, Email: email, AccountName: "login_account", Password: s.loginPassword, Status: status, UserIDs: append([]shared.UserID(nil), s.loginUserIDs...)}, nil
 	}
 	return nil, domainaccount.ErrAccountNotFound
 }
@@ -112,6 +127,10 @@ func (s accountHandlerAccountRepoStub) Update(context.Context, *domainaccount.Ac
 }
 
 func (s accountHandlerAccountRepoStub) RegisterDevice(context.Context, *domainaccount.AccountDevice) error {
+	return nil
+}
+
+func (s accountHandlerAccountRepoStub) RecordLoginEvent(context.Context, *domainaccount.AccountLoginEvent) error {
 	return nil
 }
 
@@ -165,6 +184,95 @@ func (accountHandlerUserRoleRepoStub) Assign(context.Context, shared.UserID, rol
 }
 
 func (accountHandlerUserRoleRepoStub) Revoke(context.Context, shared.UserID, role.Code) error {
+	return nil
+}
+
+type accountHandlerSessionManagerStub struct{}
+
+func (accountHandlerSessionManagerStub) Create(context.Context, auth.CreateSessionInput) (auth.TokenPair, error) {
+	return auth.TokenPair{
+		AccessToken:  auth.AccessToken("handler-access-token"),
+		RefreshToken: auth.RefreshToken("handler-refresh-token"),
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}, nil
+}
+
+func (accountHandlerSessionManagerStub) FindByToken(context.Context, auth.AccessToken) (*auth.Session, error) {
+	return nil, auth.ErrSessionNotFound
+}
+
+func (accountHandlerSessionManagerStub) Refresh(context.Context, auth.RefreshToken) (auth.TokenPair, error) {
+	return auth.TokenPair{}, nil
+}
+
+func (accountHandlerSessionManagerStub) Revoke(context.Context, auth.AccessToken) error {
+	return nil
+}
+
+func (accountHandlerSessionManagerStub) RevokeAllForUser(context.Context, shared.AccountID) error {
+	return nil
+}
+
+func (accountHandlerSessionManagerStub) RevokeAll(context.Context) error {
+	return nil
+}
+
+func (accountHandlerSessionManagerStub) SwitchUser(context.Context, auth.AccessToken, shared.UserID) error {
+	return nil
+}
+
+type accountHandlerDeviceRepoStub struct {
+	deviceID shared.DeviceID
+}
+
+func (s accountHandlerDeviceRepoStub) FindByID(_ context.Context, id shared.DeviceID) (*domaindevice.Device, error) {
+	if s.deviceID.String() != id.String() {
+		return nil, domaindevice.ErrDeviceNotFound
+	}
+	return &domaindevice.Device{ID: id, Platform: domaindevice.MacOS, Name: "Handler Mac"}, nil
+}
+
+func (s accountHandlerDeviceRepoStub) FindAllByAccountID(context.Context, shared.AccountID) ([]*domaindevice.Device, error) {
+	return nil, nil
+}
+
+func (s accountHandlerDeviceRepoStub) Create(context.Context, *domaindevice.Device) error {
+	return nil
+}
+
+func (s accountHandlerDeviceRepoStub) Update(context.Context, *domaindevice.Device) error {
+	return nil
+}
+
+func (s accountHandlerDeviceRepoStub) BindAccount(context.Context, shared.DeviceID, shared.AccountID) error {
+	return nil
+}
+
+func (s accountHandlerDeviceRepoStub) DeleteByAccount(context.Context, shared.DeviceID, shared.AccountID) error {
+	return nil
+}
+
+type accountHandlerParticipantRepoStub struct{}
+
+func (accountHandlerParticipantRepoStub) FindByID(context.Context, participant.ID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (accountHandlerParticipantRepoStub) FindByUserID(context.Context, shared.UserID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (accountHandlerParticipantRepoStub) FindByAgentID(context.Context, int64) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (accountHandlerParticipantRepoStub) FindSystemByType(context.Context, string) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (accountHandlerParticipantRepoStub) Create(_ context.Context, p *participant.Participant) error {
+	p.ID = 801
+	p.CreatedAt = time.Now()
 	return nil
 }
 
@@ -265,6 +373,10 @@ func (s *accountHandlerVerifyEmailAccountRepoStub) RegisterDevice(context.Contex
 	return nil
 }
 
+func (s *accountHandlerVerifyEmailAccountRepoStub) RecordLoginEvent(context.Context, *domainaccount.AccountLoginEvent) error {
+	return nil
+}
+
 func (s *accountHandlerVerifyEmailAccountRepoStub) ReplaceDevices(context.Context, shared.AccountID, []domainaccount.AccountDevice) error {
 	return nil
 }
@@ -306,9 +418,56 @@ func newAccountHandlerVerifyEmailRouter(
 	return router
 }
 
+func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
+	gin.SetMode(gin.TestMode)
+	uow := &accountHandlerUOWStub{}
+	deviceID, _ := shared.ParseDeviceID("11111111-1111-1111-1111-111111111111")
+	loginUseCase := authUseCase.NewLoginUseCase(
+		uow,
+		accountHandlerHasherStub{verifyResult: true},
+		accountHandlerSessionManagerStub{},
+		accountHandlerAccountRepoStub{
+			emailExists:   true,
+			loginPassword: "stored-hash",
+		},
+		accountHandlerUserRepoStub{},
+		accountHandlerUserRoleRepoStub{},
+		accountHandlerDeviceRepoStub{deviceID: deviceID},
+		accountHandlerParticipantRepoStub{},
+		accountHandlerEmailServiceStub{},
+		func(string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return accountHandlerEmailBuilderStub{}
+		},
+	)
+
+	router := gin.New()
+	router.Use(middleware.ContextMiddleware())
+	handler := NewAuthHandler(nil, loginUseCase, nil, nil, nil)
+	handler.RegisterAuthRoutes(router.Group("/api/auth"))
+	return router, uow
+}
+
+func newAccountHandlerLoginInvalidPayloadRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.ContextMiddleware())
+	handler := NewAuthHandler(nil, nil, nil, nil, nil)
+	handler.RegisterAuthRoutes(router.Group("/api/auth"))
+	return router
+}
+
 func performAccountRegisterRequest(router *gin.Engine, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func performAccountLoginRequest(router *gin.Engine, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "TentservDesktop/HandlerTest")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	return resp
@@ -458,6 +617,57 @@ func TestAuthHandler_RegisterFailedHasStructuredLog(t *testing.T) {
 	}
 }
 
+func TestAuthHandler_LoginSuccessSetsBearerHeaderHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	router, uow := newAccountHandlerLoginRouter()
+	body := `{"identifier":"login@example.com","password":"redacted-password","device_id":"11111111-1111-1111-1111-111111111111"}`
+
+	t.Log("Given: login usecase dependencies succeed")
+	t.Log("Input: valid login JSON with identifier/password/device_id")
+	t.Log("Action: POST /api/auth/login")
+
+	resp := performAccountLoginRequest(router, body)
+	authHeader := resp.Header().Get("Authorization")
+
+	t.Logf("Output: status=%d body=%s bearer_header_present=%t", resp.Code, resp.Body.String(), strings.HasPrefix(authHeader, "Bearer "))
+	t.Logf("Mutation: commit_calls=%d", uow.tx.commitCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		t.Fatalf("expected Bearer auth header, got %q", authHeader)
+	}
+	if resp.Body.String() != "{}" {
+		t.Fatalf("expected empty JSON object, got %s", resp.Body.String())
+	}
+}
+
+func TestAuthHandler_LoginInvalidPayloadHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	router := newAccountHandlerLoginInvalidPayloadRouter()
+	body := `{"identifier":"login@example.com","device_id":"11111111-1111-1111-1111-111111111111"}`
+
+	t.Log("Given: invalid login request payload")
+	t.Log("Input: missing_password=true")
+	t.Log("Action: POST /api/auth/login")
+
+	resp := performAccountLoginRequest(router, body)
+	errResp := decodeAccountHandlerError(t, resp.Body)
+
+	t.Logf("Output: status=%d code=%s message=%q", resp.Code, errResp.Code, errResp.Message)
+	t.Log("Mutation: login usecase not invoked")
+	t.Logf("Duration: %s", time.Since(start))
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if errResp.Code != "INVALID_REQUEST" {
+		t.Fatalf("expected INVALID_REQUEST, got %+v", errResp)
+	}
+}
+
 func TestAuthHandler_VerifyEmailSuccessHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAccountHandlerVerifyEmailStoreStub()
@@ -576,4 +786,6 @@ var (
 	_ domainaccount.Repository = (*accountHandlerVerifyEmailAccountRepoStub)(nil)
 	_ domainuser.Repository    = (*accountHandlerUserRepoStub)(nil)
 	_ userrole.Repository      = (*accountHandlerUserRoleRepoStub)(nil)
+	_ domaindevice.Repository  = (*accountHandlerDeviceRepoStub)(nil)
+	_ participant.Repository   = (*accountHandlerParticipantRepoStub)(nil)
 )

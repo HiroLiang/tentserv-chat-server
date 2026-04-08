@@ -121,14 +121,14 @@ func (uc *AcceptFriendshipUseCase) Execute(
 		if addErr := uc.chatMemberRepo.Add(context.Background(), &chatmember.ChatMember{
 			RoomID:        room.ID,
 			ParticipantID: accepterP.ID,
-			Role:          chatmember.Member,
+			Role:          chatmember.Owner,
 		}); addErr != nil {
 			logger.Log.Warn("accept friendship: failed to add accepter to direct room", zap.Error(addErr))
 		}
 		if addErr := uc.chatMemberRepo.Add(context.Background(), &chatmember.ChatMember{
 			RoomID:        room.ID,
 			ParticipantID: requesterP.ID,
-			Role:          chatmember.Member,
+			Role:          chatmember.Owner,
 		}); addErr != nil {
 			logger.Log.Warn("accept friendship: failed to add requester to direct room", zap.Error(addErr))
 		}

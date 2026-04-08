@@ -103,7 +103,10 @@ func (h *AuthHandler) register(c *gin.Context) {
 func (h *AuthHandler) login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		HandleError(c, err)
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid login payload",
+		})
 		return
 	}
 

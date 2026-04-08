@@ -116,6 +116,25 @@ func (r *AccountRepo) RegisterDevice(ctx context.Context, accountDevice *account
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
+func (r *AccountRepo) RecordLoginEvent(ctx context.Context, event *account.AccountLoginEvent) error {
+	query, args, err := postgres.Builder.
+		Insert("public.account_login_events").
+		Columns("account_id", "device_uuid", "ip_address", "user_agent", "success").
+		Values(
+			event.AccountID,
+			event.DeviceID.String(),
+			event.IPAddress.String(),
+			event.UserAgent,
+			event.Success,
+		).
+		ToSql()
+	if err != nil {
+		return err
+	}
+
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
 func (r *AccountRepo) ReplaceDevices(
 	ctx context.Context,
 	accountID shared.AccountID,

@@ -92,6 +92,9 @@ func (uc *SearchUsersUseCase) Execute(
 
 	out := make([]*UserSearchResultWithStatus, 0, len(results))
 	for _, r := range results {
+		if r.ID == currentUserID {
+			continue
+		}
 		item := &UserSearchResultWithStatus{UserSearchResult: r}
 		if status, ok := friendshipMap[r.ID]; ok {
 			s := string(status)

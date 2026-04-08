@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -10,12 +11,15 @@ import (
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type CreateSenderKeyRequestInput struct {
-	RoomID          int64
+	RoomID           int64
 	ProviderMemberID int64
 }
 
@@ -25,6 +29,8 @@ type CreateSenderKeyRequestUseCase struct {
 	participantRepo      participant.Repository
 	chatMemberRepo       chatmember.Repository
 	senderKeyRequestRepo senderkeyrequest.Repository
+	memberSenderKeyRepo  membersenderkey.Repository
+	friendshipRepo       friendship.Repository
 	broadcaster          e2eePort.Broadcaster
 }
 
@@ -32,12 +38,16 @@ func NewCreateSenderKeyRequestUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
 	senderKeyRequestRepo senderkeyrequest.Repository,
+	memberSenderKeyRepo membersenderkey.Repository,
+	friendshipRepo friendship.Repository,
 	broadcaster e2eePort.Broadcaster,
 ) *CreateSenderKeyRequestUseCase {
 	return &CreateSenderKeyRequestUseCase{
 		participantRepo:      participantRepo,
 		chatMemberRepo:       chatMemberRepo,
 		senderKeyRequestRepo: senderKeyRequestRepo,
+		memberSenderKeyRepo:  memberSenderKeyRepo,
+		friendshipRepo:       friendshipRepo,
 		broadcaster:          broadcaster,
 	}
 }
@@ -67,6 +77,37 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		return nil, fmt.Errorf("%w: provider not found in room", ErrNotRoomMember)
 	}
 
+	// Verify provider belongs to the same room as the requester.
+	if providerMember.RoomID != chatroom.ID(input.Data.RoomID) {
+		return nil, fmt.Errorf("%w: provider member is not in the requested room", ErrNotRoomMember)
+	}
+
+	// If the provider already has an uploaded sender key, the request is unnecessary.
+	_, err = u.memberSenderKeyRepo.FindLatest(ctx, providerMember.ID)
+	if err == nil {
+		// Key already exists — no need to create a request.
+		return &CreateSenderKeyRequestOutput{}, nil
+	}
+	if !errors.Is(err, membersenderkey.ErrNotFound) {
+		return nil, fmt.Errorf("create sender key request: check existing key: %w", err)
+	}
+
+	// Check for block relationship between the two participants.
+	providerParticipant, err := u.participantRepo.FindByID(ctx, providerMember.ParticipantID)
+	if err != nil || providerParticipant.UserID == nil {
+		return nil, fmt.Errorf("%w: provider participant not found", ErrNotRoomMember)
+	}
+	if callerParticipant.UserID != nil {
+		rows, err := u.friendshipRepo.FindBetweenUsers(ctx, *callerParticipant.UserID, shared.UserID(*providerParticipant.UserID))
+		if err == nil {
+			for _, f := range rows {
+				if f.Status == friendship.StatusBlocked {
+					return nil, ErrForbidden
+				}
+			}
+		}
+	}
+
 	req := &senderkeyrequest.SenderKeyRequest{
 		RequesterMemberID: callerMember.ID,
 		ProviderMemberID:  providerMember.ID,
@@ -76,7 +117,7 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 	}
 
 	// Push e2ee.sender_key_needed to the provider if they are online.
-	go u.notifyProvider(context.Background(), providerMember, callerMember, callerParticipant, input.Data.RoomID)
+	go u.notifyProvider(context.Background(), providerMember, callerMember, callerParticipant, providerParticipant, input.Data.RoomID)
 
 	return &CreateSenderKeyRequestOutput{}, nil
 }
@@ -89,14 +130,14 @@ type wsSenderKeyNeededPayload struct {
 }
 
 func (u *CreateSenderKeyRequestUseCase) notifyProvider(
-	ctx context.Context,
+	_ context.Context,
 	providerMember *chatmember.ChatMember,
 	requesterMember *chatmember.ChatMember,
 	requesterParticipant *participant.Participant,
+	providerParticipant *participant.Participant,
 	roomID int64,
 ) {
-	providerParticipant, err := u.participantRepo.FindByID(ctx, providerMember.ParticipantID)
-	if err != nil || providerParticipant.UserID == nil {
+	if providerParticipant.UserID == nil {
 		return
 	}
 

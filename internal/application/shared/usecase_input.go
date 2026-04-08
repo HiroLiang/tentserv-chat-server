@@ -9,9 +9,10 @@ import (
 )
 
 type RequestContext struct {
-	IP       net.IP
-	TraceID  string
-	DeviceID shared.DeviceID
+	IP        net.IP
+	TraceID   string
+	DeviceID  shared.DeviceID
+	UserAgent string
 }
 
 type AuthContext struct {

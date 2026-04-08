@@ -62,10 +62,14 @@ func (s *authRegisterUOWStub) Begin(ctx context.Context) (context.Context, trans
 }
 
 type authHasherStub struct {
-	hash      string
-	hashErr   error
-	hashCalls int
-	lastPlain string
+	hash            string
+	hashErr         error
+	hashCalls       int
+	lastPlain       string
+	verifyResult    bool
+	verifyCalls     int
+	lastVerifyPlain string
+	lastVerifyHash  string
 }
 
 func (s *authHasherStub) Hash(str string) (string, error) {
@@ -84,8 +88,11 @@ func (s *authHasherStub) HashBytes(bytes []byte) (string, error) {
 	return s.Hash(string(bytes))
 }
 
-func (s *authHasherStub) Verify(_, _ string) bool {
-	return false
+func (s *authHasherStub) Verify(plain, hash string) bool {
+	s.verifyCalls++
+	s.lastVerifyPlain = plain
+	s.lastVerifyHash = hash
+	return s.verifyResult
 }
 
 type authAccountRepoStub struct {
@@ -93,20 +100,26 @@ type authAccountRepoStub struct {
 	accountsByEmail map[shared.EmailAddress]*account.Account
 	accountsByName  map[string]*account.Account
 
-	findByIDErr      error
-	findByEmailErr   error
-	findByAccountErr error
-	createErr        error
-	updateErr        error
+	findByIDErr         error
+	findByEmailErr      error
+	findByAccountErr    error
+	createErr           error
+	updateErr           error
+	registerDeviceErr   error
+	recordLoginEventErr error
 
-	nextID             shared.AccountID
-	findByIDCalls      int
-	findByEmailCalls   int
-	findByAccountCalls int
-	createCalls        int
-	updateCalls        int
-	lastCreated        *account.Account
-	lastUpdated        *account.Account
+	nextID                shared.AccountID
+	findByIDCalls         int
+	findByEmailCalls      int
+	findByAccountCalls    int
+	createCalls           int
+	updateCalls           int
+	registerDeviceCalls   int
+	recordLoginEventCalls int
+	lastCreated           *account.Account
+	lastUpdated           *account.Account
+	lastRegisteredDevice  *account.AccountDevice
+	lastLoginEvent        *account.AccountLoginEvent
 }
 
 func newAuthAccountRepoStub() *authAccountRepoStub {
@@ -182,7 +195,23 @@ func (s *authAccountRepoStub) Update(_ context.Context, acc *account.Account) er
 	return nil
 }
 
-func (s *authAccountRepoStub) RegisterDevice(context.Context, *account.AccountDevice) error {
+func (s *authAccountRepoStub) RegisterDevice(_ context.Context, device *account.AccountDevice) error {
+	s.registerDeviceCalls++
+	if s.registerDeviceErr != nil {
+		return s.registerDeviceErr
+	}
+	copied := *device
+	s.lastRegisteredDevice = &copied
+	return nil
+}
+
+func (s *authAccountRepoStub) RecordLoginEvent(_ context.Context, event *account.AccountLoginEvent) error {
+	s.recordLoginEventCalls++
+	if s.recordLoginEventErr != nil {
+		return s.recordLoginEventErr
+	}
+	copied := *event
+	s.lastLoginEvent = &copied
 	return nil
 }
 

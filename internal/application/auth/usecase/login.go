@@ -12,6 +12,8 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -35,8 +37,10 @@ type LoginUseCase struct {
 	accountRepo        account.Repository
 	userRepo           user.Repository
 	userRoleRepo       userrole.Repository
+	deviceRepo         device.Repository
+	participantRepo    participant.Repository
 	emailService       appEmail.EmailService
-	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
+	mailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
 }
 
 func NewLoginUseCase(
@@ -46,8 +50,10 @@ func NewLoginUseCase(
 	accountRepo account.Repository,
 	userRepo user.Repository,
 	userRoleRepo userrole.Repository,
+	deviceRepo device.Repository,
+	participantRepo participant.Repository,
 	emailService appEmail.EmailService,
-	mailBuilderFactory func(recipientEmail, recipientName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
+	mailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
 ) *LoginUseCase {
 	return &LoginUseCase{
 		uow:                uow,
@@ -56,6 +62,8 @@ func NewLoginUseCase(
 		accountRepo:        accountRepo,
 		userRepo:           userRepo,
 		userRoleRepo:       userRoleRepo,
+		deviceRepo:         deviceRepo,
+		participantRepo:    participantRepo,
 		emailService:       emailService,
 		mailBuilderFactory: mailBuilderFactory,
 	}
@@ -68,8 +76,9 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	if err != nil {
 		return LoginOutput{}, ErrLoginFailed
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -91,6 +100,19 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	// Verify password
 	if !uc.hasher.Verify(input.Data.Password, accountData.Password) {
 		return LoginOutput{}, ErrPasswordError
+	}
+
+	// Parse device ID and require that the device was registered during startup.
+	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
+	if err != nil {
+		return LoginOutput{}, ErrInvalidDeviceID
+	}
+	deviceData, err := uc.deviceRepo.FindByID(ctx, deviceID)
+	if err != nil {
+		if errors.Is(err, device.ErrDeviceNotFound) {
+			return LoginOutput{}, ErrInvalidDeviceID
+		}
+		return LoginOutput{}, ErrLoginFailed
 	}
 
 	// Create a user if not exists
@@ -118,21 +140,19 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		primaryUserID = accountData.UserIDs[0]
 	}
 
-	// Parse device ID
-	deviceID, err := shared.ParseDeviceID(input.Data.DeviceID)
-	if err != nil {
-		return LoginOutput{}, ErrInvalidDeviceID
+	if err := uc.ensureParticipant(ctx, primaryUserID); err != nil {
+		return LoginOutput{}, ErrLoginFailed
 	}
 
 	// Update device
-	device := account.AccountDevice{
+	accountDevice := account.AccountDevice{
 		AccountID:  accountData.ID,
 		DeviceID:   deviceID,
 		LastIP:     input.Base.Request.IP,
 		LastSeenAt: time.Now(),
 	}
 
-	err = uc.accountRepo.RegisterDevice(ctx, &device)
+	err = uc.accountRepo.RegisterDevice(ctx, &accountDevice)
 	if err != nil {
 		return LoginOutput{}, ErrLoginFailed
 	}
@@ -147,11 +167,28 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrLoginFailed
 	}
 
+	err = uc.accountRepo.RecordLoginEvent(ctx, &account.AccountLoginEvent{
+		AccountID: accountData.ID,
+		DeviceID:  deviceID,
+		IPAddress: input.Base.Request.IP,
+		UserAgent: input.Base.Request.UserAgent,
+		Success:   true,
+	})
+	if err != nil {
+		return LoginOutput{}, ErrLoginFailed
+	}
+
 	// Update account
 	err = uc.accountRepo.Update(ctx, accountData)
 	if err != nil {
 		return LoginOutput{}, ErrLoginFailed
 	}
+
+	err = tx.Commit()
+	if err != nil {
+		return LoginOutput{}, ErrLoginFailed
+	}
+	committed = true
 
 	// Send login notification email (fire-and-forget)
 	if config.Env("APP_ENV", "dev") != "dev" {
@@ -160,6 +197,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 			builder := uc.mailBuilderFactory(
 				string(accountData.Email),
 				accountData.AccountName,
+				deviceData.Name,
 				input.Data.DeviceID,
 				input.Base.Request.IP.String(),
 				time.Now(),
@@ -168,7 +206,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		}()
 	}
 
-	return LoginOutput{TokenPair: tokenPair}, tx.Commit()
+	return LoginOutput{TokenPair: tokenPair}, nil
 }
 
 func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*account.Account, error) {
@@ -182,6 +220,28 @@ func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*ac
 		}
 	}
 	return uc.accountRepo.FindByAccountName(ctx, identifier)
+}
+
+func (uc *LoginUseCase) ensureParticipant(ctx context.Context, userID shared.UserID) error {
+	_, err := uc.participantRepo.FindByUserID(ctx, userID)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, participant.ErrNotFound) {
+		return err
+	}
+
+	p := participant.Participant{
+		Type:   participant.UserType,
+		UserID: &userID,
+	}
+	if err := uc.participantRepo.Create(ctx, &p); err != nil {
+		if errors.Is(err, participant.ErrAlreadyExists) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (uc *LoginUseCase) castStatusError(status account.Status) error {

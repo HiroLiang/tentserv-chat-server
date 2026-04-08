@@ -7,4 +7,5 @@ var (
 	ErrIdentityNotFound  = errors.New("identity key not found")
 	ErrNotRoomMember     = errors.New("not a room member")
 	ErrKeyBundleNotFound = errors.New("key bundle not found")
+	ErrForbidden         = errors.New("forbidden")
 )

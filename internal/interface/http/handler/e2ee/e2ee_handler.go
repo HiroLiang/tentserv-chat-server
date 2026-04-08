@@ -16,6 +16,7 @@ type E2EEHandler struct {
 	countOTPPreKeys                *usecase.CountOTPPreKeysUseCase
 	getKeyBundle                   *usecase.GetKeyBundleUseCase
 	checkKeyStatus                 *usecase.CheckKeyStatusUseCase
+	getKeyPolicy                   *usecase.GetKeyPolicyUseCase
 	uploadSenderKey                *usecase.UploadSenderKeyUseCase
 	getSenderKeys                  *usecase.GetSenderKeysUseCase
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase
@@ -29,6 +30,7 @@ func NewE2EEHandler(
 	countOTPPreKeys *usecase.CountOTPPreKeysUseCase,
 	getKeyBundle *usecase.GetKeyBundleUseCase,
 	checkKeyStatus *usecase.CheckKeyStatusUseCase,
+	getKeyPolicy *usecase.GetKeyPolicyUseCase,
 	uploadSenderKey *usecase.UploadSenderKeyUseCase,
 	getSenderKeys *usecase.GetSenderKeysUseCase,
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase,
@@ -41,6 +43,7 @@ func NewE2EEHandler(
 		countOTPPreKeys:                countOTPPreKeys,
 		getKeyBundle:                   getKeyBundle,
 		checkKeyStatus:                 checkKeyStatus,
+		getKeyPolicy:                   getKeyPolicy,
 		uploadSenderKey:                uploadSenderKey,
 		getSenderKeys:                  getSenderKeys,
 		getSenderKeyDistributionStatus: getSenderKeyDistributionStatus,
@@ -55,6 +58,7 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.GET("/otp-prekeys/count", h.countOTPPreKeys_)
 	r.GET("/key-bundle/:user_id", h.getKeyBundle_)
 	r.GET("/key-status/:user_id", h.checkKeyStatus_)
+	r.GET("/key-policy", h.getKeyPolicy_)
 	r.POST("/sender-key", h.uploadSenderKey_)
 	r.GET("/sender-keys/:room_id", h.getSenderKeys_)
 	r.GET("/sender-key-distributions/:room_id", h.getSenderKeyDistributionStatus_)
@@ -243,6 +247,34 @@ func (h *E2EEHandler) checkKeyStatus_(c *gin.Context) {
 	c.JSON(http.StatusOK, CheckKeyStatusResponse{
 		IdentityKeyExists:  out.IdentityKeyExists,
 		SignedPreKeyExists: out.SignedPreKeyExists,
+		DeviceID:           out.DeviceID,
+		IdentityKey:        out.IdentityKey,
+		IdentityKeySign:    out.IdentityKeySign,
+		SignedPreKey:       out.SignedPreKey,
+		SPKSignature:       out.SPKSignature,
+		SPKKeyID:           out.SPKKeyID,
+		OTPPreKeyCount:     out.OTPPreKeyCount,
+	})
+}
+
+// @Summary Get E2EE key bootstrap policy
+// @Description Return server-side OTP target count and replenish threshold for login-time key bootstrap.
+// @Tags E2EE
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} GetKeyPolicyResponse
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/key-policy [get]
+func (h *E2EEHandler) getKeyPolicy_(c *gin.Context) {
+	out, err := h.getKeyPolicy.Execute(c.Request.Context(), adapter.BuildInput(c, usecase.GetKeyPolicyInput{}))
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, GetKeyPolicyResponse{
+		OTPPreKeyTargetCount:        out.OTPPreKeyTargetCount,
+		OTPPreKeyReplenishThreshold: out.OTPPreKeyReplenishThreshold,
 	})
 }
 

@@ -52,8 +52,20 @@ type KeyBundleResponse struct {
 
 // Key Status (non-consuming existence check)
 type CheckKeyStatusResponse struct {
-	IdentityKeyExists  bool `json:"identity_key_exists"`
-	SignedPreKeyExists bool `json:"signed_pre_key_exists"`
+	IdentityKeyExists  bool   `json:"identity_key_exists"`
+	SignedPreKeyExists bool   `json:"signed_pre_key_exists"`
+	DeviceID           string `json:"device_id,omitempty"`
+	IdentityKey        string `json:"identity_key,omitempty"`
+	IdentityKeySign    string `json:"identity_key_sign,omitempty"`
+	SignedPreKey       string `json:"signed_pre_key,omitempty"`
+	SPKSignature       string `json:"spk_signature,omitempty"`
+	SPKKeyID           uint32 `json:"spk_key_id,omitempty"`
+	OTPPreKeyCount     int    `json:"otp_prekey_count"`
+}
+
+type GetKeyPolicyResponse struct {
+	OTPPreKeyTargetCount        int `json:"otp_prekey_target_count"`
+	OTPPreKeyReplenishThreshold int `json:"otp_prekey_replenish_threshold"`
 }
 
 // Sender Key (used for both direct and group rooms)

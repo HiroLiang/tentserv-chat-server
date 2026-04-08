@@ -36,6 +36,7 @@ type GetKeyBundleUseCase struct {
 	signedPreKeyRepo usersignedprekey.Repository
 	otpPreKeyRepo    userotpprekey.Repository
 	dispatcher       appPush.Dispatcher
+	loadConfig       func() keyPolicyConfig
 }
 
 func NewGetKeyBundleUseCase(
@@ -44,11 +45,28 @@ func NewGetKeyBundleUseCase(
 	otpPreKeyRepo userotpprekey.Repository,
 	dispatcher appPush.Dispatcher,
 ) *GetKeyBundleUseCase {
+	return newGetKeyBundleUseCase(
+		identityKeyRepo,
+		signedPreKeyRepo,
+		otpPreKeyRepo,
+		dispatcher,
+		loadAppKeyPolicyConfig,
+	)
+}
+
+func newGetKeyBundleUseCase(
+	identityKeyRepo useridentitykey.Repository,
+	signedPreKeyRepo usersignedprekey.Repository,
+	otpPreKeyRepo userotpprekey.Repository,
+	dispatcher appPush.Dispatcher,
+	loadConfig func() keyPolicyConfig,
+) *GetKeyBundleUseCase {
 	return &GetKeyBundleUseCase{
 		identityKeyRepo:  identityKeyRepo,
 		signedPreKeyRepo: signedPreKeyRepo,
 		otpPreKeyRepo:    otpPreKeyRepo,
 		dispatcher:       dispatcher,
+		loadConfig:       loadConfig,
 	}
 }
 
@@ -98,6 +116,9 @@ func (u *GetKeyBundleUseCase) Execute(
 	}
 
 	otpKey, err := u.otpPreKeyRepo.ConsumeOne(ctx, targetUserID, deviceID)
+	if err != nil && !errors.Is(err, userotpprekey.ErrPoolEmpty) {
+		return nil, fmt.Errorf("consume otp prekey: %w", err)
+	}
 	if err == nil && otpKey != nil {
 		encoded := base64.StdEncoding.EncodeToString(otpKey.PublicKey[:])
 		keyID := uint32(otpKey.KeyID)
@@ -107,7 +128,11 @@ func (u *GetKeyBundleUseCase) Execute(
 
 	// Check remaining OTP prekeys; dispatch replenish request if below a threshold
 	remaining, err := u.otpPreKeyRepo.CountAvailable(ctx, targetUserID, deviceID)
-	if err == nil && remaining < OTPReplenishThreshold {
+	if err == nil && u.dispatcher != nil {
+		_, threshold := normalizeKeyPolicyConfig(u.loadConfig())
+		if remaining >= threshold {
+			return out, nil
+		}
 		payload, _ := json.Marshal(map[string]interface{}{
 			"user_id":   targetUserID,
 			"device_id": deviceID.String(),

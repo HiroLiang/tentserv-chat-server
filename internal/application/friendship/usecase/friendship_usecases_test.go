@@ -1,0 +1,354 @@
+package usecase
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+)
+
+type friendshipRepoStub struct {
+	findByUserID            func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
+	findAllByUserID         func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
+	findPendingByUserID     func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
+	create                  func(ctx context.Context, userID, friendID shared.UserID) error
+	findByID                func(ctx context.Context, id int64) (*friendship.Friendship, error)
+	findByUserIDAndFriendID func(ctx context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error)
+	findPendingByFriendID   func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
+	updateStatus            func(ctx context.Context, id int64, status friendship.Status) error
+	delete                  func(ctx context.Context, id int64) error
+	createCalls             int
+	updateCalls             int
+}
+
+func (s *friendshipRepoStub) FindByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	if s.findByUserID != nil {
+		return s.findByUserID(ctx, userID)
+	}
+	return nil, nil
+}
+func (s *friendshipRepoStub) FindAllByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	if s.findAllByUserID != nil {
+		return s.findAllByUserID(ctx, userID)
+	}
+	return nil, nil
+}
+func (s *friendshipRepoStub) FindPendingByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	if s.findPendingByUserID != nil {
+		return s.findPendingByUserID(ctx, userID)
+	}
+	return nil, nil
+}
+func (s *friendshipRepoStub) Create(ctx context.Context, userID, friendID shared.UserID) error {
+	s.createCalls++
+	if s.create != nil {
+		return s.create(ctx, userID, friendID)
+	}
+	return nil
+}
+func (s *friendshipRepoStub) CreateBlocked(context.Context, shared.UserID, shared.UserID) error {
+	return nil
+}
+func (s *friendshipRepoStub) FindByID(ctx context.Context, id int64) (*friendship.Friendship, error) {
+	if s.findByID != nil {
+		return s.findByID(ctx, id)
+	}
+	return nil, friendship.ErrFriendshipNotFound
+}
+func (s *friendshipRepoStub) FindByUserIDAndFriendID(ctx context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+	if s.findByUserIDAndFriendID != nil {
+		return s.findByUserIDAndFriendID(ctx, userID, friendID)
+	}
+	return nil, friendship.ErrFriendshipNotFound
+}
+func (s *friendshipRepoStub) FindBetweenUsers(context.Context, shared.UserID, shared.UserID) ([]*friendship.Friendship, error) {
+	return nil, friendship.ErrFriendshipNotFound
+}
+func (s *friendshipRepoStub) FindPendingByFriendID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {
+	if s.findPendingByFriendID != nil {
+		return s.findPendingByFriendID(ctx, userID)
+	}
+	return nil, nil
+}
+func (s *friendshipRepoStub) UpdateStatus(ctx context.Context, id int64, status friendship.Status) error {
+	s.updateCalls++
+	if s.updateStatus != nil {
+		return s.updateStatus(ctx, id, status)
+	}
+	return nil
+}
+func (s *friendshipRepoStub) Delete(ctx context.Context, id int64) error {
+	if s.delete != nil {
+		return s.delete(ctx, id)
+	}
+	return nil
+}
+
+type friendshipUserRepoStub struct {
+	users       map[shared.UserID]*user.User
+	findByIDErr error
+}
+
+func (s *friendshipUserRepoStub) Create(context.Context, *user.User) (shared.UserID, error) {
+	return 0, nil
+}
+func (s *friendshipUserRepoStub) FindByID(_ context.Context, id shared.UserID) (*user.User, error) {
+	if s.findByIDErr != nil {
+		return nil, s.findByIDErr
+	}
+	u, ok := s.users[id]
+	if !ok {
+		return nil, user.ErrUserNotFound
+	}
+	copied := *u
+	copied.RoleCodes = append([]role.Code(nil), u.RoleCodes...)
+	return &copied, nil
+}
+func (s *friendshipUserRepoStub) FindByAccountID(context.Context, shared.AccountID) (*[]user.User, error) {
+	return nil, nil
+}
+func (s *friendshipUserRepoStub) Update(context.Context, *user.User) error { return nil }
+func (s *friendshipUserRepoStub) SearchByName(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+func (s *friendshipUserRepoStub) FindByAccountName(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+func (s *friendshipUserRepoStub) FindByPublicID(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+
+type friendshipTxStub struct {
+	commitErr     error
+	commitCalls   int
+	rollbackCalls int
+}
+
+func (s *friendshipTxStub) Commit() error {
+	s.commitCalls++
+	return s.commitErr
+}
+func (s *friendshipTxStub) Rollback() error {
+	s.rollbackCalls++
+	return nil
+}
+
+type friendshipUOWStub struct {
+	tx       *friendshipTxStub
+	beginErr error
+}
+
+func (s *friendshipUOWStub) Begin(ctx context.Context) (context.Context, transaction.Transaction, error) {
+	if s.beginErr != nil {
+		return ctx, nil, s.beginErr
+	}
+	if s.tx == nil {
+		s.tx = &friendshipTxStub{}
+	}
+	return ctx, s.tx, nil
+}
+
+type noopParticipantRepo struct{}
+
+func (noopParticipantRepo) FindByID(context.Context, participant.ID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+func (noopParticipantRepo) FindByUserID(context.Context, shared.UserID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+func (noopParticipantRepo) FindByAgentID(context.Context, int64) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+func (noopParticipantRepo) FindSystemByType(context.Context, string) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+func (noopParticipantRepo) Create(context.Context, *participant.Participant) error { return nil }
+
+type noopChatRoomRepo struct{}
+
+func (noopChatRoomRepo) FindByID(context.Context, chatroom.ID) (*chatroom.ChatRoom, error) {
+	return nil, chatroom.ErrNotFound
+}
+func (noopChatRoomRepo) Create(context.Context, *chatroom.ChatRoom) error { return nil }
+func (noopChatRoomRepo) FindDirectByParticipants(context.Context, participant.ID, participant.ID) (*chatroom.ChatRoom, error) {
+	return nil, chatroom.ErrNotFound
+}
+func (noopChatRoomRepo) Update(context.Context, *chatroom.ChatRoom) error { return nil }
+func (noopChatRoomRepo) SoftDelete(context.Context, chatroom.ID) error    { return nil }
+
+type noopChatMemberRepo struct{}
+
+func (noopChatMemberRepo) FindByID(context.Context, chatmember.ID) (*chatmember.ChatMember, error) {
+	return nil, chatmember.ErrNotFound
+}
+func (noopChatMemberRepo) FindByRoomAndParticipant(context.Context, chatroom.ID, participant.ID) (*chatmember.ChatMember, error) {
+	return nil, chatmember.ErrNotFound
+}
+func (noopChatMemberRepo) FindByRoom(context.Context, chatroom.ID) ([]*chatmember.ChatMember, error) {
+	return nil, nil
+}
+func (noopChatMemberRepo) FindByParticipant(context.Context, participant.ID) ([]*chatmember.ChatMember, error) {
+	return nil, nil
+}
+func (noopChatMemberRepo) Add(context.Context, *chatmember.ChatMember) error         { return nil }
+func (noopChatMemberRepo) Update(context.Context, *chatmember.ChatMember) error      { return nil }
+func (noopChatMemberRepo) SoftDelete(context.Context, chatmember.ID) error           { return nil }
+func (noopChatMemberRepo) Remove(context.Context, chatroom.ID, participant.ID) error { return nil }
+
+func authedInput[T any](userID shared.UserID, data T) appShared.UseCaseInput[T] {
+	return appShared.UseCaseInput[T]{
+		Base: appShared.BaseContext{Auth: &appShared.AuthContext{UserID: userID, Roles: []role.Code{role.User}}},
+		Data: data,
+	}
+}
+
+func init() {
+	logger.Log = zap.NewNop()
+}
+
+func TestApplyFriendshipUseCase_RejectsSelfAndDuplicateDirections(t *testing.T) {
+	uc := NewApplyFriendshipUseCase(&friendshipRepoStub{})
+
+	err := uc.Execute(context.Background(), authedInput(501, ApplyFriendshipInput{FriendID: 501}))
+	require.ErrorIs(t, err, friendship.ErrSelfFriendship)
+
+	uc = NewApplyFriendshipUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 601 && friendID == 501 {
+				return &friendship.Friendship{ID: 1, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, ApplyFriendshipInput{FriendID: 601}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipAlreadyExists)
+}
+
+func TestApplyFriendshipUseCase_MapsDuplicateKeyAndPropagatesRepoErrors(t *testing.T) {
+	repoErr := errors.New("db unavailable")
+	uc := NewApplyFriendshipUseCase(&friendshipRepoStub{
+		create: func(context.Context, shared.UserID, shared.UserID) error {
+			return errors.New("duplicate key value violates unique constraint")
+		},
+	})
+	err := uc.Execute(context.Background(), authedInput(501, ApplyFriendshipInput{FriendID: 601}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipAlreadyExists)
+
+	uc = NewApplyFriendshipUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(context.Context, shared.UserID, shared.UserID) (*friendship.Friendship, error) {
+			return nil, repoErr
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, ApplyFriendshipInput{FriendID: 601}))
+	require.ErrorIs(t, err, repoErr)
+}
+
+func TestGetFriendsAndRequestsUseCases_FilterStatusesAndSkipMissingUsers(t *testing.T) {
+	friendRepo := &friendshipRepoStub{
+		findByUserID: func(context.Context, shared.UserID) ([]*friendship.Friendship, error) {
+			return []*friendship.Friendship{
+				{ID: 1, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted, CreatedAt: time.Now()},
+				{ID: 2, UserID: 501, FriendID: 602, Status: friendship.StatusPending, CreatedAt: time.Now()},
+				{ID: 3, UserID: 501, FriendID: 603, Status: friendship.StatusBlocked, CreatedAt: time.Now()},
+				{ID: 4, UserID: 501, FriendID: 604, Status: friendship.StatusAccepted, CreatedAt: time.Now()},
+			}, nil
+		},
+		findPendingByFriendID: func(context.Context, shared.UserID) ([]*friendship.Friendship, error) {
+			return []*friendship.Friendship{
+				{ID: 5, UserID: 605, FriendID: 501, Status: friendship.StatusPending, CreatedAt: time.Now()},
+			}, nil
+		},
+		findPendingByUserID: func(context.Context, shared.UserID) ([]*friendship.Friendship, error) {
+			return []*friendship.Friendship{
+				{ID: 2, UserID: 501, FriendID: 602, Status: friendship.StatusPending, CreatedAt: time.Now()},
+			}, nil
+		},
+	}
+	userRepo := &friendshipUserRepoStub{users: map[shared.UserID]*user.User{
+		601: {ID: 601, Name: "Accepted", Avatar: "accepted.png"},
+		602: {ID: 602, Name: "Pending", Avatar: "pending.png"},
+		605: {ID: 605, Name: "Requester", Avatar: "requester.png"},
+	}}
+
+	friendsOut, err := NewGetFriendsUseCase(friendRepo, userRepo).Execute(context.Background(), authedInput(501, struct{}{}))
+	require.NoError(t, err)
+	require.Len(t, friendsOut.Friends, 2)
+	assert.Equal(t, "accepted", friendsOut.Friends[0].Status)
+	assert.Equal(t, "pending", friendsOut.Friends[1].Status)
+
+	requestsOut, err := NewGetFriendRequestsUseCase(friendRepo, userRepo).Execute(context.Background(), authedInput(501, struct{}{}))
+	require.NoError(t, err)
+	require.Len(t, requestsOut.Requests, 1)
+	assert.Equal(t, int64(605), requestsOut.Requests[0].UserID)
+
+	sentOut, err := NewGetSentRequestsUseCase(friendRepo, userRepo).Execute(context.Background(), authedInput(501, struct{}{}))
+	require.NoError(t, err)
+	require.Len(t, sentOut.Requests, 1)
+	assert.Equal(t, int64(602), sentOut.Requests[0].UserID)
+}
+
+func TestAcceptFriendshipUseCase_CreatesMutualAcceptedRowsAndCommits(t *testing.T) {
+	repo := &friendshipRepoStub{}
+	repo.findByID = func(context.Context, int64) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+	}
+	repo.findByUserIDAndFriendID = func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+		if userID == 501 && friendID == 601 {
+			return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusPending}, nil
+		}
+		return nil, friendship.ErrFriendshipNotFound
+	}
+
+	uow := &friendshipUOWStub{}
+	uc := NewAcceptFriendshipUseCase(uow, repo, noopParticipantRepo{}, noopChatRoomRepo{}, noopChatMemberRepo{})
+
+	err := uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.createCalls)
+	assert.Equal(t, 2, repo.updateCalls)
+	assert.Equal(t, 1, uow.tx.commitCalls)
+}
+
+func TestAcceptFriendshipUseCase_MapsPendingForbiddenAndCommitErrors(t *testing.T) {
+	commitErr := errors.New("commit failed")
+	uow := &friendshipUOWStub{tx: &friendshipTxStub{commitErr: commitErr}}
+	repo := &friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusAccepted}, nil
+		},
+	}
+	uc := NewAcceptFriendshipUseCase(uow, repo, noopParticipantRepo{}, noopChatRoomRepo{}, noopChatMemberRepo{})
+
+	err := uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipNotPending)
+
+	repo.findByID = func(context.Context, int64) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 999, Status: friendship.StatusPending}, nil
+	}
+	err = uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrForbidden)
+
+	repo.findByID = func(context.Context, int64) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+	}
+	repo.findByUserIDAndFriendID = func(context.Context, shared.UserID, shared.UserID) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusPending}, nil
+	}
+	err = uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, commitErr)
+}

@@ -13,5 +13,6 @@ type Repository interface {
 	Create(ctx context.Context, account *Account) (shared.AccountID, error)
 	Update(ctx context.Context, account *Account) error
 	RegisterDevice(ctx context.Context, accountDevice *AccountDevice) error
+	RecordLoginEvent(ctx context.Context, event *AccountLoginEvent) error
 	ReplaceDevices(ctx context.Context, accountID shared.AccountID, devices []AccountDevice) error
 }

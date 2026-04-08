@@ -23,3 +23,12 @@ type AccountDevice struct {
 	LastIP     net.IP
 	LastSeenAt time.Time
 }
+
+type AccountLoginEvent struct {
+	AccountID shared.AccountID
+	DeviceID  shared.DeviceID
+	IPAddress net.IP
+	UserAgent string
+	Success   bool
+	CreatedAt time.Time
+}

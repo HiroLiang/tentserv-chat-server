@@ -11,7 +11,7 @@ func TestFeatures(t *testing.T) {
 		TestSuiteInitializer: InitializeSuite,
 		ScenarioInitializer:  InitializeScenario,
 		Options: &godog.Options{
-			Paths:  []string{"account", "device"},
+			Paths:  []string{"account", "device", "e2ee", "friendship"},
 			Format: "pretty",
 		},
 	}
