@@ -9,4 +9,6 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 
 	ErrInvalidRoleCode = errors.New("invalid role code")
+
+	ErrSwitchUser = errors.New("failed to switch user")
 )

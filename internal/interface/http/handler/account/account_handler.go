@@ -160,6 +160,7 @@ func (h *AuthHandler) getProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetProfileResponse{
+		AccountID:   out.AccountID,
 		PublicID:    out.PublicID,
 		Email:       out.Email,
 		AccountName: out.AccountName,

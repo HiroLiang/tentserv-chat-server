@@ -24,6 +24,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// [EN] BuildWsComponents registers WS message handlers (chat.send, game.move, system.ack) and sets
+//      the onConnect hook that replays pending sender key requests when a user reconnects.
+// [中] BuildWsComponents 註冊 WS 訊息處理器（chat.send、game.move、system.ack），
+//      並設定 onConnect 鉤子，在使用者重新連線時重播待處理的 sender key 請求。
+// [日] BuildWsComponents は WS メッセージハンドラ（chat.send、game.move、system.ack）を登録し、
+//      ユーザー再接続時に保留中の sender key リクエストを再配信する onConnect フックを設定する。
+
 // BuildWsComponents wires all message handlers onto the router.
 // The Hub is already created and started in BuildDeps.
 func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.MessageRouter) {
@@ -40,6 +47,13 @@ func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.Mes
 	return deps.Hub, router
 }
 
+// [EN] RegisterWsRoutes: upgrades GET /ws/ to WebSocket after AuthMiddleware + RequireAuth validation,
+//      extracts userID from authContext, creates a Client, registers it with the Hub,
+//      and starts ReadPump + WritePump goroutines.
+// [中] RegisterWsRoutes：AuthMiddleware + RequireAuth 驗證後，將 GET /ws/ 升級為 WebSocket，
+//      從 authContext 取得 userID，建立 Client，向 Hub 註冊，並啟動 ReadPump + WritePump goroutine。
+// [日] RegisterWsRoutes：AuthMiddleware + RequireAuth 検証後、GET /ws/ を WebSocket にアップグレードし、
+//      authContext から userID を取得して Client を作成、Hub に登録し、ReadPump + WritePump goroutine を起動する。
 // RegisterWsRoutes registers the single /ws upgrade endpoint.
 func RegisterWsRoutes(r *gin.Engine, hub *ws.Hub, router *ws.MessageRouter, deps *Dependencies) {
 	r.GET("/ws/",

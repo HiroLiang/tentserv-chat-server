@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -82,6 +83,9 @@ func (u *GetKeyBundleUseCase) Execute(
 
 	signedPreKey, err := u.signedPreKeyRepo.FindActive(ctx, targetUserID, deviceID)
 	if err != nil {
+		if errors.Is(err, usersignedprekey.ErrNotFound) {
+			return nil, ErrKeyBundleNotFound
+		}
 		return nil, fmt.Errorf("find active signed prekey: %w", err)
 	}
 

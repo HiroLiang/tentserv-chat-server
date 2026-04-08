@@ -82,11 +82,9 @@ func (uc *CreateChatRoomUseCase) Execute(
 		return CreateChatRoomOutput{}, ErrChatRoomCreate
 	}
 
-	// DIRECT room with one invited member: check for existing room, blocking, then invite
-	isDirect := strings.EqualFold(string(input.Data.Type), string(chatroom.Direct))
-	if isDirect && len(input.Data.MemberIDs) == 1 {
-		invitedUserID := shared.UserID(input.Data.MemberIDs[0])
-
+	invitedParticipants := make([]*participant.Participant, 0, len(input.Data.MemberIDs))
+	for _, memberID := range input.Data.MemberIDs {
+		invitedUserID := shared.UserID(memberID)
 		invitedP, err := uc.participantRepo.FindByUserID(ctx, invitedUserID)
 		if err != nil {
 			if errors.Is(err, participant.ErrNotFound) {
@@ -95,13 +93,21 @@ func (uc *CreateChatRoomUseCase) Execute(
 			return CreateChatRoomOutput{}, ErrChatRoomCreate
 		}
 
-		fs, err := uc.friendshipRepo.FindBetweenUsers(ctx, userID, invitedUserID)
-		if err != nil && !errors.Is(err, friendship.ErrFriendshipNotFound) {
+		hasBlocked, err := uc.hasBlockedFriendshipBetweenUsers(ctx, userID, invitedUserID)
+		if err != nil {
 			return CreateChatRoomOutput{}, ErrChatRoomCreate
 		}
-		if fs != nil && fs.Status == friendship.StatusBlocked {
+		if hasBlocked {
 			return CreateChatRoomOutput{}, ErrUserBlocked
 		}
+
+		invitedParticipants = append(invitedParticipants, invitedP)
+	}
+
+	// DIRECT room with one invited member: check for existing room, blocking, then invite
+	isDirect := strings.EqualFold(string(input.Data.Type), string(chatroom.Direct))
+	if isDirect && len(invitedParticipants) == 1 {
+		invitedP := invitedParticipants[0]
 
 		existing, err := uc.chatroomRepo.FindDirectByParticipants(ctx, p.ID, invitedP.ID)
 		if err != nil && !errors.Is(err, chatroom.ErrNotFound) {
@@ -184,14 +190,7 @@ func (uc *CreateChatRoomUseCase) Execute(
 		return CreateChatRoomOutput{}, ErrChatRoomCreate
 	}
 
-	for _, memberID := range input.Data.MemberIDs {
-		invitedP, err := uc.participantRepo.FindByUserID(ctx, shared.UserID(memberID))
-		if err != nil {
-			if errors.Is(err, participant.ErrNotFound) {
-				return CreateChatRoomOutput{}, ErrParticipantNotFound
-			}
-			return CreateChatRoomOutput{}, ErrChatRoomCreate
-		}
+	for _, invitedP := range invitedParticipants {
 		inv := &chatinvitation.ChatInvitation{
 			RoomID:         room.ID,
 			InviterID:      p.ID,
@@ -216,4 +215,25 @@ func (uc *CreateChatRoomUseCase) Execute(
 		AllowAgent: room.AllowAgent,
 		CreatedAt:  room.CreatedAt,
 	}, nil
+}
+
+func (uc *CreateChatRoomUseCase) hasBlockedFriendshipBetweenUsers(
+	ctx context.Context,
+	userID1 shared.UserID,
+	userID2 shared.UserID,
+) (bool, error) {
+	friendships, err := uc.friendshipRepo.FindBetweenUsers(ctx, userID1, userID2)
+	if err != nil {
+		if errors.Is(err, friendship.ErrFriendshipNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	for _, fs := range friendships {
+		if fs.Status == friendship.StatusBlocked {
+			return true, nil
+		}
+	}
+	return false, nil
 }

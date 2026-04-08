@@ -83,6 +83,13 @@ func HandleError(c *gin.Context, err error) {
 		})
 		return
 
+	case errors.Is(err, usecase.ErrSwitchUser):
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{
+			Code:    "SWITCH_USER_FAILED",
+			Message: "failed to switch user",
+		})
+		return
+
 	default:
 		_ = c.Error(err)
 		return

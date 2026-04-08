@@ -15,6 +15,7 @@ type E2EEHandler struct {
 	uploadOTPPreKeys               *usecase.UploadOTPPreKeysUseCase
 	countOTPPreKeys                *usecase.CountOTPPreKeysUseCase
 	getKeyBundle                   *usecase.GetKeyBundleUseCase
+	checkKeyStatus                 *usecase.CheckKeyStatusUseCase
 	uploadSenderKey                *usecase.UploadSenderKeyUseCase
 	getSenderKeys                  *usecase.GetSenderKeysUseCase
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase
@@ -27,6 +28,7 @@ func NewE2EEHandler(
 	uploadOTPPreKeys *usecase.UploadOTPPreKeysUseCase,
 	countOTPPreKeys *usecase.CountOTPPreKeysUseCase,
 	getKeyBundle *usecase.GetKeyBundleUseCase,
+	checkKeyStatus *usecase.CheckKeyStatusUseCase,
 	uploadSenderKey *usecase.UploadSenderKeyUseCase,
 	getSenderKeys *usecase.GetSenderKeysUseCase,
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase,
@@ -38,6 +40,7 @@ func NewE2EEHandler(
 		uploadOTPPreKeys:               uploadOTPPreKeys,
 		countOTPPreKeys:                countOTPPreKeys,
 		getKeyBundle:                   getKeyBundle,
+		checkKeyStatus:                 checkKeyStatus,
 		uploadSenderKey:                uploadSenderKey,
 		getSenderKeys:                  getSenderKeys,
 		getSenderKeyDistributionStatus: getSenderKeyDistributionStatus,
@@ -51,6 +54,7 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.POST("/otp-prekeys", h.uploadOTPPreKeys_)
 	r.GET("/otp-prekeys/count", h.countOTPPreKeys_)
 	r.GET("/key-bundle/:user_id", h.getKeyBundle_)
+	r.GET("/key-status/:user_id", h.checkKeyStatus_)
 	r.POST("/sender-key", h.uploadSenderKey_)
 	r.GET("/sender-keys/:room_id", h.getSenderKeys_)
 	r.GET("/sender-key-distributions/:room_id", h.getSenderKeyDistributionStatus_)
@@ -208,6 +212,37 @@ func (h *E2EEHandler) getKeyBundle_(c *gin.Context) {
 		SPKKeyID:        out.SPKKeyID,
 		OTPPreKey:       out.OTPPreKey,
 		OTPPreKeyID:     out.OTPPreKeyID,
+	})
+}
+
+// @Summary Check key status (non-consuming)
+// @Description Check whether the identity key and signed pre-key exist for a user/device. Does NOT consume any OTP pre-key.
+// @Tags E2EE
+// @Produce json
+// @Security BearerAuth
+// @Param user_id path string true "Target user ID"
+// @Param device_id query string false "Target device ID"
+// @Success 200 {object} CheckKeyStatusResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/key-status/{user_id} [get]
+func (h *E2EEHandler) checkKeyStatus_(c *gin.Context) {
+	userID := c.Param("user_id")
+	deviceID := c.Query("device_id")
+
+	input := adapter.BuildInput(c, usecase.CheckKeyStatusInput{
+		TargetUserID: userID,
+		DeviceID:     deviceID,
+	})
+	out, err := h.checkKeyStatus.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, CheckKeyStatusResponse{
+		IdentityKeyExists:  out.IdentityKeyExists,
+		SignedPreKeyExists: out.SignedPreKeyExists,
 	})
 }
 

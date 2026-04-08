@@ -48,6 +48,12 @@ func NewUploadSenderKeyUseCase(
 	}
 }
 
+// [EN] Execute: validates room membership, decodes and validates the 32-byte sender public key,
+//      stores the MemberSenderKey record, then asynchronously notifies pending requesters.
+// [中] Execute：驗證房間成員身份，解碼並驗證 32 位元組 sender 公鑰，
+//      儲存 MemberSenderKey 記錄後非同步通知待處理的請求者。
+// [日] Execute：ルームメンバー資格を検証し、32 バイトの sender 公開鍵をデコード・検証して
+//      MemberSenderKey レコードを保存し、保留中のリクエスト者に非同期で通知する。
 func (u *UploadSenderKeyUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[UploadSenderKeyInput],
@@ -96,6 +102,14 @@ type wsDirectKeyReadyPayload struct {
 	ProviderMemberID int64 `json:"provider_member_id"`
 }
 
+// [EN] notifyRequesters: finds all pending sender_key_requests for the provider member,
+//      sends "e2ee.direct_key_ready" via WebSocket to each requester's userID,
+//      and marks those requests as fulfilled in the DB.
+// [中] notifyRequesters：查詢該 provider 成員的所有待處理 sender_key_request，
+//      透過 WebSocket 傳送 "e2ee.direct_key_ready" 給每個請求者的 userID，並將這些請求標記為已完成。
+// [日] notifyRequesters：プロバイダーメンバーの保留中の sender_key_request をすべて取得し、
+//      各リクエスト者の userID に WebSocket 経由で "e2ee.direct_key_ready" を送信し、
+//      それらのリクエストを DB で完了済みにマークする。
 // notifyRequesters looks up pending sender_key_requests for this provider,
 // sends e2ee.direct_key_ready to each requester, and marks those requests fulfilled.
 func (u *UploadSenderKeyUseCase) notifyRequesters(ctx context.Context, providerMemberID chatmember.ID, roomID int64) {

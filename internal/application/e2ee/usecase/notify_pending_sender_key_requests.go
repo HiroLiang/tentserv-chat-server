@@ -91,6 +91,7 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 			Type: "e2ee.sender_key_needed",
 			Payload: wsSenderKeyNeededPayload{
 				RoomID:            int64(requesterMember.RoomID),
+				ProviderMemberID:  int64(providerMember.ID),
 				RequesterMemberID: int64(requesterMember.ID),
 				RequesterUserID:   int64(*requesterParticipant.UserID),
 			},

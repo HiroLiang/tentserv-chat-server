@@ -66,7 +66,8 @@ func (r *OTPPreKeyRepository) AddBatch(ctx context.Context, keys []*userotppreke
 		return nil
 	}
 
-	q := otpPreKeyTable.Insert().Columns("user_id", "device_id", "key_id", "public_key")
+	q := otpPreKeyTable.Insert().Columns("user_id", "device_id", "key_id", "public_key").
+		Suffix("ON CONFLICT (user_id, device_id, key_id) DO NOTHING")
 	for _, k := range keys {
 		rec := toOTPPreKeyRecord(k)
 		q = q.Values(rec.UserID, rec.DeviceID, rec.KeyID, rec.PublicKey)

@@ -11,6 +11,7 @@ import (
 type GetProfileInput struct{}
 
 type GetProfileOutput struct {
+	AccountID   int64
 	PublicID    string
 	Email       string
 	AccountName string
@@ -68,6 +69,7 @@ func (uc *GetProfileUseCase) Execute(
 	}
 
 	return &GetProfileOutput{
+		AccountID:   int64(accountID),
 		PublicID:    accountData.PublicID.String(),
 		Email:       string(accountData.Email),
 		AccountName: accountData.AccountName,

@@ -51,8 +51,7 @@ func (r *AccountRepo) Create(ctx context.Context, accountData *account.Account) 
 	err = r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&id)
 	if err != nil {
 
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 
 			if pgErr.Code == "23505" {
 

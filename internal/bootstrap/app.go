@@ -26,6 +26,12 @@ func CreateApp() *App {
 	return &App{}
 }
 
+// [EN] Start: initializes Redis → PostgreSQL → dependencies (repos/services) → delivery queue scheduler →
+//      use cases → HTTP server. Starts the server in a goroutine.
+// [中] Start：依序初始化 Redis → PostgreSQL → 依賴（Repo/Service）→ 投遞佇列排程器 → Use Cases → HTTP 伺服器，
+//      伺服器在 goroutine 中執行。
+// [日] Start：Redis → PostgreSQL → 依存関係（Repo/Service）→ 配信キュースケジューラ →
+//      ユースケース → HTTP サーバーの順に初期化し、サーバーは goroutine で起動する。
 func (app *App) Start() error {
 	start := time.Now()
 	var err error
@@ -83,6 +89,9 @@ func (app *App) Start() error {
 	return nil
 }
 
+// [EN] Stop: shuts down in order — scheduler cancel → HTTP graceful shutdown → DB close → Redis close.
+// [中] Stop：依序關閉 — 取消排程器 → HTTP 優雅關機 → DB 關閉 → Redis 關閉。
+// [日] Stop：順番にシャットダウン — スケジューラキャンセル → HTTP グレースフルシャットダウン → DB クローズ → Redis クローズ。
 func (app *App) Stop(ctx context.Context) {
 
 	// 0. Stop scheduler

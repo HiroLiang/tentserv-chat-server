@@ -82,9 +82,10 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 }
 
 type wsSenderKeyNeededPayload struct {
-	RoomID              int64 `json:"room_id"`
-	RequesterMemberID   int64 `json:"requester_member_id"`
-	RequesterUserID     int64 `json:"requester_user_id"`
+	RoomID            int64 `json:"room_id"`
+	ProviderMemberID  int64 `json:"provider_member_id"`
+	RequesterMemberID int64 `json:"requester_member_id"`
+	RequesterUserID   int64 `json:"requester_user_id"`
 }
 
 func (u *CreateSenderKeyRequestUseCase) notifyProvider(
@@ -110,6 +111,7 @@ func (u *CreateSenderKeyRequestUseCase) notifyProvider(
 		Type: "e2ee.sender_key_needed",
 		Payload: wsSenderKeyNeededPayload{
 			RoomID:            roomID,
+			ProviderMemberID:  int64(providerMember.ID),
 			RequesterMemberID: int64(requesterMember.ID),
 			RequesterUserID:   int64(*requesterParticipant.UserID),
 		},

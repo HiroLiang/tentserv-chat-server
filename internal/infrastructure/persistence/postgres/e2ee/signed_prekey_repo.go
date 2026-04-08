@@ -83,17 +83,20 @@ func (r *SignedPreKeyRepository) FindByKeyID(
 func (r *SignedPreKeyRepository) Add(ctx context.Context, key *usersignedprekey.UserSignedPreKey) error {
 	rec := toSignedPreKeyRecord(key)
 
-	query, args, err := signedPreKeyTable.Insert().
-		Columns("user_id", "device_id", "key_id", "public_key", "signature", "is_active", "expires_at").
-		Values(rec.UserID, rec.DeviceID, rec.KeyID, rec.PublicKey, rec.Signature, rec.IsActive, rec.ExpiresAt).
-		Suffix("RETURNING id, created_at").
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build insert signed prekey: %w", err)
-	}
+	const query = `
+		INSERT INTO public.user_signed_pre_keys
+			(user_id, device_id, key_id, public_key, signature, is_active, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id, device_id, key_id) DO UPDATE SET
+			public_key = EXCLUDED.public_key,
+			signature  = EXCLUDED.signature,
+			is_active  = EXCLUDED.is_active,
+			expires_at = EXCLUDED.expires_at,
+			created_at = now()
+		RETURNING id, created_at`
 
 	db := r.GetDB(ctx)
-	row := db.QueryRowxContext(ctx, query, args...)
+	row := db.QueryRowxContext(ctx, query, rec.UserID, rec.DeviceID, rec.KeyID, rec.PublicKey, rec.Signature, rec.IsActive, rec.ExpiresAt)
 	if err := row.Scan(&key.ID, &key.CreatedAt); err != nil {
 		return fmt.Errorf("insert signed prekey: %w", err)
 	}

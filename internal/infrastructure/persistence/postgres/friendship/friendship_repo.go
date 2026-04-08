@@ -116,7 +116,7 @@ func (r *FriendshipRepository) FindByUserIDAndFriendID(ctx context.Context, user
 	return toDomain(rec), nil
 }
 
-func (r *FriendshipRepository) FindBetweenUsers(ctx context.Context, userID1, userID2 shared.UserID) (*friendship.Friendship, error) {
+func (r *FriendshipRepository) FindBetweenUsers(ctx context.Context, userID1, userID2 shared.UserID) ([]*friendship.Friendship, error) {
 	query, args, err := Table.
 		Select(Table.Columns...).
 		Where(squirrel.Or{
@@ -128,14 +128,19 @@ func (r *FriendshipRepository) FindBetweenUsers(ctx context.Context, userID1, us
 		return nil, fmt.Errorf("build find friendship between users query: %w", err)
 	}
 
-	rec, err := postgres.ScanOne[FriendshipRecord](ctx, r.GetDB(ctx), query, args...)
+	records, err := postgres.ScanAll[FriendshipRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
-		if errors.Is(err, postgres.ErrNotFound) {
-			return nil, friendship.ErrFriendshipNotFound
-		}
-		return nil, fmt.Errorf("scan friendship: %w", err)
+		return nil, fmt.Errorf("scan friendships: %w", err)
 	}
-	return toDomain(rec), nil
+	if len(records) == 0 {
+		return nil, friendship.ErrFriendshipNotFound
+	}
+
+	result := make([]*friendship.Friendship, 0, len(records))
+	for i := range records {
+		result = append(result, toDomain(&records[i]))
+	}
+	return result, nil
 }
 
 func (r *FriendshipRepository) FindAllByUserID(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error) {

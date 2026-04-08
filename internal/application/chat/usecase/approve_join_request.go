@@ -2,12 +2,16 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 )
@@ -30,6 +34,7 @@ type ApproveJoinRequestUseCase struct {
 	chatMemberRepo  chatmember.Repository
 	participantRepo participant.Repository
 	invitationRepo  chatinvitation.Repository
+	broadcaster     chatPort.Broadcaster
 }
 
 func NewApproveJoinRequestUseCase(
@@ -37,12 +42,14 @@ func NewApproveJoinRequestUseCase(
 	chatMemberRepo chatmember.Repository,
 	participantRepo participant.Repository,
 	invitationRepo chatinvitation.Repository,
+	broadcaster chatPort.Broadcaster,
 ) *ApproveJoinRequestUseCase {
 	return &ApproveJoinRequestUseCase{
 		uow:             uow,
 		chatMemberRepo:  chatMemberRepo,
 		participantRepo: participantRepo,
 		invitationRepo:  invitationRepo,
+		broadcaster:     broadcaster,
 	}
 }
 
@@ -130,6 +137,9 @@ func (uc *ApproveJoinRequestUseCase) Execute(
 		return ApproveJoinRequestOutput{}, ErrInvitationCreate
 	}
 
+	// Notify existing members so they can initiate sender key exchange with the new member.
+	go uc.notifyMemberJoined(context.Background(), inv.RoomID, member.ID, inv.InviteeID)
+
 	memberID := int64(member.ID)
 	role := string(member.Role)
 	return ApproveJoinRequestOutput{
@@ -139,4 +149,42 @@ func (uc *ApproveJoinRequestUseCase) Execute(
 		Role:         &role,
 		JoinedAt:     &member.JoinedAt,
 	}, nil
+}
+
+func (uc *ApproveJoinRequestUseCase) notifyMemberJoined(
+	ctx context.Context,
+	roomID chatroom.ID,
+	newMemberID chatmember.ID,
+	newParticipantID participant.ID,
+) {
+	if uc.broadcaster == nil {
+		return
+	}
+	members, err := uc.chatMemberRepo.FindByRoom(ctx, roomID)
+	if err != nil {
+		return
+	}
+	payload, err := json.Marshal(struct {
+		Type    string                `json:"type"`
+		Payload wsMemberJoinedPayload `json:"payload"`
+	}{
+		Type: "chat.member_joined",
+		Payload: wsMemberJoinedPayload{
+			RoomID:      int64(roomID),
+			NewMemberID: int64(newMemberID),
+		},
+	})
+	if err != nil {
+		return
+	}
+	for _, m := range members {
+		if m.IsDeleted || m.ParticipantID == newParticipantID {
+			continue
+		}
+		p, err := uc.participantRepo.FindByID(ctx, m.ParticipantID)
+		if err != nil || p.UserID == nil {
+			continue
+		}
+		uc.broadcaster.SendToUser(strconv.FormatInt(int64(*p.UserID), 10), payload)
+	}
 }

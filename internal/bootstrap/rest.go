@@ -14,6 +14,18 @@ import (
     "github.com/gin-gonic/gin"
 )
 
+// [EN] RegisterRestRoutes wires all REST routes onto the Gin router group.
+//      Middleware stack (applied to all routes): ErrorHandler → GlobalRateLimit → IPRateLimit →
+//      AccessLog → AuthMiddleware (sets authContext if token valid) → ContextMiddleware.
+//      Protected route groups additionally use RequireAuthMiddleware() which aborts with 401 if no authContext.
+// [中] RegisterRestRoutes 將所有 REST 路由掛載到 Gin RouterGroup。
+//      中間件堆疊（全域）：ErrorHandler → GlobalRateLimit → IPRateLimit →
+//      AccessLog → AuthMiddleware（Token 有效時設定 authContext）→ ContextMiddleware。
+//      受保護路由群組額外使用 RequireAuthMiddleware()，無 authContext 時返回 401。
+// [日] RegisterRestRoutes はすべての REST ルートを Gin RouterGroup に登録する。
+//      ミドルウェアスタック（全ルート共通）：ErrorHandler → GlobalRateLimit → IPRateLimit →
+//      AccessLog → AuthMiddleware（トークン有効時に authContext を設定）→ ContextMiddleware。
+//      保護ルートグループはさらに RequireAuthMiddleware() を適用し、authContext なしの場合は 401 を返す。
 func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies *Dependencies) {
 
     // Global middleware
@@ -42,7 +54,8 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
         useCases.UpdateUserProfileUseCase,
         useCases.UploadAvatarUseCase,
         useCases.GetUserProfileUseCase,
-        useCases.SearchUsersUseCase)
+        useCases.SearchUsersUseCase,
+        useCases.SwitchUserUseCase)
     userHandler.RegisterUserRoutes(group.Group("/user"))
 
     var friendshipHandler = friendship.NewFriendshipHandler(
@@ -104,6 +117,7 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
         useCases.UploadOTPPreKeysUseCase,
         useCases.CountOTPPreKeysUseCase,
         useCases.GetKeyBundleUseCase,
+        useCases.CheckKeyStatusUseCase,
         useCases.UploadSenderKeyUseCase,
         useCases.GetSenderKeysUseCase,
         useCases.GetSenderKeyDistributionStatusUseCase,

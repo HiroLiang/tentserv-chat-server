@@ -6,6 +6,22 @@ import (
 	"time"
 )
 
+// [EN] Hub is the central WebSocket message broker. It maintains:
+//      - clients: all connected Client instances (accessed only from Run() goroutine — no lock needed).
+//      - userClients: userID → []*Client mapping (protected by mu RWMutex for concurrent access).
+//      - pendingAcks: tracks in-flight messages waiting for client ACK (protected by ackMu).
+//      - onConnect: hook called in a goroutine when a new client registers (used for replay of queued keys).
+// [中] Hub 為中央 WebSocket 訊息代理。維護：
+//      clients（所有連線，僅在 Run() goroutine 中存取，無需鎖定）；
+//      userClients（userID → []*Client，以 mu RWMutex 保護並發存取）；
+//      pendingAcks（追蹤等待 ACK 的訊息，以 ackMu 保護）；
+//      onConnect（新客戶端連線時在 goroutine 中執行的鉤子，用於重播佇列金鑰）。
+// [日] Hub は WebSocket メッセージブローカーの中核。以下を管理する：
+//      clients（全接続 Client、Run() goroutine からのみアクセス — ロック不要）；
+//      userClients（userID → []*Client、mu RWMutex で並行アクセスを保護）；
+//      pendingAcks（ACK 待ちの配信を追跡、ackMu で保護）；
+//      onConnect（新クライアント登録時に goroutine で呼び出されるフック、キュー鍵の再配信に使用）。
+
 // Hub manages all active WebSocket clients and routes broadcasts.
 type Hub struct {
 	// clients holds every connected client; only accessed from Run().
@@ -45,6 +61,9 @@ func NewHub() *Hub {
 	}
 }
 
+// [EN] Run: event loop (select) for Register/Unregister/Broadcast channels. Single goroutine owns clients map.
+// [中] Run：Register/Unregister/Broadcast channel 的事件迴圈，單一 goroutine 擁有 clients map。
+// [日] Run：Register/Unregister/Broadcast チャネルのイベントループ。clients map は単一 goroutine が所有する。
 // Run starts the Hub event loop. Must be called in a goroutine.
 func (h *Hub) Run() {
 	for {
@@ -91,6 +110,12 @@ func (h *Hub) SendToUser(userID string, msg []byte) {
 	}
 }
 
+// [EN] PushAndWaitAck: sends a message with delivery_id and blocks until ACK received or timeout.
+//      Used by the retry scheduler for guaranteed delivery to online clients.
+// [中] PushAndWaitAck：傳送含 delivery_id 的訊息，阻塞直到收到 ACK 或逾時。
+//      由重試排程器用於對線上客戶端的保證送達。
+// [日] PushAndWaitAck：delivery_id 付きメッセージを送信し、ACK 受信またはタイムアウトまでブロックする。
+//      オンラインクライアントへの配信保証のためにリトライスケジューラから使用される。
 // PushAndWaitAck sends a typed message with a delivery ID to a user and waits for the client ACK.
 // Returns true if ACK was received within timeout, false otherwise.
 func (h *Hub) PushAndWaitAck(userID string, deliveryID int64, msgType string, payload []byte, timeout time.Duration) bool {

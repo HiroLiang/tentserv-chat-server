@@ -60,6 +60,14 @@ func NewSendMessageUseCase(
 	}
 }
 
+// [EN] Execute: validates caller is an active room member with send permission,
+//      validates message type (text/image/file), defends against path traversal for file/image content,
+//      persists the message, then calls fanOut() asynchronously to broadcast to all room members.
+// [中] Execute：驗證呼叫者為房間有效成員且有傳訊權限，驗證訊息類型（text/image/file），
+//      對 file/image 防範路徑遍歷攻擊，持久化訊息後非同步呼叫 fanOut() 廣播給所有成員。
+// [日] Execute：呼び出し元がアクティブなルームメンバーかつ送信権限を持つことを検証し、
+//      メッセージタイプ（text/image/file）を検証、ファイル/画像コンテンツのパストラバーサルを防御、
+//      メッセージを永続化した後、fanOut() を非同期で呼び出して全メンバーにブロードキャストする。
 func (uc *SendMessageUseCase) Execute(
 	ctx context.Context,
 	input shared.UseCaseInput[SendMessageInput],
@@ -158,6 +166,14 @@ type wsEnvelope struct {
 	Payload wsMessagePayload `json:"payload"`
 }
 
+// [EN] fanOut: runs in a goroutine. Fetches all room members, serializes the chat.message envelope,
+//      then calls broadcaster.SendToUser() for each member's userID.
+//      Online clients receive immediately; offline clients are handled by the delivery queue.
+// [中] fanOut：在 goroutine 中執行，取得所有房間成員，序列化 chat.message 封包，
+//      對每個成員的 userID 呼叫 broadcaster.SendToUser()；線上客戶端立即收到，離線由投遞佇列處理。
+// [日] fanOut：goroutine で実行。全ルームメンバーを取得し、chat.message エンベロープをシリアライズして
+//      各メンバーの userID に broadcaster.SendToUser() を呼び出す。
+//      オンラインクライアントは即座に受信；オフラインは配信キューが処理する。
 func (uc *SendMessageUseCase) fanOut(out SendMessageOutput) {
 	defer func() {
 		if r := recover(); r != nil {

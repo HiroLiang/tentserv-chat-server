@@ -16,6 +16,16 @@ const (
 	maxMessageSize = 4096
 )
 
+// [EN] Client represents one WebSocket connection. Each client has two goroutines:
+//      ReadPump: reads inbound messages and routes them via MessageRouter.
+//      WritePump: drains the send channel and writes to the socket; also sends periodic pings (54s).
+// [中] Client 代表一條 WebSocket 連線。每個 Client 有兩個 goroutine：
+//      ReadPump：讀取入站訊息並透過 MessageRouter 分發；
+//      WritePump：消費 send channel 並寫入 socket，同時定期發送 ping（54 秒）。
+// [日] Client は 1 つの WebSocket 接続を表す。各 Client に 2 つの goroutine を持つ：
+//      ReadPump：受信メッセージを読み取り MessageRouter でルーティングする；
+//      WritePump：send チャネルをドレインして socket に書き込み、定期的に ping（54 秒）を送信する。
+
 // Client represents a single WebSocket connection.
 type Client struct {
 	hub    *Hub

@@ -14,6 +14,17 @@ import (
 	"go.uber.org/zap"
 )
 
+// [EN] AuthMiddleware: extracts Bearer token and X-Device-ID (falls back to query params for WebSocket),
+//      validates the session, checks device ID matches, fetches user roles, and stores an AuthContext in Gin context.
+//      Does NOT abort on failure — downstream RequireAuthMiddleware() handles that.
+//      On success, echoes the refreshed token in the response Authorization header.
+// [中] AuthMiddleware：提取 Bearer token 與 X-Device-ID（WebSocket 回退到 query param），
+//      驗證 session、比對 device ID、取得使用者角色，並將 AuthContext 存入 Gin context。
+//      驗證失敗不中止請求，由下游 RequireAuthMiddleware() 處理；成功時在回應 header 回傳更新後的 token。
+// [日] AuthMiddleware：Bearer トークンと X-Device-ID を取得（WebSocket はクエリパラメータにフォールバック）、
+//      セッションを検証し、デバイス ID を照合し、ユーザーロールを取得して AuthContext を Gin コンテキストに保存する。
+//      失敗しても中断しない（下流の RequireAuthMiddleware() が担当）。成功時はレスポンスヘッダに更新トークンを返す。
+
 // AuthMiddleware try to validate auth token from the header
 func AuthMiddleware(sessionManager port.SessionManager, userRepo user.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {

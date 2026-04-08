@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
@@ -21,6 +22,7 @@ type UserHandler struct {
 	uploadAvatarUseCase  *usecase.UploadAvatarUseCase
 	getProfileUseCase    *usecase.GetProfileUseCase
 	searchUsersUseCase   *usecase.SearchUsersUseCase
+	switchUserUseCase    *usecase.SwitchUserUseCase
 }
 
 // NewUserHandler Create a new UserHandler instance with dependencies
@@ -29,12 +31,14 @@ func NewUserHandler(
 	uploadAvatarUseCase *usecase.UploadAvatarUseCase,
 	getProfileUseCase *usecase.GetProfileUseCase,
 	searchUsersUseCase *usecase.SearchUsersUseCase,
+	switchUserUseCase *usecase.SwitchUserUseCase,
 ) *UserHandler {
 	return &UserHandler{
 		updateProfileUseCase: updateProfileUseCase,
 		uploadAvatarUseCase:  uploadAvatarUseCase,
 		getProfileUseCase:    getProfileUseCase,
 		searchUsersUseCase:   searchUsersUseCase,
+		switchUserUseCase:    switchUserUseCase,
 	}
 }
 
@@ -46,6 +50,7 @@ func (h *UserHandler) RegisterUserRoutes(r *gin.RouterGroup) {
 
 	authed := r.Group("", middleware.RequireAuthMiddleware())
 	authed.GET("/search", h.searchUsers)
+	authed.POST("/switch", h.switchUser)
 }
 
 // @Summary Get user profile
@@ -179,12 +184,35 @@ func (h *UserHandler) uploadAvatar(c *gin.Context) {
 	c.JSON(http.StatusOK, UploadAvatarResponse{AvatarPath: output.AvatarPath})
 }
 
-func isAllowedImageType(mimeType string) bool {
-	switch mimeType {
-	case "image/jpeg", "image/png", "image/webp":
-		return true
+// @Summary Switch user
+// @Description Switch the active user in the current session
+// @Tags User
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param payload body SwitchUserRequest true "Target user ID"
+// @Success 204
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/user/switch [post]
+func (h *UserHandler) switchUser(c *gin.Context) {
+	var req SwitchUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
 	}
-	return false
+
+	input := adapter.BuildInput(c, usecase.SwitchUserInput{
+		TargetUserID: shared.UserID(req.UserID),
+	})
+
+	if err := h.switchUserUseCase.Execute(c.Request.Context(), input); err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // @Summary Search users
@@ -234,4 +262,12 @@ func (h *UserHandler) searchUsers(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+func isAllowedImageType(mimeType string) bool {
+	switch mimeType {
+	case "image/jpeg", "image/png", "image/webp":
+		return true
+	}
+	return false
 }

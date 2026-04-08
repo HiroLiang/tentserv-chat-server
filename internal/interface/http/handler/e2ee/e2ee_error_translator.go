@@ -34,6 +34,13 @@ func HandleError(c *gin.Context, err error) {
 		})
 		return
 
+	case errors.Is(err, usecase.ErrKeyBundleNotFound):
+		c.JSON(http.StatusNotFound, response.ErrorResponse{
+			Code:    "KEY_BUNDLE_NOT_FOUND",
+			Message: "key bundle not found",
+		})
+		return
+
 	default:
 		_ = c.Error(err)
 		return

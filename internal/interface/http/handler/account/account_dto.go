@@ -22,6 +22,7 @@ type LoginResponse struct {
 }
 
 type GetProfileResponse struct {
+	AccountID   int64           `json:"account_id"`
 	PublicID    string          `json:"public_id"`
 	Email       string          `json:"email"`
 	AccountName string          `json:"account_name"`

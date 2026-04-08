@@ -27,6 +27,11 @@ type GetUserProfileResponse struct {
 	RoleCodes []string `json:"role_codes"`
 }
 
+// SwitchUserRequest represents the target user to switch to.
+type SwitchUserRequest struct {
+	UserID int64 `json:"user_id" binding:"required"`
+}
+
 // UserSearchResponse is returned for user search results.
 type UserSearchResponse struct {
 	UserID           int64   `json:"user_id"`

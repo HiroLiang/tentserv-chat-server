@@ -50,6 +50,12 @@ type KeyBundleResponse struct {
 	OTPPreKeyID     *uint32 `json:"otp_pre_key_id,omitempty"`
 }
 
+// Key Status (non-consuming existence check)
+type CheckKeyStatusResponse struct {
+	IdentityKeyExists  bool `json:"identity_key_exists"`
+	SignedPreKeyExists bool `json:"signed_pre_key_exists"`
+}
+
 // Sender Key (used for both direct and group rooms)
 type UploadSenderKeyRequest struct {
 	RoomID              int64  `json:"room_id" binding:"required"`

@@ -32,6 +32,12 @@ func init() {
 	}
 }
 
+// [EN] main: server entry point. Initializes logger and config, creates and starts the app,
+//      then blocks on SIGTERM/SIGINT for graceful shutdown (5s timeout).
+// [中] main：伺服器入口。初始化 logger 與設定，建立並啟動 App，
+//      監聽 SIGTERM/SIGINT 訊號後執行 5 秒超時優雅關機。
+// [日] main：サーバーエントリ。logger と設定を初期化し、App を作成・起動した後、
+//      SIGTERM/SIGINT を待機して 5 秒タイムアウトのグレースフルシャットダウンを実行する。
 func main() {
 
 	// Initialize logger

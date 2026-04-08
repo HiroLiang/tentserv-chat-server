@@ -27,6 +27,7 @@ type UseCases struct {
 	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
 	GetUserProfileUseCase    *userUseCase.GetProfileUseCase
 	SearchUsersUseCase       *userUseCase.SearchUsersUseCase
+	SwitchUserUseCase        *userUseCase.SwitchUserUseCase
 
 	RegisterDeviceUseCase   *deviceUseCase.RegisterUseCase
 	GetDeviceProfileUseCase *deviceUseCase.GetProfileUseCase
@@ -53,6 +54,7 @@ type UseCases struct {
 	UploadOTPPreKeysUseCase                   *e2eeUseCase.UploadOTPPreKeysUseCase
 	CountOTPPreKeysUseCase                    *e2eeUseCase.CountOTPPreKeysUseCase
 	GetKeyBundleUseCase                       *e2eeUseCase.GetKeyBundleUseCase
+	CheckKeyStatusUseCase                     *e2eeUseCase.CheckKeyStatusUseCase
 	UploadSenderKeyUseCase                        *e2eeUseCase.UploadSenderKeyUseCase
 	GetSenderKeysUseCase                          *e2eeUseCase.GetSenderKeysUseCase
 	GetSenderKeyDistributionStatusUseCase         *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
@@ -111,6 +113,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),
 		GetUserProfileUseCase:    userUseCase.NewGetProfileUseCase(deps.UserRepo),
 		SearchUsersUseCase:       userUseCase.NewSearchUsersUseCase(deps.UserRepo, deps.FriendshipRepo),
+		SwitchUserUseCase:        userUseCase.NewSwitchUserUseCase(deps.SessionManager),
 
 		RegisterDeviceUseCase:   deviceUseCase.NewRegisterUseCase(deps.Uow, deps.DeviceRepo),
 		GetDeviceProfileUseCase: deviceUseCase.NewGetProfileUseCase(deps.Uow, deps.DeviceRepo),
@@ -142,6 +145,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.ParticipantRepository,
 			deps.ChatInvitationRepo,
+			deps.Hub,
 		),
 		GetMyRoomInvitationUseCase: chatUseCase.NewGetMyRoomInvitationUseCase(
 			deps.ParticipantRepository,
@@ -154,6 +158,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.ChatInvitationRepo,
 			deps.FriendshipRepo,
+			deps.Hub,
 		),
 		GetUserChatRoomsUseCase: chatUseCase.NewGetUserChatRoomsUseCase(
 			deps.ParticipantRepository,
@@ -201,6 +206,10 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.SignedPreKeyRepo,
 			deps.OTPPreKeyRepo,
 			deps.PushDispatcher,
+		),
+		CheckKeyStatusUseCase: e2eeUseCase.NewCheckKeyStatusUseCase(
+			deps.IdentityKeyRepo,
+			deps.SignedPreKeyRepo,
 		),
 		UploadSenderKeyUseCase: e2eeUseCase.NewUploadSenderKeyUseCase(
 			deps.ParticipantRepository,

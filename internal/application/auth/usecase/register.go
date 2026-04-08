@@ -113,6 +113,7 @@ func (uc *RegisterUseCase) Execute(
 			return RegisterOutput{}, ErrRegisterFailed
 		}
 	}
+	newAccount.ID = accountId
 
 	// Create a user with the provided display name
 	newUser := user.NewUser(accountId, input.Data.Name)
