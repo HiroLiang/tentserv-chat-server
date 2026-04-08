@@ -75,6 +75,9 @@ func (r *DeviceRepository) FindAllByAccountID(ctx context.Context, accountID sha
 func (r *DeviceRepository) Create(ctx context.Context, d *device.Device) error {
 	rec := toRecord(d)
 
+	// [EN] Create reports ErrDeviceAlreadyExists so the usecase can run the update branch in the same transaction.
+	// [中] Create 以 ErrDeviceAlreadyExists 回報衝突，讓 usecase 能在同一交易中走更新分支。
+	// [日] Create は競合時に ErrDeviceAlreadyExists を返し、usecase が同じ transaction で更新分岐へ進めるようにする。
 	query, args, err := Table.Insert().
 		Columns("id", "platform", "name").
 		Values(rec.ID, rec.Platform, rec.Name).
@@ -102,6 +105,9 @@ func (r *DeviceRepository) Create(ctx context.Context, d *device.Device) error {
 func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
 	rec := toRecord(d)
 
+	// [EN] Device updates only mutate editable fields and let PostgreSQL refresh updated_at.
+	// [中] 裝置更新只修改可編輯欄位，並由 PostgreSQL 刷新 updated_at。
+	// [日] 端末更新では編集可能な項目のみ変更し、updated_at は PostgreSQL に更新させる。
 	query, args, err := Table.Update().
 		Set("name", rec.Name).
 		Set("platform", rec.Platform).
@@ -112,7 +118,19 @@ func (r *DeviceRepository) Update(ctx context.Context, d *device.Device) error {
 		return err
 	}
 
-	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+	result, err := r.GetDB(ctx).ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update device: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update device rows affected: %w", err)
+	}
+	if rows == 0 {
+		return device.ErrDeviceNotFound
+	}
+	return nil
 }
 
 func (r *DeviceRepository) BindAccount(ctx context.Context, deviceID device.ID, accountID shared.AccountID) error {

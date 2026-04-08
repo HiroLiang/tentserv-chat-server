@@ -17,6 +17,8 @@ type GetSenderKeyDistributionStatusInput struct {
 }
 
 type GetSenderKeyDistributionStatusOutput struct {
+	// OwnSenderKeyExists: whether the caller has uploaded a sender key to the backend.
+	OwnSenderKeyExists bool
 	// PendingReceivers: member IDs who have not yet fetched my latest sender key.
 	PendingReceivers []int64
 	// PendingFromMembers: member IDs whose latest sender key I have not yet fetched.
@@ -58,6 +60,11 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
+	ownSenderKeyExists, err := u.ownSenderKeyExists(ctx, callerMember.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Pending receivers: who hasn't fetched my latest key yet?
 	pendingReceivers, err := u.pendingReceivers(ctx, callerMember.ID)
 	if err != nil {
@@ -71,9 +78,23 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 	}
 
 	return &GetSenderKeyDistributionStatusOutput{
+		OwnSenderKeyExists: ownSenderKeyExists,
 		PendingReceivers:   pendingReceivers,
 		PendingFromMembers: pendingFrom,
 	}, nil
+}
+
+func (u *GetSenderKeyDistributionStatusUseCase) ownSenderKeyExists(
+	ctx context.Context,
+	callerMemberID chatmember.ID,
+) (bool, error) {
+	if _, err := u.memberSenderKeyRepo.FindLatest(ctx, callerMemberID); err != nil {
+		if err == membersenderkey.ErrNotFound {
+			return false, nil
+		}
+		return false, fmt.Errorf("find own latest sender key: %w", err)
+	}
+	return true, nil
 }
 
 func (u *GetSenderKeyDistributionStatusUseCase) pendingReceivers(

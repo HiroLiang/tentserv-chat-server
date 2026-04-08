@@ -7,6 +7,7 @@ import (
 	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -59,7 +60,10 @@ func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
 func (h *AuthHandler) register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		HandleError(c, err)
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid register payload",
+		})
 		return
 	}
 

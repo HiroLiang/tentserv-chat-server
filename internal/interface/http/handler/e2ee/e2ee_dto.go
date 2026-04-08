@@ -81,6 +81,8 @@ type CreateSenderKeyRequestRequest struct {
 
 // Sender Key Distribution Status
 type GetSenderKeyDistributionStatusResponse struct {
+	// OwnSenderKeyExists: whether my latest sender key exists on the server.
+	OwnSenderKeyExists bool `json:"own_sender_key_exists"`
 	// PendingReceivers: member IDs in the room who have not yet fetched my latest sender key.
 	PendingReceivers []int64 `json:"pending_receivers"`
 	// PendingFromMembers: member IDs whose latest sender key I have not yet fetched.

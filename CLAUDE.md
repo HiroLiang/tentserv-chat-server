@@ -1,99 +1,49 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Backend execution and style guide for `tentserv-chat-server/`. Business scope comes from the outer `../AGENTS.md`, the matching `../docs/agent-guides/*/SKILL.md`, and this repo's `AGENTS.md`.
 
 ## Commands
 
+Run from `tentserv-chat-server/`:
+
 ```bash
-make setup   # Install swag and godog CLIs (required before first run)
+make setup   # Install swag and godog CLIs before first use
 make build   # Compile to bin/goat-api
-make run     # Start server on :8080
-make test    # Run all tests (unit + BDD)
-make unit    # Run unit tests: go test ./internal/... -v
-make bdd     # Run BDD tests: go test -v ./features
-make swag    # Regenerate Swagger docs (after changing API annotations)
+make run     # Start server locally on :8080
+make test    # Run unit + BDD tests
+make unit    # go test ./internal/... -v
+make bdd     # go test -v ./features
+make swag    # Regenerate Swagger docs after API annotation changes
+go test ./internal/path/to/pkg -count=1 -v -run TestFunctionName
 ```
 
-To run a single unit test:
-```bash
-go test ./internal/path/to/pkg/... -v -run TestFunctionName
-```
+Use `go test ./features -count=1 -v` whenever backend HTTP behavior changes.
 
-## Architecture
+## Architecture Rules
 
-Clean Architecture with strict unidirectional dependency: `domain → application → infrastructure/interface`
+- Keep Clean Architecture direction: `domain -> application -> infrastructure/interface`.
+- Handlers bind HTTP DTOs, build use case inputs with `adapter.BuildInput(c, data)` or `adapter.BuildEmptyInput(c)`, then delegate to use cases.
+- Use cases accept `shared.UseCaseInput[T]`; business logic stays there, not in Gin handlers.
+- Repository implementations use the existing `Masterminds/squirrel` plus `postgres.ScanOne[T]` / `postgres.ScanAll[T]` helpers. `BaseRepo.GetDB(ctx)` returns the transaction-bound DB when present.
+- When package names clash, alias domain imports clearly, for example `domainuser`.
 
-**`internal/domain/`** — Entities and repository interfaces. No framework dependencies. Each domain package contains: entity (`<name>.go`), `repository.go` (interface), `value_objects.go` (typed primitives), `errors.go`.
+## BDD Rules
 
-**`internal/application/`** — Use cases. All accept `shared.UseCaseInput[T]` which wraps:
-- `Base.Auth` — AccountID, UserID, Roles, AccessToken
-- `Base.Request` — IP, TraceID, DeviceID
-- `Data T` — typed request payload
+- BDD lives in `features/` using Godog/Gherkin and an `httptest.Server`.
+- Keep the BDD server minimal for the flow under test; do not initialize full chat/ws/e2ee wiring unless that flow requires it.
+- New or changed user-visible HTTP behavior must update a feature file and steps.
+- Step logs must include `Given`, `Input`, `Action`, `Output`, `Mutation`, and `Duration`.
+- Do not log raw passwords, verification tokens, private keys, session tokens, or E2EE key material.
 
-**`internal/infrastructure/`** — Implementations: PostgreSQL repos (via pgx/sqlx + Masterminds/squirrel), Redis session/cache/rate-limiter, local file storage, email (Resend), E2EE crypto.
+## Unit Test Rules
 
-**`internal/interface/http/`** — Gin handlers, middleware, DTOs, and error translators. Each feature group has:
-- `*_handler.go` — route handler
-- `*_dto.go` — request/response structs
-- `*_error_translator.go` — maps domain errors → HTTP status codes
+- Use unit tests for internal contracts BDD should not own: SQL mapping, repo error translation, builders, transaction commit/rollback, cryptography, and narrow failure branches.
+- Do not duplicate BDD happy paths unless the use case has internal behavior that is not visible over HTTP.
+- Prefer focused commands first, then `go test ./internal/... -count=1 -v` before handoff when backend internals changed.
 
-**`internal/interface/ws/`** — Gorilla WebSocket real-time layer:
-- `hub.go` — Hub manages `clients map[*Client]bool` and `userClients map[string][]*Client` for per-user message routing; tracks pending ACKs for delivery guarantees
-- `client.go` — One goroutine pair per connection: `ReadPump` dispatches inbound messages to the router; `WritePump` drains the send channel to the socket
-- `router.go` — Registers message-type → handler mappings
-- Handlers: `handler/chat/` (chat messages), `handler/game/` (game moves), `handler/system/` (ACK acknowledgments)
-- `bootstrap/ws.go` starts a background retry scheduler that replays the delivery queue for offline clients
+## Config
 
-**`internal/bootstrap/`** — DI wiring: `BuildDeps()` constructs all repos/services; `usecases.go` wires use cases.
-
-**`features/`** — BDD tests using Godog/Gherkin. `suite.go` sets up mock deps and an `httptest.Server`; `context.go` contains step definitions.
-
-## Key Patterns
-
-**Gin → UseCase bridge** (`internal/interface/http/adapter/`):
-```go
-adapter.BuildInput(c, data)      // with typed request data
-adapter.BuildEmptyInput(c)       // no request body
-```
-
-**Import naming:** When a handler package name matches an application package name (e.g., both named `user`), the imported application package is used unqualified. If domain and application packages clash in the same file, alias domain as `domainuser`.
-
-**Repository queries:** Use `Masterminds/squirrel` — wrap conditions with `squirrel.Eq{...}` and pass to shared `postgres.ScanOne[T]` / `postgres.ScanAll[T]` helpers. `BaseRepo.GetDB(ctx)` returns the active transaction if one exists in context, otherwise the raw DB.
-
-**Infrastructure record/mapper pattern:** Each repo has three files: `*_record.go` (raw DB struct with `[]byte` keys), `*_mapper.go` (domain ↔ record conversion), `*_repo.go` (implements domain interface).
-
-**Mocking in BDD tests:** `bootstrap.MockDeps()` with option functions. `FileStorage` mock must be set explicitly: `deps.FileStorage = mockShared.MockFileStorage()`.
-
-## E2EE (End-to-End Encryption)
-
-Signal Protocol key types implemented in `internal/domain/`:
-- `useridentitykey/` — long-lived Curve25519 identity key (one per user per device)
-- `usersignedprekey/` — medium-term pre-key signed by identity key (Ed25519)
-- `userotpprekey/` — one-time pre-keys consumed in X3DH
-- `membersenderkey/` — per-member group sender keys (chain-based re-keying)
-
-Crypto interface: `internal/application/shared/crypto/e2ee.go` (`KeyVerifier`).
-Implementation: `internal/infrastructure/shared/crypto/e2ee_verifier.go` — Ed25519 verify + SHA-256 fingerprint.
-DB migration: `dev-doc/sql/migrate_add_e2ee.sql`.
-
-## Configuration
-
-- Production config: `config/config.yaml`
-- BDD test config: `dev-doc/config/config.yaml` (loaded via `config.LoadConfig("../dev-doc/config")`)
-- Runtime env vars: `APP_ENV`, `SERVER_PORT`, `CONFIG_PATH`
-- YAML values support `${VAR:default}` expansion
-
-## Infrastructure Requirements (local dev)
-
-```bash
-# PostgreSQL
-docker run -d --name postgres --network goat-net \
-  -e POSTGRES_USER=root -e POSTGRES_PASSWORD=1234 -e POSTGRES_DB=tentserv \
-  -p 5432:5432 postgres:18
-
-# Redis
-docker run -d --name redis --network goat-net \
-  -p 6379:6379 redis:8 redis-server --requirepass "1234"
-```
-
-Initialize schema with `config/init_postgres.sql`.
+- Runtime config: `config/config.yaml`
+- BDD config: `dev-doc/config/config.yaml`
+- Schema initialization: `config/init_postgres.sql`
+- Local PostgreSQL/Redis details are documented in the outer workspace `AGENTS.md` when needed for manual dev runs.

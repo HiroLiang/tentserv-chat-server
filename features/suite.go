@@ -1,49 +1,57 @@
 package features
 
 import (
-	"fmt"
 	"net/http/httptest"
 
-	"github.com/HiroLiang/tentserv-chat-server/internal/bootstrap"
+	accountfeatures "github.com/HiroLiang/tentserv-chat-server/features/account"
+	devicefeatures "github.com/HiroLiang/tentserv-chat-server/features/device"
+	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
-	mockAuth "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/auth/mock"
-	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
+	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
+	accountHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/account"
+	deviceHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/device"
+	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
 	"github.com/cucumber/godog"
-	"go.uber.org/zap"
+	"github.com/gin-gonic/gin"
 )
 
 var (
 	testServer *httptest.Server
 	baseURL    string
+	accountBDD *accountfeatures.Deps
+	deviceBDD  *devicefeatures.Deps
 )
 
-// InitializeSuite runs once before all features
 func InitializeSuite(ctx *godog.TestSuiteContext) {
 	ctx.BeforeSuite(func() {
-		logger.InitTestEnv()
-
+		gin.SetMode(gin.TestMode)
 		if err := config.LoadConfig("../dev-doc/config"); err != nil {
-			logger.Log.Fatal("Error loading config", zap.Error(err))
+			panic(err)
 		}
 
-		// Get mock dependencies
-		dependencies := bootstrap.MockDeps(
-			func(deps *bootstrap.Dependencies) {
-				deps.UserRoleRepo = mockAuth.MockUserRoleRepo()
-			},
+		accountBDD = accountfeatures.NewDeps()
+		deviceBDD = devicefeatures.NewDeps()
+
+		accountRegisterUseCase, verifyEmailUseCase := accountBDD.RegisterUseCases(
+			bddsupport.UOW{},
+			security.NewArgon2Hasher(),
 		)
+		deviceRegisterUseCase, deviceUpdateUseCase := deviceBDD.RegisterUseCases(bddsupport.UOW{})
 
-		// Build use cases
-		useCases := bootstrap.BuildUseCases(dependencies)
+		router := gin.New()
+		router.Use(middleware.ContextMiddleware())
+		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, nil, nil, nil, verifyEmailUseCase)
+		authHandler.RegisterAuthRoutes(router.Group("/api/auth"))
+		deviceRoutes := deviceHandler.NewDeviceHandler(deviceRegisterUseCase, nil, deviceUpdateUseCase, nil, nil, nil)
+		deviceRoutes.RegisterPublicDeviceRoutes(router.Group("/api/device"))
 
-		// For feature tests we only hit /api/test, so pass empty services
-		app := bootstrap.NewServer(":8080", useCases, dependencies)
-		testServer = httptest.NewServer(app.Handler)
+		testServer = httptest.NewServer(router)
 		baseURL = testServer.URL
-		fmt.Println(testServer.URL)
 	})
+
 	ctx.AfterSuite(func() {
-		testServer.Close()
-		logger.Stop()
+		if testServer != nil {
+			testServer.Close()
+		}
 	})
 }

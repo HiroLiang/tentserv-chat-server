@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -47,7 +48,10 @@ func (u *CheckKeyStatusUseCase) Execute(
 	var deviceID shared.DeviceID
 	if input.Data.DeviceID == "" {
 		keys, err := u.identityKeyRepo.FindByUser(ctx, targetUserID)
-		if err != nil || len(keys) == 0 {
+		if err != nil {
+			return nil, fmt.Errorf("find identity keys by user: %w", err)
+		}
+		if len(keys) == 0 {
 			return &CheckKeyStatusOutput{IdentityKeyExists: false, SignedPreKeyExists: false}, nil
 		}
 		deviceID = keys[0].DeviceID
@@ -61,10 +65,24 @@ func (u *CheckKeyStatusUseCase) Execute(
 	out := &CheckKeyStatusOutput{}
 
 	_, err = u.identityKeyRepo.FindByUserAndDevice(ctx, targetUserID, deviceID)
-	out.IdentityKeyExists = err == nil
+	switch {
+	case err == nil:
+		out.IdentityKeyExists = true
+	case errors.Is(err, useridentitykey.ErrNotFound):
+		out.IdentityKeyExists = false
+	default:
+		return nil, fmt.Errorf("find identity key: %w", err)
+	}
 
 	_, err = u.signedPreKeyRepo.FindActive(ctx, targetUserID, deviceID)
-	out.SignedPreKeyExists = err == nil
+	switch {
+	case err == nil:
+		out.SignedPreKeyExists = true
+	case errors.Is(err, usersignedprekey.ErrNotFound):
+		out.SignedPreKeyExists = false
+	default:
+		return nil, fmt.Errorf("find active signed prekey: %w", err)
+	}
 
 	return out, nil
 }

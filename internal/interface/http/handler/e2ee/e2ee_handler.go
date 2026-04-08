@@ -317,7 +317,7 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 }
 
 // @Summary Get sender key distribution status for a room
-// @Description Returns two lists: members who have not yet fetched my latest key (pending_receivers),
+// @Description Returns whether my sender key exists plus two lists: members who have not yet fetched my latest key (pending_receivers),
 //
 //	and members whose latest key I have not yet fetched (pending_from_members).
 //
@@ -346,6 +346,7 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
+		OwnSenderKeyExists: out.OwnSenderKeyExists,
 		PendingReceivers:   normalizeMemberIDs(out.PendingReceivers),
 		PendingFromMembers: normalizeMemberIDs(out.PendingFromMembers),
 	})

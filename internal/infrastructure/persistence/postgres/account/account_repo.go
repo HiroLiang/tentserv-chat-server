@@ -175,6 +175,9 @@ func (r *AccountRepo) findAccount(
 
 	record, err := postgres.ScanOne[AccountRecord](ctx, r.GetDB(ctx), query, args...)
 	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, account.ErrAccountNotFound
+		}
 		return nil, err
 	}
 

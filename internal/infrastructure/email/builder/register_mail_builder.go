@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"fmt"
+	"html"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
@@ -25,9 +26,11 @@ func NewRegisterMailBuilder(sender shared.EmailSender, recipientEmail, recipient
 }
 
 func (b *RegisterMailBuilder) BuildEmail(_ context.Context) (*shared.Email, error) {
+	htmlRecipientName := html.EscapeString(b.recipientName)
+	htmlVerifyURL := html.EscapeString(b.verifyURL)
 	htmlBody := fmt.Sprintf(
 		`<p>Hi %s,</p><p>Please verify your email address by clicking the link below:</p><p><a href="%s">Verify Email</a></p><p>This link will expire in 24 hours.</p>`,
-		b.recipientName, b.verifyURL,
+		htmlRecipientName, htmlVerifyURL,
 	)
 	textBody := fmt.Sprintf(
 		"Hi %s,\n\nPlease verify your email address by visiting:\n%s\n\nThis link will expire in 24 hours.",

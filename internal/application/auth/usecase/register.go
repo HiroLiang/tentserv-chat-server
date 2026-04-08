@@ -5,7 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -72,14 +73,29 @@ func (uc *RegisterUseCase) Execute(
 	if err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}
+	committed := false
 	defer func() {
-		_ = tx.Rollback()
+		if !committed {
+			_ = tx.Rollback()
+		}
 	}()
 
 	// Validate email
 	emailAddr, err := shared.ParseEmail(input.Data.Email)
 	if err != nil {
 		return RegisterOutput{}, ErrInvalidEmail
+	}
+
+	if _, err := uc.accountRepo.FindByEmail(ctx, emailAddr); err == nil {
+		return RegisterOutput{}, ErrEmailExist
+	} else if !errors.Is(err, account.ErrAccountNotFound) {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	if _, err := uc.accountRepo.FindByAccountName(ctx, input.Data.Account); err == nil {
+		return RegisterOutput{}, ErrAccountExist
+	} else if !errors.Is(err, account.ErrAccountNotFound) {
+		return RegisterOutput{}, ErrRegisterFailed
 	}
 
 	// Hash password
@@ -135,26 +151,35 @@ func (uc *RegisterUseCase) Execute(
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
+	if err := tx.Commit(); err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+	committed = true
+
 	// Generate verification token
 	token, err := generateVerificationToken()
 	if err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
-	// Store token → accountID in Redis
 	conf := config.App()
 	if err := uc.verificationStore.Store(ctx, token, int64(accountId), conf.Email.VerifyTTL); err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
-	// Build, verify URL and send email
-	verifyURL := fmt.Sprintf("%s/api/auth/verify-email?token=%s", conf.Email.BaseURL, token)
-	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Account, verifyURL)
-	if err := uc.emailService.Send(ctx, builder); err != nil {
+	verifyURL, err := buildVerificationURL(conf.Email.BaseURL, token)
+	if err != nil {
+		_ = uc.verificationStore.Delete(ctx, token)
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
-	return RegisterOutput{int64(accountId)}, tx.Commit()
+	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Name, verifyURL)
+	if err := uc.emailService.Send(ctx, builder); err != nil {
+		_ = uc.verificationStore.Delete(ctx, token)
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	return RegisterOutput{int64(accountId)}, nil
 }
 
 func generateVerificationToken() (string, error) {
@@ -163,4 +188,16 @@ func generateVerificationToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func buildVerificationURL(baseURL, token string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/auth/verify-email"
+	q := u.Query()
+	q.Set("token", token)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }

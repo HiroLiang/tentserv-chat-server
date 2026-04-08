@@ -154,6 +154,7 @@ func TestGetSenderKeyDistributionStatusUseCase_EmptySlicesWhenNoKeys(t *testing.
 
 	require.NoError(t, err)
 	require.NotNil(t, out)
+	assert.False(t, out.OwnSenderKeyExists)
 	require.NotNil(t, out.PendingReceivers)
 	require.NotNil(t, out.PendingFromMembers)
 	assert.Empty(t, out.PendingReceivers)
@@ -211,5 +212,54 @@ func TestGetSenderKeyDistributionStatusUseCase_PendingFromMembers(t *testing.T) 
 
 	require.NoError(t, err)
 	require.NotNil(t, out)
+	assert.False(t, out.OwnSenderKeyExists)
 	assert.Equal(t, []int64{int64(otherMemberID)}, out.PendingFromMembers)
+}
+
+func TestGetSenderKeyDistributionStatusUseCase_OwnSenderKeyExists(t *testing.T) {
+	callerMemberID := chatmember.ID(10)
+	otherMemberID := chatmember.ID(11)
+
+	uc := NewGetSenderKeyDistributionStatusUseCase(
+		&senderStatusParticipantRepoStub{
+			findByUserID: func(context.Context, sharedDomain.UserID) (*participant.Participant, error) {
+				return &participant.Participant{ID: participant.ID(1)}, nil
+			},
+		},
+		&senderStatusChatMemberRepoStub{
+			findByRoomAndParticipant: func(context.Context, chatroom.ID, participant.ID) (*chatmember.ChatMember, error) {
+				return &chatmember.ChatMember{ID: callerMemberID}, nil
+			},
+			findByRoom: func(context.Context, chatroom.ID) ([]*chatmember.ChatMember, error) {
+				return []*chatmember.ChatMember{
+					{ID: callerMemberID},
+					{ID: otherMemberID},
+				}, nil
+			},
+		},
+		&senderStatusMemberSenderKeyRepoStub{
+			findLatest: func(_ context.Context, chatMemberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
+				if chatMemberID == callerMemberID {
+					return &membersenderkey.MemberSenderKey{
+						ChatMemberID: callerMemberID,
+						ChainID:      membersenderkey.ChainID(7),
+					}, nil
+				}
+				return nil, membersenderkey.ErrNotFound
+			},
+		},
+		&senderStatusDistributionRepoStub{},
+	)
+
+	out, err := uc.Execute(context.Background(), appShared.UseCaseInput[GetSenderKeyDistributionStatusInput]{
+		Base: appShared.BaseContext{
+			Auth: &appShared.AuthContext{UserID: sharedDomain.UserID(100)},
+		},
+		Data: GetSenderKeyDistributionStatusInput{RoomID: 4},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.True(t, out.OwnSenderKeyExists)
+	assert.Empty(t, out.PendingFromMembers)
 }

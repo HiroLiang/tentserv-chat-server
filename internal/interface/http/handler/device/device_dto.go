@@ -33,17 +33,18 @@ type DeviceUpdateResponse struct {
 	DeviceName string `json:"device_name"`
 	Platform   string `json:"platform"`
 	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 type BindDeviceResponse struct {
-	Success   bool  `json:"success"`
+	Success   bool   `json:"success"`
 	DeviceID  string `json:"device_id"`
 	AccountID int64  `json:"account_id"`
 }
 
 type ListDevicesResponse struct {
-	Success bool              `json:"success"`
-	Devices []DeviceListItem  `json:"devices"`
+	Success bool             `json:"success"`
+	Devices []DeviceListItem `json:"devices"`
 }
 
 type DeviceListItem struct {

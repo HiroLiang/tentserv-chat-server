@@ -11,9 +11,9 @@ import (
 )
 
 func HandleError(c *gin.Context, err error) {
-	logger.Log.Error(err.Error())
 	switch {
 	case errors.Is(err, usecase.ErrInvalidSignature):
+		logger.Log.Warn(err.Error())
 		c.JSON(http.StatusBadRequest, response.ErrorResponse{
 			Code:    "INVALID_SIGNATURE",
 			Message: "invalid signature or key material",
@@ -21,6 +21,7 @@ func HandleError(c *gin.Context, err error) {
 		return
 
 	case errors.Is(err, usecase.ErrIdentityNotFound):
+		logger.Log.Warn(err.Error())
 		c.JSON(http.StatusNotFound, response.ErrorResponse{
 			Code:    "IDENTITY_NOT_FOUND",
 			Message: "identity key not found",
@@ -28,6 +29,7 @@ func HandleError(c *gin.Context, err error) {
 		return
 
 	case errors.Is(err, usecase.ErrNotRoomMember):
+		logger.Log.Warn(err.Error())
 		c.JSON(http.StatusForbidden, response.ErrorResponse{
 			Code:    "NOT_ROOM_MEMBER",
 			Message: "you are not a member of this room",
@@ -35,6 +37,7 @@ func HandleError(c *gin.Context, err error) {
 		return
 
 	case errors.Is(err, usecase.ErrKeyBundleNotFound):
+		logger.Log.Warn(err.Error())
 		c.JSON(http.StatusNotFound, response.ErrorResponse{
 			Code:    "KEY_BUNDLE_NOT_FOUND",
 			Message: "key bundle not found",
