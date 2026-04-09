@@ -54,6 +54,10 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		deviceRegisterUseCase, deviceUpdateUseCase := deviceBDD.RegisterUseCases(bddsupport.UOW{})
 		e2eeUseCases := e2eeBDD.RegisterUseCases()
 		createSKRUseCase := e2eeBDD.SKR.RegisterCreateSenderKeyRequestUseCase()
+		uploadSenderKeyUseCase := e2eeBDD.SKR.RegisterUploadSenderKeyUseCase()
+		getSenderKeyDistributionStatusUseCase := e2eeBDD.SKR.RegisterGetSenderKeyDistributionStatusUseCase()
+		getPendingSenderKeyDistributionsUseCase := e2eeBDD.SKR.RegisterGetPendingSenderKeyDistributionsUseCase()
+		consumeSenderKeyDistributionUseCase := e2eeBDD.SKR.RegisterConsumeSenderKeyDistributionUseCase()
 		friendshipUseCases := friendshipBDD.RegisterUseCases(bddsupport.UOW{})
 		createChatRoomUseCase := friendshipBDD.RegisterChatUseCase(bddsupport.UOW{})
 
@@ -91,9 +95,11 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			e2eeUseCases.GetKeyBundle,
 			e2eeUseCases.CheckKeyStatus,
 			e2eeUseCases.GetKeyPolicy,
+			uploadSenderKeyUseCase,
 			nil,
-			nil,
-			nil,
+			getSenderKeyDistributionStatusUseCase,
+			getPendingSenderKeyDistributionsUseCase,
+			consumeSenderKeyDistributionUseCase,
 			createSKRUseCase,
 		).RegisterE2EERoutes(router.Group("/api/e2ee", middleware.RequireAuthMiddleware()))
 		chatHandler.NewChatRoomHandler(

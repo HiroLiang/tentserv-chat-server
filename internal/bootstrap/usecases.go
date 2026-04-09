@@ -60,6 +60,8 @@ type UseCases struct {
 	UploadSenderKeyUseCase                *e2eeUseCase.UploadSenderKeyUseCase
 	GetSenderKeysUseCase                  *e2eeUseCase.GetSenderKeysUseCase
 	GetSenderKeyDistributionStatusUseCase *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
+	GetPendingSenderKeyDistributionsUseCase *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase
+	ConsumeSenderKeyDistributionUseCase     *e2eeUseCase.ConsumeSenderKeyDistributionUseCase
 	CreateSenderKeyRequestUseCase         *e2eeUseCase.CreateSenderKeyRequestUseCase
 	NotifyPendingSenderKeyRequestsUseCase *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
 
@@ -229,7 +231,9 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
 			deps.SenderKeyRequestRepo,
+			deps.FriendshipRepo,
 			deps.Hub,
 		),
 		CreateSenderKeyRequestUseCase: e2eeUseCase.NewCreateSenderKeyRequestUseCase(
@@ -237,6 +241,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.SenderKeyRequestRepo,
 			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
 			deps.FriendshipRepo,
 			deps.Hub,
 		),
@@ -257,6 +262,18 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.MemberSenderKeyRepo,
 			deps.SenderKeyDistributionRepo,
+		),
+		GetPendingSenderKeyDistributionsUseCase: e2eeUseCase.NewGetPendingSenderKeyDistributionsUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.SenderKeyDistributionRepo,
+		),
+		ConsumeSenderKeyDistributionUseCase: e2eeUseCase.NewConsumeSenderKeyDistributionUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyRequestRepo,
+			deps.Hub,
 		),
 
 		SendMessageUseCase: chatUseCase.NewSendMessageUseCase(

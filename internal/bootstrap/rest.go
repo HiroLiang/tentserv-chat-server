@@ -130,6 +130,8 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.UploadSenderKeyUseCase,
 		useCases.GetSenderKeysUseCase,
 		useCases.GetSenderKeyDistributionStatusUseCase,
+		useCases.GetPendingSenderKeyDistributionsUseCase,
+		useCases.ConsumeSenderKeyDistributionUseCase,
 		useCases.CreateSenderKeyRequestUseCase,
 	).RegisterE2EERoutes(e2eeGroup)
 

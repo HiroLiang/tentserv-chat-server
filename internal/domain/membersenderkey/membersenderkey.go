@@ -7,10 +7,10 @@ import (
 )
 
 type MemberSenderKey struct {
-	ID                  ID
-	ChatMemberID        chatmember.ID
-	ChainID             ChainID
-	SenderKeyPublic     SenderKeyPublic
-	DistributionMessage []byte
-	CreatedAt           time.Time
+	ID               ID
+	ChatMemberID     chatmember.ID
+	SenderKeyVersion int64
+	KeyFingerprint   *string
+	ChainID          ChainID
+	CreatedAt        time.Time
 }

@@ -14,8 +14,8 @@ Feature: E2EE sender key request distribution
     Then the response status should be 204
     And a sender key request row should exist from member 201 to provider 202
 
-  Scenario: Sender key request is skipped when provider already has a sender key
-    Given a room member setup exists with room id 2, caller member id 203, and provider member id 204 in the same room with an existing sender key for provider
+  Scenario: Sender key request is skipped when a latest distribution is already available for the caller
+    Given a room member setup exists with room id 2, caller member id 203, and provider member id 204 in the same room with an available latest distribution for the caller
     When I create a sender key request for room 2 and provider member 204
     Then the response status should be 204
     And no sender key request row should exist from member 203 to provider 204
@@ -31,6 +31,13 @@ Feature: E2EE sender key request distribution
     When I create a sender key request for room 4 and provider member 208
     Then the response status should be 403
     And the response error code should be "NOT_ROOM_MEMBER"
+
+  Scenario: Sender key request is rejected when caller and provider are blocked
+    Given a room member setup exists with room id 6, caller member id 211, and provider member id 212 in the same room with no existing sender key
+    And caller member 211 and provider member 212 are blocked from each other
+    When I create a sender key request for room 6 and provider member 212
+    Then the response status should be 403
+    And the response error code should be "FORBIDDEN"
 
   Scenario: Repeated sender key request stays idempotent
     Given a room member setup exists with room id 5, caller member id 209, and provider member id 210 in the same room with no existing sender key

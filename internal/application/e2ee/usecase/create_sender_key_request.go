@@ -14,6 +14,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
@@ -30,6 +31,7 @@ type CreateSenderKeyRequestUseCase struct {
 	chatMemberRepo       chatmember.Repository
 	senderKeyRequestRepo senderkeyrequest.Repository
 	memberSenderKeyRepo  membersenderkey.Repository
+	distributionRepo     senderkeydistribution.Repository
 	friendshipRepo       friendship.Repository
 	broadcaster          e2eePort.Broadcaster
 }
@@ -39,6 +41,7 @@ func NewCreateSenderKeyRequestUseCase(
 	chatMemberRepo chatmember.Repository,
 	senderKeyRequestRepo senderkeyrequest.Repository,
 	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
 	friendshipRepo friendship.Repository,
 	broadcaster e2eePort.Broadcaster,
 ) *CreateSenderKeyRequestUseCase {
@@ -47,6 +50,7 @@ func NewCreateSenderKeyRequestUseCase(
 		chatMemberRepo:       chatMemberRepo,
 		senderKeyRequestRepo: senderKeyRequestRepo,
 		memberSenderKeyRepo:  memberSenderKeyRepo,
+		distributionRepo:     distributionRepo,
 		friendshipRepo:       friendshipRepo,
 		broadcaster:          broadcaster,
 	}
@@ -82,14 +86,18 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		return nil, fmt.Errorf("%w: provider member is not in the requested room", ErrNotRoomMember)
 	}
 
-	// If the provider already has an uploaded sender key, the request is unnecessary.
-	_, err = u.memberSenderKeyRepo.FindLatest(ctx, providerMember.ID)
-	if err == nil {
-		// Key already exists — no need to create a request.
-		return &CreateSenderKeyRequestOutput{}, nil
+	// If a latest distribution is already available for the caller, the request is unnecessary.
+	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMember.ID)
+	if err != nil && !errors.Is(err, membersenderkey.ErrNotFound) {
+		return nil, fmt.Errorf("create sender key request: check latest sender key: %w", err)
 	}
-	if !errors.Is(err, membersenderkey.ErrNotFound) {
-		return nil, fmt.Errorf("create sender key request: check existing key: %w", err)
+	if err == nil {
+		dist, distErr := u.distributionRepo.FindLatest(ctx, providerMember.ID, callerMember.ID)
+		if distErr == nil &&
+			dist.SenderKeyVersion >= latestKey.SenderKeyVersion &&
+			(dist.Status == senderkeydistribution.StatusAvailable || dist.Status == senderkeydistribution.StatusConsumed) {
+			return &CreateSenderKeyRequestOutput{}, nil
+		}
 	}
 
 	// Check for block relationship between the two participants.

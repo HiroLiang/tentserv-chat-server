@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -17,11 +18,11 @@ type GetSenderKeyDistributionStatusInput struct {
 }
 
 type GetSenderKeyDistributionStatusOutput struct {
-	// OwnSenderKeyExists: whether the caller has uploaded a sender key to the backend.
-	OwnSenderKeyExists bool
-	// PendingReceivers: member IDs who have not yet fetched my latest sender key.
-	PendingReceivers []int64
-	// PendingFromMembers: member IDs whose latest sender key I have not yet fetched.
+	OwnSenderKeyExists     bool
+	RequestableMemberIDs   []int64
+	AvailableFromMemberIDs []int64
+	PendingReceivers       []int64
+	// Legacy compatibility for still-migrating callers.
 	PendingFromMembers []int64
 }
 
@@ -55,105 +56,67 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
-	callerMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, chatroom.ID(input.Data.RoomID), callerParticipant.ID)
-	if err != nil {
+	roomID := chatroom.ID(input.Data.RoomID)
+	callerMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, callerParticipant.ID)
+	if err != nil || callerMember.IsDeleted {
 		return nil, ErrNotRoomMember
 	}
 
-	ownSenderKeyExists, err := u.ownSenderKeyExists(ctx, callerMember.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Pending receivers: who hasn't fetched my latest key yet?
-	pendingReceivers, err := u.pendingReceivers(ctx, callerMember.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Pending from members: whose key haven't I fetched yet?
-	pendingFrom, err := u.pendingFromMembers(ctx, chatroom.ID(input.Data.RoomID), callerMember.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &GetSenderKeyDistributionStatusOutput{
-		OwnSenderKeyExists: ownSenderKeyExists,
-		PendingReceivers:   pendingReceivers,
-		PendingFromMembers: pendingFrom,
-	}, nil
-}
-
-func (u *GetSenderKeyDistributionStatusUseCase) ownSenderKeyExists(
-	ctx context.Context,
-	callerMemberID chatmember.ID,
-) (bool, error) {
-	if _, err := u.memberSenderKeyRepo.FindLatest(ctx, callerMemberID); err != nil {
-		if err == membersenderkey.ErrNotFound {
-			return false, nil
-		}
-		return false, fmt.Errorf("find own latest sender key: %w", err)
-	}
-	return true, nil
-}
-
-func (u *GetSenderKeyDistributionStatusUseCase) pendingReceivers(
-	ctx context.Context,
-	callerMemberID chatmember.ID,
-) ([]int64, error) {
-	latest, err := u.memberSenderKeyRepo.FindLatest(ctx, callerMemberID)
-	if err != nil {
-		if err == membersenderkey.ErrNotFound {
-			return []int64{}, nil
-		}
-		return nil, fmt.Errorf("find latest sender key: %w", err)
-	}
-
-	pending, err := u.distributionRepo.FindPendingReceivers(ctx, callerMemberID, int(latest.ChainID))
-	if err != nil {
-		return nil, fmt.Errorf("find pending receivers: %w", err)
-	}
-
-	ids := make([]int64, len(pending))
-	for i, id := range pending {
-		ids[i] = int64(id)
-	}
-	return ids, nil
-}
-
-func (u *GetSenderKeyDistributionStatusUseCase) pendingFromMembers(
-	ctx context.Context,
-	roomID chatroom.ID,
-	callerMemberID chatmember.ID,
-) ([]int64, error) {
 	members, err := u.chatMemberRepo.FindByRoom(ctx, roomID)
 	if err != nil {
 		return nil, fmt.Errorf("find room members: %w", err)
 	}
 
-	pending := make([]int64, 0)
-	for _, m := range members {
-		if m.ID == callerMemberID || m.IsDeleted {
+	out := &GetSenderKeyDistributionStatusOutput{
+		RequestableMemberIDs:   []int64{},
+		AvailableFromMemberIDs: []int64{},
+		PendingReceivers:       []int64{},
+		PendingFromMembers:     []int64{},
+	}
+
+	ownLatest, err := u.memberSenderKeyRepo.FindLatest(ctx, callerMember.ID)
+	if err == nil {
+		out.OwnSenderKeyExists = true
+	}
+
+	for _, member := range members {
+		if member.IsDeleted || member.ID == callerMember.ID {
 			continue
 		}
-		latest, err := u.memberSenderKeyRepo.FindLatest(ctx, m.ID)
-		if err != nil {
-			if err == membersenderkey.ErrNotFound {
-				continue
+
+		latest, latestErr := u.memberSenderKeyRepo.FindLatest(ctx, member.ID)
+		switch {
+		case latestErr == nil:
+			dist, distErr := u.distributionRepo.FindLatest(ctx, member.ID, callerMember.ID)
+			if errors.Is(distErr, senderkeydistribution.ErrNotFound) {
+				out.RequestableMemberIDs = append(out.RequestableMemberIDs, int64(member.ID))
+				out.PendingFromMembers = append(out.PendingFromMembers, int64(member.ID))
+			} else if distErr != nil {
+				return nil, fmt.Errorf("find latest distribution from member %d to caller %d: %w", member.ID, callerMember.ID, distErr)
+			} else if dist.SenderKeyVersion < latest.SenderKeyVersion || dist.Status == senderkeydistribution.StatusFailed {
+				out.RequestableMemberIDs = append(out.RequestableMemberIDs, int64(member.ID))
+				out.PendingFromMembers = append(out.PendingFromMembers, int64(member.ID))
+			} else if dist.Status == senderkeydistribution.StatusAvailable {
+				out.AvailableFromMemberIDs = append(out.AvailableFromMemberIDs, int64(member.ID))
 			}
-			return nil, fmt.Errorf("find latest sender key for member %d: %w", m.ID, err)
+		case errors.Is(latestErr, membersenderkey.ErrNotFound):
+			out.RequestableMemberIDs = append(out.RequestableMemberIDs, int64(member.ID))
+			out.PendingFromMembers = append(out.PendingFromMembers, int64(member.ID))
+		default:
+			return nil, fmt.Errorf("find latest sender key for member %d: %w", member.ID, latestErr)
 		}
 
-		senderPending, err := u.distributionRepo.FindPendingReceivers(ctx, m.ID, int(latest.ChainID))
-		if err != nil {
-			return nil, err
-		}
-		for _, receiverID := range senderPending {
-			if receiverID == callerMemberID {
-				pending = append(pending, int64(m.ID))
-				break
+		if out.OwnSenderKeyExists {
+			dist, distErr := u.distributionRepo.FindLatest(ctx, callerMember.ID, member.ID)
+			if errors.Is(distErr, senderkeydistribution.ErrNotFound) {
+				out.PendingReceivers = append(out.PendingReceivers, int64(member.ID))
+			} else if distErr != nil {
+				return nil, fmt.Errorf("find latest distribution from caller %d to member %d: %w", callerMember.ID, member.ID, distErr)
+			} else if dist.SenderKeyVersion < ownLatest.SenderKeyVersion || dist.Status != senderkeydistribution.StatusConsumed {
+				out.PendingReceivers = append(out.PendingReceivers, int64(member.ID))
 			}
 		}
 	}
-	return pending, nil
+
+	return out, nil
 }

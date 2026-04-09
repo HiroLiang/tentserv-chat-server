@@ -19,16 +19,18 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/deliveryqueue"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/cucumber/godog"
 )
 
 type steps struct {
 	*bddsupport.APITestContext
-	deps       *Deps
-	accountBDD *accountfeatures.Deps
-	authHeader string
-	start      time.Time
+	deps               *Deps
+	accountBDD         *accountfeatures.Deps
+	authHeader         string
+	start              time.Time
+	lastDistributionID int64
 }
 
 type keyStatusResponse struct {
@@ -51,6 +53,24 @@ type keyBundleResponse struct {
 	SPKKeyID        uint32  `json:"spk_key_id"`
 	OTPPreKey       *string `json:"otp_pre_key"`
 	OTPPreKeyID     *uint32 `json:"otp_pre_key_id"`
+}
+
+type senderKeyDistributionStatusResponse struct {
+	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
+	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
+	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
+	PendingReceivers       []int64 `json:"pending_receivers"`
+	PendingFromMembers     []int64 `json:"pending_from_members"`
+}
+
+type pendingSenderKeyDistributionsResponse struct {
+	Distributions []struct {
+		DistributionID      int64  `json:"distribution_id"`
+		SenderMemberID      int64  `json:"sender_member_id"`
+		ReceiverMemberID    int64  `json:"receiver_member_id"`
+		SenderKeyVersion    int64  `json:"sender_key_version"`
+		DistributionMessage string `json:"distribution_message"`
+	} `json:"distributions"`
 }
 
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, accountBDD *accountfeatures.Deps) {
@@ -82,13 +102,28 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	// Sender key request steps
 	ctx.Step(`^E2EE keys are bootstrapped for the logged in user$`, s.e2eeKeysAreBootstrappedForTheLoggedInUser)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with no existing sender key$`, s.roomMemberSetupSameRoomNoKey)
-	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with an existing sender key for provider$`, s.roomMemberSetupSameRoomWithKey)
+	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with an available latest distribution for the caller$`, s.roomMemberSetupSameRoomWithAvailableDistribution)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) where provider is in a different room$`, s.roomMemberSetupDifferentRoom)
 	ctx.Step(`^a room member setup exists with room id (\d+), provider member id (\d+) in that room, and the caller has no room membership$`, s.roomMemberSetupCallerNotInRoom)
+	ctx.Step(`^caller member (\d+) and provider member (\d+) are blocked from each other$`, s.callerAndProviderAreBlocked)
 	ctx.Step(`^I create a sender key request for room (\d+) and provider member (\d+)$`, s.iCreateASenderKeyRequestForRoomAndProviderMember)
 	ctx.Step(`^a sender key request row should exist from member (\d+) to provider (\d+)$`, s.aSenderKeyRequestRowShouldExist)
 	ctx.Step(`^no sender key request row should exist from member (\d+) to provider (\d+)$`, s.noSenderKeyRequestRowShouldExist)
 	ctx.Step(`^pending sender key request count from member (\d+) to provider (\d+) should be (\d+)$`, s.pendingSenderKeyRequestCountFromMemberToProviderShouldBe)
+
+	// Sender key distribution steps
+	ctx.Step(`^a sender key provider setup exists with room id (\d+), provider member id (\d+), and receiver member id (\d+) in the same room$`, s.senderKeyProviderSetup)
+	ctx.Step(`^a sender key receiver setup exists with room id (\d+), sender member id (\d+), and receiver member id (\d+) with available distribution version (\d+)$`, s.senderKeyReceiverSetupWithAvailableDistribution)
+	ctx.Step(`^I provide a sender key distribution for room (\d+) to receiver member (\d+) with sender key version (\d+)$`, s.iProvideASenderKeyDistribution)
+	ctx.Step(`^I request sender key distribution status for room (\d+)$`, s.iRequestSenderKeyDistributionStatus)
+	ctx.Step(`^sender key distribution status should show own key exists as (true|false)$`, s.senderKeyDistributionStatusShouldShowOwnKeyExists)
+	ctx.Step(`^sender key distribution status should list available sender member (\d+)$`, s.senderKeyDistributionStatusShouldListAvailableSenderMember)
+	ctx.Step(`^sender key distribution status should list pending receiver member (\d+)$`, s.senderKeyDistributionStatusShouldListPendingReceiverMember)
+	ctx.Step(`^I list pending sender key distributions for room (\d+)$`, s.iListPendingSenderKeyDistributions)
+	ctx.Step(`^pending sender key distributions should include sender member (\d+), receiver member (\d+), and version (\d+)$`, s.pendingSenderKeyDistributionsShouldInclude)
+	ctx.Step(`^I mark the first pending sender key distribution as "([^"]*)"$`, s.iMarkTheFirstPendingSenderKeyDistributionAs)
+	ctx.Step(`^the first pending sender key distribution should now be "([^"]*)"$`, s.theFirstPendingSenderKeyDistributionShouldNowBe)
+	ctx.Step(`^an e2ee\.sender_key_needed event should have been broadcast for provider member (\d+)$`, s.senderKeyNeededEventShouldHaveBeenBroadcast)
 }
 
 func (s *steps) e2eeKeyBootstrapStateIsClean() error {
@@ -659,13 +694,20 @@ func (s *steps) e2eeEndpointRequest(endpoint, deviceID string) (method string, p
 	case "sender-key":
 		return http.MethodPost, "/api/e2ee/sender-key", map[string]any{
 			"room_id":              1,
-			"sender_key_public":    "sender-key-public",
-			"distribution_message": "distribution-message",
+			"receiver_member_id":   202,
+			"sender_key_version":   1,
+			"distribution_message": base64.StdEncoding.EncodeToString([]byte("distribution-message")),
 		}, nil
 	case "sender-keys":
 		return http.MethodGet, "/api/e2ee/sender-keys/1", nil, nil
 	case "sender-key-distributions":
 		return http.MethodGet, "/api/e2ee/sender-key-distributions/1", nil, nil
+	case "sender-key-distributions-pending":
+		return http.MethodGet, "/api/e2ee/sender-key-distributions/1/pending", nil, nil
+	case "sender-key-distributions-consume":
+		return http.MethodPost, "/api/e2ee/sender-key-distributions/1/consume", map[string]any{
+			"status": "consumed",
+		}, nil
 	case "sender-key-request":
 		return http.MethodPost, "/api/e2ee/sender-key-request", map[string]any{
 			"room_id":            1,
@@ -858,15 +900,15 @@ func (s *steps) e2eeKeysAreBootstrappedForTheLoggedInUser() error {
 }
 
 func (s *steps) roomMemberSetupSameRoomNoKey(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, false)
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, false, false)
 }
 
-func (s *steps) roomMemberSetupSameRoomWithKey(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, true)
+func (s *steps) roomMemberSetupSameRoomWithAvailableDistribution(roomID, callerMemberID, providerMemberID int64) error {
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, true, true)
 }
 
 func (s *steps) roomMemberSetupDifferentRoom(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID+100, false)
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID+100, false, false)
 }
 
 func (s *steps) roomMemberSetupCallerNotInRoom(roomID, providerMemberID int64) error {
@@ -892,7 +934,7 @@ func (s *steps) roomMemberSetupCallerNotInRoom(roomID, providerMemberID int64) e
 	return nil
 }
 
-func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, providerRoomID int64, seedProviderKey bool) error {
+func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, providerRoomID int64, seedProviderKey bool, seedAvailableDistribution bool) error {
 	s.start = time.Now()
 	callerUserID := s.accountBDD.LastSessionUserID()
 	if callerUserID == 0 {
@@ -906,14 +948,301 @@ func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, provid
 	s.deps.SKR.SeedMember(callerUserID, callerPID, chatmember.ID(callerMemberID), chatroom.ID(roomID))
 	s.deps.SKR.SeedMember(providerUID, providerPID, chatmember.ID(providerMemberID), chatroom.ID(providerRoomID))
 	if seedProviderKey {
-		s.deps.SKR.SeedProviderKey(chatmember.ID(providerMemberID))
+		s.deps.SKR.SeedProviderKeyVersion(chatmember.ID(providerMemberID), 99)
+	}
+	if seedAvailableDistribution {
+		s.deps.SKR.SeedDistribution(roomID, chatmember.ID(providerMemberID), chatmember.ID(callerMemberID), 99, senderkeydistribution.StatusAvailable)
 	}
 	fmt.Println("Given: room member setup complete")
-	fmt.Printf("Input: room_id=%d caller_member=%d provider_member=%d provider_room=%d with_key=%t\n",
-		roomID, callerMemberID, providerMemberID, providerRoomID, seedProviderKey)
+	fmt.Printf("Input: room_id=%d caller_member=%d provider_member=%d provider_room=%d with_key=%t with_available_distribution=%t\n",
+		roomID, callerMemberID, providerMemberID, providerRoomID, seedProviderKey, seedAvailableDistribution)
 	fmt.Println("Mutation: SKR participants and members seeded")
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
 	return nil
+}
+
+func (s *steps) callerAndProviderAreBlocked(callerMemberID, providerMemberID int64) error {
+	s.start = time.Now()
+	callerMember, err := s.deps.SKR.chatMemberRepo.FindByID(nil, chatmember.ID(callerMemberID))
+	if err != nil {
+		return err
+	}
+	providerMember, err := s.deps.SKR.chatMemberRepo.FindByID(nil, chatmember.ID(providerMemberID))
+	if err != nil {
+		return err
+	}
+	callerParticipant, err := s.deps.SKR.participantRepo.FindByID(nil, callerMember.ParticipantID)
+	if err != nil || callerParticipant.UserID == nil {
+		return fmt.Errorf("caller participant not found for member %d", callerMemberID)
+	}
+	providerParticipant, err := s.deps.SKR.participantRepo.FindByID(nil, providerMember.ParticipantID)
+	if err != nil || providerParticipant.UserID == nil {
+		return fmt.Errorf("provider participant not found for member %d", providerMemberID)
+	}
+	s.deps.SKR.SeedBlockedFriendship(*callerParticipant.UserID, *providerParticipant.UserID)
+	fmt.Println("Given: caller and provider have a blocked relationship")
+	fmt.Printf("Input: caller_member_id=%d provider_member_id=%d\n", callerMemberID, providerMemberID)
+	fmt.Println("Mutation: friendship status seeded as blocked")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) senderKeyProviderSetup(roomID, providerMemberID, receiverMemberID int64) error {
+	s.start = time.Now()
+	providerUserID := s.accountBDD.LastSessionUserID()
+	if providerUserID == 0 {
+		return fmt.Errorf("no logged in user available for sender key provider setup")
+	}
+
+	providerPID := participant.ID(providerMemberID + 1000)
+	receiverUID := shared.UserID(receiverMemberID + 2000)
+	receiverPID := participant.ID(receiverMemberID + 1000)
+
+	s.deps.SKR.SeedMember(providerUserID, providerPID, chatmember.ID(providerMemberID), chatroom.ID(roomID))
+	s.deps.SKR.SeedMember(receiverUID, receiverPID, chatmember.ID(receiverMemberID), chatroom.ID(roomID))
+
+	fmt.Println("Given: authenticated user is the sender key provider in the room")
+	fmt.Printf("Input: room_id=%d provider_member_id=%d receiver_member_id=%d\n", roomID, providerMemberID, receiverMemberID)
+	fmt.Println("Mutation: provider and receiver memberships seeded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) senderKeyReceiverSetupWithAvailableDistribution(roomID, senderMemberID, receiverMemberID, version int64) error {
+	s.start = time.Now()
+	receiverUserID := s.accountBDD.LastSessionUserID()
+	if receiverUserID == 0 {
+		return fmt.Errorf("no logged in user available for sender key receiver setup")
+	}
+
+	senderUID := shared.UserID(senderMemberID + 2000)
+	senderPID := participant.ID(senderMemberID + 1000)
+	receiverPID := participant.ID(receiverMemberID + 1000)
+
+	s.deps.SKR.SeedMember(senderUID, senderPID, chatmember.ID(senderMemberID), chatroom.ID(roomID))
+	s.deps.SKR.SeedMember(receiverUserID, receiverPID, chatmember.ID(receiverMemberID), chatroom.ID(roomID))
+	s.deps.SKR.SeedProviderKeyVersion(chatmember.ID(senderMemberID), version)
+	s.lastDistributionID = int64(s.deps.SKR.SeedDistribution(
+		roomID,
+		chatmember.ID(senderMemberID),
+		chatmember.ID(receiverMemberID),
+		version,
+		senderkeydistribution.StatusAvailable,
+	))
+
+	fmt.Println("Given: authenticated user is the pending distribution receiver in the room")
+	fmt.Printf("Input: room_id=%d sender_member_id=%d receiver_member_id=%d version=%d distribution_id=%d\n", roomID, senderMemberID, receiverMemberID, version, s.lastDistributionID)
+	fmt.Println("Mutation: sender key metadata and available distribution seeded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iProvideASenderKeyDistribution(roomID, receiverMemberID, version int64) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Given: authenticated provider uploads a sealed sender key distribution")
+	fmt.Printf("Input: room_id=%d receiver_member_id=%d sender_key_version=%d\n", roomID, receiverMemberID, version)
+	fmt.Println("Action: POST /api/e2ee/sender-key")
+
+	payload := map[string]any{
+		"room_id":              roomID,
+		"receiver_member_id":   receiverMemberID,
+		"sender_key_version":   version,
+		"distribution_message": base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("dist-%d", version))),
+	}
+	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/sender-key", payload, authHeader); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: sender_key_distributions may be updated")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iRequestSenderKeyDistributionStatus(roomID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Given: authenticated room member wants sender key room summary")
+	fmt.Printf("Input: room_id=%d\n", roomID)
+	fmt.Println("Action: GET /api/e2ee/sender-key-distributions/:room_id")
+
+	if err := s.DoRequestWithHeaders(http.MethodGet, fmt.Sprintf("/api/e2ee/sender-key-distributions/%d", roomID), s.authHeaders(authHeader, "")); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) senderKeyDistributionStatusShouldShowOwnKeyExists(expected string) error {
+	start := time.Now()
+	fmt.Println("Given: sender key distribution room summary response is available")
+	fmt.Printf("Input: expected_own_sender_key_exists=%s\n", expected)
+
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	expectedValue := expected == "true"
+	if body.OwnSenderKeyExists != expectedValue {
+		return fmt.Errorf("expected own_sender_key_exists=%t, got %t", expectedValue, body.OwnSenderKeyExists)
+	}
+	fmt.Printf("Output: own_sender_key_exists=%t\n", body.OwnSenderKeyExists)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListAvailableSenderMember(memberID int64) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, id := range body.AvailableFromMemberIDs {
+		if id == memberID {
+			fmt.Printf("Output: available_from_member_ids=%v\n", body.AvailableFromMemberIDs)
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected available_from_member_ids to include %d, got %v", memberID, body.AvailableFromMemberIDs)
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListPendingReceiverMember(memberID int64) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, id := range body.PendingReceivers {
+		if id == memberID {
+			fmt.Printf("Output: pending_receivers=%v\n", body.PendingReceivers)
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected pending_receivers to include %d, got %v", memberID, body.PendingReceivers)
+}
+
+func (s *steps) iListPendingSenderKeyDistributions(roomID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Given: authenticated receiver wants pending sender key distributions")
+	fmt.Printf("Input: room_id=%d\n", roomID)
+	fmt.Println("Action: GET /api/e2ee/sender-key-distributions/:room_id/pending")
+
+	if err := s.DoRequestWithHeaders(http.MethodGet, fmt.Sprintf("/api/e2ee/sender-key-distributions/%d/pending", roomID), s.authHeaders(authHeader, "")); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) pendingSenderKeyDistributionsShouldInclude(senderMemberID, receiverMemberID, version int64) error {
+	start := time.Now()
+	var body pendingSenderKeyDistributionsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, dist := range body.Distributions {
+		if dist.SenderMemberID == senderMemberID && dist.ReceiverMemberID == receiverMemberID && dist.SenderKeyVersion == version {
+			s.lastDistributionID = dist.DistributionID
+			fmt.Printf("Output: found_distribution_id=%d distributions=%d\n", dist.DistributionID, len(body.Distributions))
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected pending distribution sender=%d receiver=%d version=%d, got %+v", senderMemberID, receiverMemberID, version, body.Distributions)
+}
+
+func (s *steps) iMarkTheFirstPendingSenderKeyDistributionAs(status string) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	if s.lastDistributionID == 0 {
+		return fmt.Errorf("no pending distribution id recorded")
+	}
+
+	fmt.Println("Given: authenticated receiver processes the pending distribution")
+	fmt.Printf("Input: distribution_id=%d status=%s\n", s.lastDistributionID, status)
+	fmt.Println("Action: POST /api/e2ee/sender-key-distributions/:distribution_id/consume")
+
+	payload := map[string]any{"status": status}
+	if err := s.doE2EEJSONRequest(http.MethodPost, fmt.Sprintf("/api/e2ee/sender-key-distributions/%d/consume", s.lastDistributionID), payload, authHeader); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: distribution status may change")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theFirstPendingSenderKeyDistributionShouldNowBe(status string) error {
+	start := time.Now()
+	dist, ok := s.deps.SKR.FindDistributionByID(senderkeydistribution.ID(s.lastDistributionID))
+	if !ok {
+		return fmt.Errorf("expected distribution id %d to exist", s.lastDistributionID)
+	}
+	if string(dist.Status) != status {
+		return fmt.Errorf("expected distribution id %d to be %s, got %s", s.lastDistributionID, status, dist.Status)
+	}
+	fmt.Printf("Output: distribution_id=%d status=%s\n", s.lastDistributionID, dist.Status)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (s *steps) senderKeyNeededEventShouldHaveBeenBroadcast(providerMemberID int64) error {
+	start := time.Now()
+	fmt.Println("Given: consume failed and a sender key request was requeued")
+	fmt.Printf("Input: expected_provider_member_id=%d\n", providerMemberID)
+	fmt.Println("Action: inspect recording broadcaster for e2ee.sender_key_needed events")
+
+	// The goroutine in the consume use case fires asynchronously; give it a moment.
+	time.Sleep(50 * time.Millisecond)
+
+	messages := s.deps.SKR.BroadcastMessages()
+	for _, msg := range messages {
+		var envelope struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ProviderMemberID int64 `json:"provider_member_id"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(msg.Payload, &envelope); err != nil {
+			continue
+		}
+		if envelope.Type == "e2ee.sender_key_needed" && envelope.Payload.ProviderMemberID == providerMemberID {
+			fmt.Printf("Output: found e2ee.sender_key_needed for provider_member_id=%d\n", providerMemberID)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+
+	return fmt.Errorf("expected e2ee.sender_key_needed event for provider member %d, got %d broadcast messages", providerMemberID, len(messages))
 }
 
 func (s *steps) iCreateASenderKeyRequestForRoomAndProviderMember(roomID, providerMemberID int64) error {

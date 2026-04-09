@@ -71,14 +71,14 @@ type GetKeyPolicyResponse struct {
 // Sender Key (used for both direct and group rooms)
 type UploadSenderKeyRequest struct {
 	RoomID              int64  `json:"room_id" binding:"required"`
-	SenderKeyPublic     string `json:"sender_key_public" binding:"required"`
+	ReceiverMemberID    int64  `json:"receiver_member_id" binding:"required"`
+	SenderKeyVersion    int64  `json:"sender_key_version" binding:"required"`
 	DistributionMessage string `json:"distribution_message" binding:"required"`
 }
 
 type SenderKeyItemResponse struct {
-	ChatMemberID        int64  `json:"chat_member_id"`
-	SenderKeyPublic     string `json:"sender_key_public"`
-	DistributionMessage string `json:"distribution_message"`
+	ChatMemberID     int64 `json:"chat_member_id"`
+	SenderKeyVersion int64 `json:"sender_key_version"`
 }
 
 type GetSenderKeysResponse struct {
@@ -93,10 +93,25 @@ type CreateSenderKeyRequestRequest struct {
 
 // Sender Key Distribution Status
 type GetSenderKeyDistributionStatusResponse struct {
-	// OwnSenderKeyExists: whether my latest sender key exists on the server.
-	OwnSenderKeyExists bool `json:"own_sender_key_exists"`
-	// PendingReceivers: member IDs in the room who have not yet fetched my latest sender key.
-	PendingReceivers []int64 `json:"pending_receivers"`
-	// PendingFromMembers: member IDs whose latest sender key I have not yet fetched.
-	PendingFromMembers []int64 `json:"pending_from_members"`
+	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
+	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
+	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
+	PendingReceivers       []int64 `json:"pending_receivers"`
+	PendingFromMembers     []int64 `json:"pending_from_members"`
+}
+
+type PendingSenderKeyDistributionItemResponse struct {
+	DistributionID      int64  `json:"distribution_id"`
+	SenderMemberID      int64  `json:"sender_member_id"`
+	ReceiverMemberID    int64  `json:"receiver_member_id"`
+	SenderKeyVersion    int64  `json:"sender_key_version"`
+	DistributionMessage string `json:"distribution_message"`
+}
+
+type GetPendingSenderKeyDistributionsResponse struct {
+	Distributions []PendingSenderKeyDistributionItemResponse `json:"distributions"`
+}
+
+type ConsumeSenderKeyDistributionRequest struct {
+	Status string `json:"status" binding:"required,oneof=consumed failed"`
 }

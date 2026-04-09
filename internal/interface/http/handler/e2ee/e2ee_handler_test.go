@@ -123,6 +123,8 @@ func TestE2EEHandler_CheckKeyStatusReturnsPublicMaterial(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -178,6 +180,8 @@ func TestE2EEHandler_CheckKeyStatusReturnsIdentityWithoutSignedPreKey(t *testing
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -207,7 +211,7 @@ func TestE2EEHandler_GetKeyPolicyReturnsConfiguredDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	require.NoError(t, config.LoadConfig("../../../../../dev-doc/config"))
 
-	handler := NewE2EEHandler(nil, nil, nil, nil, nil, nil, usecase.NewGetKeyPolicyUseCase(), nil, nil, nil, nil)
+	handler := NewE2EEHandler(nil, nil, nil, nil, nil, nil, usecase.NewGetKeyPolicyUseCase(), nil, nil, nil, nil, nil, nil)
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
 	handler.RegisterE2EERoutes(router.Group("/e2ee"))

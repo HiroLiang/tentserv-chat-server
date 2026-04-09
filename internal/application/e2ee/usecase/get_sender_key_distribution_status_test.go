@@ -104,8 +104,13 @@ func (s *senderStatusMemberSenderKeyRepoStub) Add(context.Context, *membersender
 	return nil
 }
 
+func (s *senderStatusMemberSenderKeyRepoStub) UpsertLatest(context.Context, *membersenderkey.MemberSenderKey) error {
+	return nil
+}
+
 type senderStatusDistributionRepoStub struct {
-	findPendingReceivers func(ctx context.Context, senderMemberID chatmember.ID, latestChainID int) ([]chatmember.ID, error)
+	findLatest                     func(ctx context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error)
+	findAvailableByRoomAndReceiver func(ctx context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error)
 }
 
 func (s *senderStatusDistributionRepoStub) UpsertBatch(context.Context, []*senderkeydistribution.SenderKeyDistribution) error {
@@ -113,10 +118,37 @@ func (s *senderStatusDistributionRepoStub) UpsertBatch(context.Context, []*sende
 }
 
 func (s *senderStatusDistributionRepoStub) FindPendingReceivers(ctx context.Context, senderMemberID chatmember.ID, latestChainID int) ([]chatmember.ID, error) {
-	if s.findPendingReceivers != nil {
-		return s.findPendingReceivers(ctx, senderMemberID, latestChainID)
-	}
 	return []chatmember.ID{}, nil
+}
+
+func (s *senderStatusDistributionRepoStub) UpsertAvailable(context.Context, *senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *senderStatusDistributionRepoStub) FindLatest(ctx context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	if s.findLatest != nil {
+		return s.findLatest(ctx, senderMemberID, receiverMemberID)
+	}
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *senderStatusDistributionRepoStub) FindAvailableByRoomAndReceiver(ctx context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	if s.findAvailableByRoomAndReceiver != nil {
+		return s.findAvailableByRoomAndReceiver(ctx, roomID, receiverMemberID)
+	}
+	return nil, nil
+}
+
+func (s *senderStatusDistributionRepoStub) FindByID(context.Context, senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *senderStatusDistributionRepoStub) MarkConsumed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func (s *senderStatusDistributionRepoStub) MarkFailed(context.Context, senderkeydistribution.ID) error {
+	return nil
 }
 
 func TestGetSenderKeyDistributionStatusUseCase_EmptySlicesWhenNoKeys(t *testing.T) {
@@ -155,10 +187,14 @@ func TestGetSenderKeyDistributionStatusUseCase_EmptySlicesWhenNoKeys(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.False(t, out.OwnSenderKeyExists)
+	require.NotNil(t, out.RequestableMemberIDs)
+	require.NotNil(t, out.AvailableFromMemberIDs)
 	require.NotNil(t, out.PendingReceivers)
 	require.NotNil(t, out.PendingFromMembers)
 	assert.Empty(t, out.PendingReceivers)
-	assert.Empty(t, out.PendingFromMembers)
+	assert.Empty(t, out.AvailableFromMemberIDs)
+	assert.Equal(t, []int64{11}, out.RequestableMemberIDs)
+	assert.Equal(t, []int64{11}, out.PendingFromMembers)
 }
 
 func TestGetSenderKeyDistributionStatusUseCase_PendingFromMembers(t *testing.T) {
@@ -186,19 +222,20 @@ func TestGetSenderKeyDistributionStatusUseCase_PendingFromMembers(t *testing.T) 
 			findLatest: func(_ context.Context, chatMemberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
 				if chatMemberID == otherMemberID {
 					return &membersenderkey.MemberSenderKey{
-						ChatMemberID: otherMemberID,
-						ChainID:      membersenderkey.ChainID(7),
+						ChatMemberID:     otherMemberID,
+						SenderKeyVersion: 7,
+						ChainID:          membersenderkey.ChainID(7),
 					}, nil
 				}
 				return nil, membersenderkey.ErrNotFound
 			},
 		},
 		&senderStatusDistributionRepoStub{
-			findPendingReceivers: func(_ context.Context, senderMemberID chatmember.ID, latestChainID int) ([]chatmember.ID, error) {
-				if senderMemberID == otherMemberID && latestChainID == 7 {
-					return []chatmember.ID{callerMemberID}, nil
+			findLatest: func(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+				if senderMemberID == otherMemberID && receiverMemberID == callerMemberID {
+					return nil, senderkeydistribution.ErrNotFound
 				}
-				return []chatmember.ID{}, nil
+				return nil, senderkeydistribution.ErrNotFound
 			},
 		},
 	)
@@ -213,6 +250,8 @@ func TestGetSenderKeyDistributionStatusUseCase_PendingFromMembers(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.False(t, out.OwnSenderKeyExists)
+	assert.Equal(t, []int64{int64(otherMemberID)}, out.RequestableMemberIDs)
+	assert.Empty(t, out.AvailableFromMemberIDs)
 	assert.Equal(t, []int64{int64(otherMemberID)}, out.PendingFromMembers)
 }
 
@@ -241,14 +280,43 @@ func TestGetSenderKeyDistributionStatusUseCase_OwnSenderKeyExists(t *testing.T) 
 			findLatest: func(_ context.Context, chatMemberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
 				if chatMemberID == callerMemberID {
 					return &membersenderkey.MemberSenderKey{
-						ChatMemberID: callerMemberID,
-						ChainID:      membersenderkey.ChainID(7),
+						ChatMemberID:     callerMemberID,
+						SenderKeyVersion: 7,
+						ChainID:          membersenderkey.ChainID(7),
+					}, nil
+				}
+				if chatMemberID == otherMemberID {
+					return &membersenderkey.MemberSenderKey{
+						ChatMemberID:     otherMemberID,
+						SenderKeyVersion: 5,
+						ChainID:          membersenderkey.ChainID(5),
 					}, nil
 				}
 				return nil, membersenderkey.ErrNotFound
 			},
 		},
-		&senderStatusDistributionRepoStub{},
+		&senderStatusDistributionRepoStub{
+			findLatest: func(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+				switch {
+				case senderMemberID == otherMemberID && receiverMemberID == callerMemberID:
+					return &senderkeydistribution.SenderKeyDistribution{
+						SenderMemberID:   otherMemberID,
+						ReceiverMemberID: callerMemberID,
+						SenderKeyVersion: 5,
+						Status:           senderkeydistribution.StatusAvailable,
+					}, nil
+				case senderMemberID == callerMemberID && receiverMemberID == otherMemberID:
+					return &senderkeydistribution.SenderKeyDistribution{
+						SenderMemberID:   callerMemberID,
+						ReceiverMemberID: otherMemberID,
+						SenderKeyVersion: 7,
+						Status:           senderkeydistribution.StatusConsumed,
+					}, nil
+				default:
+					return nil, senderkeydistribution.ErrNotFound
+				}
+			},
+		},
 	)
 
 	out, err := uc.Execute(context.Background(), appShared.UseCaseInput[GetSenderKeyDistributionStatusInput]{
@@ -261,5 +329,8 @@ func TestGetSenderKeyDistributionStatusUseCase_OwnSenderKeyExists(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.True(t, out.OwnSenderKeyExists)
+	assert.Empty(t, out.RequestableMemberIDs)
+	assert.Equal(t, []int64{int64(otherMemberID)}, out.AvailableFromMemberIDs)
+	assert.Empty(t, out.PendingReceivers)
 	assert.Empty(t, out.PendingFromMembers)
 }

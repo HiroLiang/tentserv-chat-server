@@ -2,17 +2,30 @@ package e2ee
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
+	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 )
 
 var distributionTable = postgres.Table{
-	Name:    "public.sender_key_distributions",
-	Columns: []string{"id", "sender_member_id", "receiver_member_id", "chain_id", "distributed_at"},
+	Name: "public.sender_key_distributions",
+	Columns: []string{
+		"id",
+		"sender_member_id",
+		"receiver_member_id",
+		"sender_key_version",
+		"distribution_message",
+		"status",
+		"distributed_at",
+		"consumed_at",
+		"failed_at",
+	},
 }
 
 type SenderKeyDistributionRepository struct {
@@ -25,8 +38,6 @@ func NewSenderKeyDistributionRepository(db *sqlx.DB) *SenderKeyDistributionRepos
 	return &SenderKeyDistributionRepository{BaseRepo: postgres.NewBaseRepo(db)}
 }
 
-// UpsertBatch records that each dist.ReceiverMemberID has fetched dist.SenderMemberID's key
-// at dist.ChainID. Uses ON CONFLICT to update chain_id when a newer version is fetched.
 func (r *SenderKeyDistributionRepository) UpsertBatch(
 	ctx context.Context,
 	dists []*senderkeydistribution.SenderKeyDistribution,
@@ -36,13 +47,35 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 	}
 
 	q := distributionTable.Insert().
-		Columns("sender_member_id", "receiver_member_id", "chain_id").
+		Columns("sender_member_id", "receiver_member_id", "sender_key_version", "distribution_message", "status").
 		Suffix(`ON CONFLICT (sender_member_id, receiver_member_id)
-			DO UPDATE SET chain_id = GREATEST(EXCLUDED.chain_id, sender_key_distributions.chain_id),
+			DO UPDATE SET sender_key_version = GREATEST(EXCLUDED.sender_key_version, sender_key_distributions.sender_key_version),
+			              status = CASE
+			                  WHEN EXCLUDED.sender_key_version >= sender_key_distributions.sender_key_version THEN EXCLUDED.status
+			                  ELSE sender_key_distributions.status
+			              END,
+			              consumed_at = CASE
+			                  WHEN EXCLUDED.status = 'consumed' THEN now()
+			                  ELSE sender_key_distributions.consumed_at
+			              END,
+			              failed_at = CASE
+			                  WHEN EXCLUDED.status = 'failed' THEN now()
+			                  ELSE sender_key_distributions.failed_at
+			              END,
 			              distributed_at = now()`)
 
 	for _, d := range dists {
-		q = q.Values(int64(d.SenderMemberID), int64(d.ReceiverMemberID), d.ChainID)
+		version := d.SenderKeyVersion
+		if version == 0 {
+			version = int64(d.ChainID)
+		}
+		q = q.Values(
+			int64(d.SenderMemberID),
+			int64(d.ReceiverMemberID),
+			version,
+			d.DistributionMessage,
+			senderkeydistribution.StatusConsumed,
+		)
 	}
 
 	query, args, err := q.ToSql()
@@ -53,8 +86,6 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
 }
 
-// FindPendingReceivers returns the IDs of members in the same room as senderMemberID
-// who have not yet fetched senderMemberID's key at latestChainID.
 func (r *SenderKeyDistributionRepository) FindPendingReceivers(
 	ctx context.Context,
 	senderMemberID chatmember.ID,
@@ -70,7 +101,8 @@ WHERE cm.room_id = (SELECT room_id FROM public.chat_members WHERE id = $1)
       SELECT 1 FROM public.sender_key_distributions skd
       WHERE skd.sender_member_id = $1
         AND skd.receiver_member_id = cm.id
-        AND skd.chain_id >= $2
+        AND skd.sender_key_version >= $2
+        AND skd.status = 'consumed'
   )`
 
 	db := r.GetDB(ctx)
@@ -84,4 +116,154 @@ WHERE cm.room_id = (SELECT room_id FROM public.chat_members WHERE id = $1)
 		result[i] = chatmember.ID(id)
 	}
 	return result, nil
+}
+
+func (r *SenderKeyDistributionRepository) UpsertAvailable(
+	ctx context.Context,
+	dist *senderkeydistribution.SenderKeyDistribution,
+) error {
+	query := `
+INSERT INTO public.sender_key_distributions
+    (sender_member_id, receiver_member_id, sender_key_version, distribution_message, status, distributed_at, consumed_at, failed_at)
+VALUES ($1, $2, $3, $4, $5, now(), NULL, NULL)
+ON CONFLICT (sender_member_id, receiver_member_id)
+DO UPDATE SET sender_key_version = EXCLUDED.sender_key_version,
+              distribution_message = EXCLUDED.distribution_message,
+              status = EXCLUDED.status,
+              distributed_at = now(),
+              consumed_at = NULL,
+              failed_at = NULL
+WHERE sender_key_distributions.sender_key_version <= EXCLUDED.sender_key_version
+RETURNING id, distributed_at`
+
+	row := r.GetDB(ctx).QueryRowxContext(
+		ctx,
+		query,
+		int64(dist.SenderMemberID),
+		int64(dist.ReceiverMemberID),
+		dist.SenderKeyVersion,
+		dist.DistributionMessage,
+		senderkeydistribution.StatusAvailable,
+	)
+	if err := row.Scan(&dist.ID, &dist.DistributedAt); err != nil {
+		return fmt.Errorf("upsert sender key distribution: %w", err)
+	}
+	dist.Status = senderkeydistribution.StatusAvailable
+	return nil
+}
+
+func (r *SenderKeyDistributionRepository) FindLatest(
+	ctx context.Context,
+	senderMemberID, receiverMemberID chatmember.ID,
+) (*senderkeydistribution.SenderKeyDistribution, error) {
+	query, args, err := distributionTable.Select(distributionTable.Columns...).
+		Where("sender_member_id = ? AND receiver_member_id = ?", int64(senderMemberID), int64(receiverMemberID)).
+		OrderBy("sender_key_version DESC").
+		Limit(1).
+		PlaceholderFormat(squirrel.Dollar).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest distribution query: %w", err)
+	}
+
+	rec, err := postgres.ScanOne[SenderKeyDistributionRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, senderkeydistribution.ErrNotFound
+		}
+		return nil, fmt.Errorf("find latest distribution: %w", err)
+	}
+	return toDistributionDomain(rec), nil
+}
+
+func (r *SenderKeyDistributionRepository) FindAvailableByRoomAndReceiver(
+	ctx context.Context,
+	roomID chatroom.ID,
+	receiverMemberID chatmember.ID,
+) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	const query = `
+SELECT skd.id,
+       skd.sender_member_id,
+       skd.receiver_member_id,
+       skd.sender_key_version,
+       skd.distribution_message,
+       skd.status,
+       skd.distributed_at,
+       skd.consumed_at,
+       skd.failed_at
+FROM public.sender_key_distributions skd
+JOIN public.chat_members cm_sender ON cm_sender.id = skd.sender_member_id
+JOIN public.chat_members cm_receiver ON cm_receiver.id = skd.receiver_member_id
+WHERE cm_sender.room_id = $1
+  AND cm_receiver.room_id = $1
+  AND cm_sender.is_deleted = false
+  AND cm_receiver.is_deleted = false
+  AND skd.receiver_member_id = $2
+  AND skd.status = 'available'
+ORDER BY skd.distributed_at ASC`
+
+	var rows []SenderKeyDistributionRecord
+	if err := sqlx.SelectContext(ctx, r.GetDB(ctx), &rows, query, int64(roomID), int64(receiverMemberID)); err != nil {
+		return nil, fmt.Errorf("find available distributions: %w", err)
+	}
+
+	out := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toDistributionDomain(&row))
+	}
+	return out, nil
+}
+
+func (r *SenderKeyDistributionRepository) FindByID(
+	ctx context.Context,
+	id senderkeydistribution.ID,
+) (*senderkeydistribution.SenderKeyDistribution, error) {
+	query, args, err := distributionTable.Select(distributionTable.Columns...).
+		Where("id = ?", int64(id)).
+		Limit(1).
+		PlaceholderFormat(squirrel.Dollar).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build distribution by id query: %w", err)
+	}
+
+	rec, err := postgres.ScanOne[SenderKeyDistributionRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, senderkeydistribution.ErrNotFound
+		}
+		return nil, fmt.Errorf("find distribution by id: %w", err)
+	}
+	return toDistributionDomain(rec), nil
+}
+
+func (r *SenderKeyDistributionRepository) MarkConsumed(
+	ctx context.Context,
+	id senderkeydistribution.ID,
+) error {
+	const query = `
+UPDATE public.sender_key_distributions
+SET status = 'consumed',
+    consumed_at = now(),
+    failed_at = NULL
+WHERE id = $1`
+	if err := postgres.Exec(ctx, r.GetDB(ctx), query, int64(id)); err != nil {
+		return fmt.Errorf("mark sender key distribution consumed: %w", err)
+	}
+	return nil
+}
+
+func (r *SenderKeyDistributionRepository) MarkFailed(
+	ctx context.Context,
+	id senderkeydistribution.ID,
+) error {
+	const query = `
+UPDATE public.sender_key_distributions
+SET status = 'failed',
+    failed_at = now()
+WHERE id = $1`
+	if err := postgres.Exec(ctx, r.GetDB(ctx), query, int64(id)); err != nil {
+		return fmt.Errorf("mark sender key distribution failed: %w", err)
+	}
+	return nil
 }

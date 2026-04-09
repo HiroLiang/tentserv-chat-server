@@ -16,6 +16,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	sharedDomain "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/stretchr/testify/assert"
@@ -156,6 +157,57 @@ func (s *senderKeyReqMSKRepoStub) FindAllByMembers(context.Context, []chatmember
 
 func (s *senderKeyReqMSKRepoStub) Add(context.Context, *membersenderkey.MemberSenderKey) error {
 	return nil
+}
+
+func (s *senderKeyReqMSKRepoStub) UpsertLatest(context.Context, *membersenderkey.MemberSenderKey) error {
+	return nil
+}
+
+type senderKeyReqDistributionRepoStub struct {
+	latest map[string]*senderkeydistribution.SenderKeyDistribution
+}
+
+func (s *senderKeyReqDistributionRepoStub) UpsertBatch(context.Context, []*senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int) ([]chatmember.ID, error) {
+	return nil, nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) UpsertAvailable(context.Context, *senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) FindLatest(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	if s.latest == nil {
+		return nil, senderkeydistribution.ErrNotFound
+	}
+	dist, ok := s.latest[s.key(senderMemberID, receiverMemberID)]
+	if !ok {
+		return nil, senderkeydistribution.ErrNotFound
+	}
+	return dist, nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) FindByID(context.Context, senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *senderKeyReqDistributionRepoStub) MarkConsumed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) MarkFailed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func (s *senderKeyReqDistributionRepoStub) key(senderMemberID, receiverMemberID chatmember.ID) string {
+	return fmt.Sprintf("%d:%d", senderMemberID, receiverMemberID)
 }
 
 type senderKeyReqFriendshipStub struct {
@@ -299,7 +351,13 @@ func TestCreateSenderKeyRequest_ProviderInDifferentRoom(t *testing.T) {
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
 
 	uc := NewCreateSenderKeyRequestUseCase(
-		pStub, cmStub, skrStub, mskStub, &senderKeyReqFriendshipStub{}, &senderKeyReqBroadcasterStub{},
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		&senderKeyReqDistributionRepoStub{},
+		&senderKeyReqFriendshipStub{},
+		&senderKeyReqBroadcasterStub{},
 	)
 	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
 
@@ -327,6 +385,7 @@ func TestCreateSenderKeyRequest_CallerNotInRoom(t *testing.T) {
 		cmStub,
 		&senderKeyReqSKRRepoStub{},
 		&senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound},
+		&senderKeyReqDistributionRepoStub{},
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -337,7 +396,7 @@ func TestCreateSenderKeyRequest_CallerNotInRoom(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotRoomMember), "expected ErrNotRoomMember, got %v", err)
 }
 
-func TestCreateSenderKeyRequest_ProviderAlreadyHasKey(t *testing.T) {
+func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailable(t *testing.T) {
 	const (
 		callerUID   = int64(3)
 		providerUID = int64(4)
@@ -345,19 +404,35 @@ func TestCreateSenderKeyRequest_ProviderAlreadyHasKey(t *testing.T) {
 	)
 
 	pStub := makeParticipantStub(callerUID, providerUID)
-	cmStub, _, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
+	cmStub, callerMemberID, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
 	skrStub := &senderKeyReqSKRRepoStub{}
-	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: nil}
+	mskStub := &senderKeyReqMSKRepoStub{}
+	distStub := &senderKeyReqDistributionRepoStub{
+		latest: map[string]*senderkeydistribution.SenderKeyDistribution{
+			fmt.Sprintf("%d:%d", providerMemberID, callerMemberID): {
+				SenderMemberID:   providerMemberID,
+				ReceiverMemberID: callerMemberID,
+				SenderKeyVersion: 9,
+				Status:           senderkeydistribution.StatusAvailable,
+			},
+		},
+	}
 
 	uc := NewCreateSenderKeyRequestUseCase(
-		pStub, cmStub, skrStub, mskStub, &senderKeyReqFriendshipStub{}, &senderKeyReqBroadcasterStub{},
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		distStub,
+		&senderKeyReqFriendshipStub{},
+		&senderKeyReqBroadcasterStub{},
 	)
 	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
 	require.NoError(t, err)
-	assert.Zero(t, skrStub.storedCount(), "no request should be stored when provider already has a key")
+	assert.Zero(t, skrStub.storedCount(), "no request should be stored when the latest distribution is already available")
 }
 
 func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
@@ -378,7 +453,13 @@ func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
 	fsStub := &senderKeyReqFriendshipStub{rows: []*friendship.Friendship{blockedRow}}
 
 	uc := NewCreateSenderKeyRequestUseCase(
-		pStub, cmStub, skrStub, mskStub, fsStub, &senderKeyReqBroadcasterStub{},
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		&senderKeyReqDistributionRepoStub{},
+		fsStub,
+		&senderKeyReqBroadcasterStub{},
 	)
 	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
 
@@ -407,6 +488,7 @@ func TestCreateSenderKeyRequest_Success(t *testing.T) {
 		cmStub,
 		skrStub,
 		mskStub,
+		&senderKeyReqDistributionRepoStub{},
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		broadcaster,
 	)
@@ -462,6 +544,7 @@ func TestCreateSenderKeyRequest_RepeatedRequestsUseUpsertContract(t *testing.T) 
 		cmStub,
 		skrStub,
 		mskStub,
+		&senderKeyReqDistributionRepoStub{},
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		&senderKeyReqBroadcasterStub{},
 	)

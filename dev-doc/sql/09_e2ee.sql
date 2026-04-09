@@ -147,16 +147,16 @@ CREATE INDEX IF NOT EXISTS idx_user_one_time_pre_keys_lookup
 --      サーバーは blob を解析せずに保存・中継する。
 -- ============================================================
 
--- Member sender keys | 成員發送方金鑰 | メンバー送信者鍵
+-- Member sender key metadata | 成員發送方金鑰中繼資料 | メンバー送信者鍵メタデータ
 CREATE TABLE IF NOT EXISTS public.member_sender_keys
 (
     id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     chat_member_id       BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
-    chain_id             INT       NOT NULL DEFAULT 1, -- incremented on re-key
-    sender_key_public    BYTEA     NOT NULL,           -- public part for verification
-    distribution_message BYTEA     NOT NULL,           -- sealed SenderKeyDistributionMessage
+    chain_id             INT       NOT NULL DEFAULT 1, -- mirrors sender_key_version for legacy compatibility
+    sender_key_version   BIGINT    NOT NULL,           -- latest sender key version created by Rust
+    key_fingerprint      TEXT,                         -- optional future debug / auditing metadata
     created_at           TIMESTAMP NOT NULL DEFAULT now(),
-    UNIQUE (chat_member_id, chain_id)
+    UNIQUE (chat_member_id, sender_key_version)
 );
 
 -- Index for member-key lookup | 成員金鑰查詢索引 | メンバーキー検索インデックス
@@ -183,14 +183,19 @@ CREATE INDEX IF NOT EXISTS idx_member_sender_keys_member
 --        「自分はまだ誰の鍵を取得していないか？」→ pending_from_members
 -- ============================================================
 
--- Sender key distribution acks | 發送方金鑰分發確認 | 送信者鍵配布確認
+-- Sender key distributions | 發送方金鑰分發 | 送信者鍵配布
 CREATE TABLE IF NOT EXISTS public.sender_key_distributions
 (
     id                 BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     sender_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
     receiver_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
-    chain_id           INT       NOT NULL, -- chain_id of member_sender_keys that was fetched
+    sender_key_version BIGINT    NOT NULL,
+    distribution_message BYTEA   NOT NULL,
+    status             TEXT      NOT NULL DEFAULT 'available',
+    chain_id           INT       NOT NULL DEFAULT 1, -- legacy compatibility; mirrors sender_key_version
     distributed_at     TIMESTAMP NOT NULL DEFAULT now(),
+    consumed_at        TIMESTAMP,
+    failed_at          TIMESTAMP,
     UNIQUE (sender_member_id, receiver_member_id)
 );
 

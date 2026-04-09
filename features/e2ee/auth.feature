@@ -37,5 +37,9 @@ Feature: E2EE endpoints require authentication
       | sender-keys              | revoked token |
       | sender-key-distributions | no token      |
       | sender-key-distributions | revoked token |
+      | sender-key-distributions-pending | no token      |
+      | sender-key-distributions-pending | revoked token |
+      | sender-key-distributions-consume | no token      |
+      | sender-key-distributions-consume | revoked token |
       | sender-key-request       | no token      |
       | sender-key-request       | revoked token |

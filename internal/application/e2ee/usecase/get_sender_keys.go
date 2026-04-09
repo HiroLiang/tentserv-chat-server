@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -18,9 +17,8 @@ type GetSenderKeysInput struct {
 }
 
 type SenderKeyItem struct {
-	ChatMemberID        int64
-	SenderKeyPublic     string // base64
-	DistributionMessage string // base64
+	ChatMemberID     int64
+	SenderKeyVersion int64
 }
 
 type GetSenderKeysOutput struct {
@@ -81,9 +79,8 @@ func (u *GetSenderKeysUseCase) Execute(
 	items := make([]SenderKeyItem, 0, len(senderKeys))
 	for _, sk := range senderKeys {
 		items = append(items, SenderKeyItem{
-			ChatMemberID:        int64(sk.ChatMemberID),
-			SenderKeyPublic:     base64.StdEncoding.EncodeToString(sk.SenderKeyPublic[:]),
-			DistributionMessage: base64.StdEncoding.EncodeToString(sk.DistributionMessage),
+			ChatMemberID:     int64(sk.ChatMemberID),
+			SenderKeyVersion: sk.SenderKeyVersion,
 		})
 	}
 

@@ -13,6 +13,7 @@ import (
 	domainfriendship "github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	sharedDomain "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
@@ -24,23 +25,62 @@ func (n *noBroadcaster) SendToUser(string, []byte) {}
 
 var _ e2eePort.Broadcaster = (*noBroadcaster)(nil)
 
+// recordingBroadcaster captures SendToUser calls for assertion in BDD steps.
+type recordingBroadcaster struct {
+	mu       sync.Mutex
+	messages []broadcastRecord
+}
+
+type broadcastRecord struct {
+	UserID  string
+	Payload []byte
+}
+
+func (r *recordingBroadcaster) SendToUser(userID string, payload []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copied := make([]byte, len(payload))
+	copy(copied, payload)
+	r.messages = append(r.messages, broadcastRecord{UserID: userID, Payload: copied})
+}
+
+func (r *recordingBroadcaster) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.messages = nil
+}
+
+func (r *recordingBroadcaster) Messages() []broadcastRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]broadcastRecord, len(r.messages))
+	copy(out, r.messages)
+	return out
+}
+
+var _ e2eePort.Broadcaster = (*recordingBroadcaster)(nil)
+
 // SKRDeps holds the in-memory repositories needed for sender key request BDD scenarios.
 type SKRDeps struct {
-	mu              sync.Mutex
-	participantRepo *skrParticipantRepo
-	chatMemberRepo  *skrChatMemberRepo
-	skrRepo         *skrSenderKeyRequestRepo
-	mskRepo         *skrMemberSenderKeyRepo
-	friendshipRepo  *skrFriendshipRepo
+	mu               sync.Mutex
+	participantRepo  *skrParticipantRepo
+	chatMemberRepo   *skrChatMemberRepo
+	skrRepo          *skrSenderKeyRequestRepo
+	mskRepo          *skrMemberSenderKeyRepo
+	distributionRepo *skrSenderKeyDistributionRepo
+	friendshipRepo   *skrFriendshipRepo
+	broadcaster      *recordingBroadcaster
 }
 
 func NewSKRDeps() *SKRDeps {
 	return &SKRDeps{
-		participantRepo: &skrParticipantRepo{byUserID: map[sharedDomain.UserID]*participant.Participant{}, byID: map[participant.ID]*participant.Participant{}},
-		chatMemberRepo:  &skrChatMemberRepo{byID: map[chatmember.ID]*chatmember.ChatMember{}, byRoomAndParticipant: map[chatroom.ID]map[participant.ID]*chatmember.ChatMember{}},
-		skrRepo:         &skrSenderKeyRequestRepo{records: map[string]*senderkeyrequest.SenderKeyRequest{}},
-		mskRepo:         &skrMemberSenderKeyRepo{keys: map[chatmember.ID]*membersenderkey.MemberSenderKey{}},
-		friendshipRepo:  &skrFriendshipRepo{},
+		participantRepo:  &skrParticipantRepo{byUserID: map[sharedDomain.UserID]*participant.Participant{}, byID: map[participant.ID]*participant.Participant{}},
+		chatMemberRepo:   &skrChatMemberRepo{byID: map[chatmember.ID]*chatmember.ChatMember{}, byRoomAndParticipant: map[chatroom.ID]map[participant.ID]*chatmember.ChatMember{}},
+		skrRepo:          &skrSenderKeyRequestRepo{records: map[string]*senderkeyrequest.SenderKeyRequest{}},
+		mskRepo:          &skrMemberSenderKeyRepo{keys: map[chatmember.ID]*membersenderkey.MemberSenderKey{}},
+		distributionRepo: &skrSenderKeyDistributionRepo{byPair: map[string]*senderkeydistribution.SenderKeyDistribution{}, byID: map[senderkeydistribution.ID]*senderkeydistribution.SenderKeyDistribution{}},
+		friendshipRepo:   &skrFriendshipRepo{},
+		broadcaster:      &recordingBroadcaster{},
 	}
 }
 
@@ -49,6 +89,13 @@ func (d *SKRDeps) Reset() {
 	d.chatMemberRepo.reset()
 	d.skrRepo.reset()
 	d.mskRepo.reset()
+	d.distributionRepo.reset()
+	d.friendshipRepo.reset()
+	d.broadcaster.reset()
+}
+
+func (d *SKRDeps) BroadcastMessages() []broadcastRecord {
+	return d.broadcaster.Messages()
 }
 
 func (d *SKRDeps) RegisterCreateSenderKeyRequestUseCase() *e2eeUseCase.CreateSenderKeyRequestUseCase {
@@ -57,8 +104,48 @@ func (d *SKRDeps) RegisterCreateSenderKeyRequestUseCase() *e2eeUseCase.CreateSen
 		d.chatMemberRepo,
 		d.skrRepo,
 		d.mskRepo,
+		d.distributionRepo,
 		d.friendshipRepo,
 		&noBroadcaster{},
+	)
+}
+
+func (d *SKRDeps) RegisterUploadSenderKeyUseCase() *e2eeUseCase.UploadSenderKeyUseCase {
+	return e2eeUseCase.NewUploadSenderKeyUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.mskRepo,
+		d.distributionRepo,
+		d.skrRepo,
+		d.friendshipRepo,
+		&noBroadcaster{},
+	)
+}
+
+func (d *SKRDeps) RegisterGetSenderKeyDistributionStatusUseCase() *e2eeUseCase.GetSenderKeyDistributionStatusUseCase {
+	return e2eeUseCase.NewGetSenderKeyDistributionStatusUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.mskRepo,
+		d.distributionRepo,
+	)
+}
+
+func (d *SKRDeps) RegisterGetPendingSenderKeyDistributionsUseCase() *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase {
+	return e2eeUseCase.NewGetPendingSenderKeyDistributionsUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.distributionRepo,
+	)
+}
+
+func (d *SKRDeps) RegisterConsumeSenderKeyDistributionUseCase() *e2eeUseCase.ConsumeSenderKeyDistributionUseCase {
+	return e2eeUseCase.NewConsumeSenderKeyDistributionUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.distributionRepo,
+		d.skrRepo,
+		d.broadcaster,
 	)
 }
 
@@ -87,7 +174,31 @@ func (d *SKRDeps) SeedMember(userID sharedDomain.UserID, participantID participa
 
 // SeedProviderKey stores a sender key for the given member (provider already has a key).
 func (d *SKRDeps) SeedProviderKey(memberID chatmember.ID) {
-	d.mskRepo.keys[memberID] = &membersenderkey.MemberSenderKey{ChatMemberID: memberID}
+	d.SeedProviderKeyVersion(memberID, 1)
+}
+
+func (d *SKRDeps) SeedProviderKeyVersion(memberID chatmember.ID, version int64) {
+	d.mskRepo.keys[memberID] = &membersenderkey.MemberSenderKey{
+		ChatMemberID:     memberID,
+		SenderKeyVersion: version,
+		ChainID:          membersenderkey.ChainID(version),
+	}
+}
+
+func (d *SKRDeps) SeedDistribution(roomID int64, senderMemberID, receiverMemberID chatmember.ID, version int64, status senderkeydistribution.Status) senderkeydistribution.ID {
+	return d.distributionRepo.seed(roomID, senderMemberID, receiverMemberID, version, status)
+}
+
+func (d *SKRDeps) FindDistribution(senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, bool) {
+	return d.distributionRepo.findLatest(senderMemberID, receiverMemberID)
+}
+
+func (d *SKRDeps) FindDistributionByID(id senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, bool) {
+	return d.distributionRepo.findByID(id)
+}
+
+func (d *SKRDeps) SeedBlockedFriendship(userID, friendID sharedDomain.UserID) {
+	d.friendshipRepo.seedBlocked(userID, friendID)
 }
 
 // FindSKRRequest returns the sender key request row (if any) for the given pair.
@@ -380,12 +491,249 @@ func (r *skrMemberSenderKeyRepo) Add(_ context.Context, sk *membersenderkey.Memb
 	return nil
 }
 
+func (r *skrMemberSenderKeyRepo) UpsertLatest(_ context.Context, sk *membersenderkey.MemberSenderKey) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copied := *sk
+	r.keys[sk.ChatMemberID] = &copied
+	return nil
+}
+
+// ─── sender key distribution repo ────────────────────────────────────────────
+
+type skrSenderKeyDistributionRepo struct {
+	mu     sync.Mutex
+	byPair map[string]*senderkeydistribution.SenderKeyDistribution
+	byID   map[senderkeydistribution.ID]*senderkeydistribution.SenderKeyDistribution
+	nextID senderkeydistribution.ID
+}
+
+func (r *skrSenderKeyDistributionRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byPair = map[string]*senderkeydistribution.SenderKeyDistribution{}
+	r.byID = map[senderkeydistribution.ID]*senderkeydistribution.SenderKeyDistribution{}
+	r.nextID = 0
+}
+
+func (r *skrSenderKeyDistributionRepo) key(senderID, receiverID chatmember.ID) string {
+	return fmt.Sprintf("%d_%d", senderID, receiverID)
+}
+
+func (r *skrSenderKeyDistributionRepo) clone(dist *senderkeydistribution.SenderKeyDistribution) *senderkeydistribution.SenderKeyDistribution {
+	if dist == nil {
+		return nil
+	}
+	copied := *dist
+	copied.DistributionMessage = append([]byte(nil), dist.DistributionMessage...)
+	return &copied
+}
+
+func (r *skrSenderKeyDistributionRepo) seed(roomID int64, senderMemberID, receiverMemberID chatmember.ID, version int64, status senderkeydistribution.Status) senderkeydistribution.ID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID++
+	dist := &senderkeydistribution.SenderKeyDistribution{
+		ID:               r.nextID,
+		RoomID:           roomID,
+		SenderMemberID:   senderMemberID,
+		ReceiverMemberID: receiverMemberID,
+		SenderKeyVersion: version,
+		Status:           status,
+		ChainID:          int(version),
+		DistributedAt:    time.Now(),
+	}
+	r.byPair[r.key(senderMemberID, receiverMemberID)] = dist
+	r.byID[dist.ID] = dist
+	return dist.ID
+}
+
+func (r *skrSenderKeyDistributionRepo) findLatest(senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byPair[r.key(senderMemberID, receiverMemberID)]
+	if !ok {
+		return nil, false
+	}
+	return r.clone(dist), true
+}
+
+func (r *skrSenderKeyDistributionRepo) findByID(id senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	return r.clone(dist), true
+}
+
+func (r *skrSenderKeyDistributionRepo) UpsertBatch(_ context.Context, dists []*senderkeydistribution.SenderKeyDistribution) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, dist := range dists {
+		k := r.key(dist.SenderMemberID, dist.ReceiverMemberID)
+		existing, ok := r.byPair[k]
+		if ok {
+			existing.ChainID = dist.ChainID
+			existing.SenderKeyVersion = int64(dist.ChainID)
+			existing.Status = senderkeydistribution.StatusConsumed
+			now := time.Now()
+			existing.ConsumedAt = &now
+			continue
+		}
+		r.nextID++
+		copied := *dist
+		copied.ID = r.nextID
+		copied.Status = senderkeydistribution.StatusConsumed
+		copied.SenderKeyVersion = int64(dist.ChainID)
+		now := time.Now()
+		copied.ConsumedAt = &now
+		r.byPair[k] = &copied
+		r.byID[copied.ID] = &copied
+	}
+	return nil
+}
+
+func (r *skrSenderKeyDistributionRepo) FindPendingReceivers(_ context.Context, senderMemberID chatmember.ID, latestChainID int) ([]chatmember.ID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]chatmember.ID, 0)
+	for _, dist := range r.byPair {
+		if dist.SenderMemberID != senderMemberID {
+			continue
+		}
+		if dist.Status != senderkeydistribution.StatusConsumed || dist.SenderKeyVersion < int64(latestChainID) {
+			out = append(out, dist.ReceiverMemberID)
+		}
+	}
+	return out, nil
+}
+
+func (r *skrSenderKeyDistributionRepo) UpsertAvailable(_ context.Context, dist *senderkeydistribution.SenderKeyDistribution) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.key(dist.SenderMemberID, dist.ReceiverMemberID)
+	if existing, ok := r.byPair[k]; ok {
+		existing.RoomID = dist.RoomID
+		existing.SenderKeyVersion = dist.SenderKeyVersion
+		existing.DistributionMessage = append([]byte(nil), dist.DistributionMessage...)
+		existing.Status = senderkeydistribution.StatusAvailable
+		existing.DistributedAt = time.Now()
+		existing.ConsumedAt = nil
+		existing.FailedAt = nil
+		dist.ID = existing.ID
+		return nil
+	}
+	r.nextID++
+	copied := r.clone(dist)
+	copied.ID = r.nextID
+	copied.Status = senderkeydistribution.StatusAvailable
+	copied.DistributedAt = time.Now()
+	r.byPair[k] = copied
+	r.byID[copied.ID] = copied
+	dist.ID = copied.ID
+	return nil
+}
+
+func (r *skrSenderKeyDistributionRepo) FindLatest(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byPair[r.key(senderMemberID, receiverMemberID)]
+	if !ok {
+		return nil, senderkeydistribution.ErrNotFound
+	}
+	return r.clone(dist), nil
+}
+
+func (r *skrSenderKeyDistributionRepo) FindAvailableByRoomAndReceiver(_ context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*senderkeydistribution.SenderKeyDistribution, 0)
+	for _, dist := range r.byPair {
+		if dist.RoomID != int64(roomID) || dist.ReceiverMemberID != receiverMemberID || dist.Status != senderkeydistribution.StatusAvailable {
+			continue
+		}
+		out = append(out, r.clone(dist))
+	}
+	return out, nil
+}
+
+func (r *skrSenderKeyDistributionRepo) FindByID(_ context.Context, id senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byID[id]
+	if !ok {
+		return nil, senderkeydistribution.ErrNotFound
+	}
+	return r.clone(dist), nil
+}
+
+func (r *skrSenderKeyDistributionRepo) MarkConsumed(_ context.Context, id senderkeydistribution.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byID[id]
+	if !ok {
+		return senderkeydistribution.ErrNotFound
+	}
+	now := time.Now()
+	dist.Status = senderkeydistribution.StatusConsumed
+	dist.ConsumedAt = &now
+	dist.FailedAt = nil
+	return nil
+}
+
+func (r *skrSenderKeyDistributionRepo) MarkFailed(_ context.Context, id senderkeydistribution.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dist, ok := r.byID[id]
+	if !ok {
+		return senderkeydistribution.ErrNotFound
+	}
+	now := time.Now()
+	dist.Status = senderkeydistribution.StatusFailed
+	dist.FailedAt = &now
+	dist.ConsumedAt = nil
+	return nil
+}
+
 // ─── friendship repo ──────────────────────────────────────────────────────────
 
-type skrFriendshipRepo struct{}
+type skrFriendshipRepo struct {
+	mu   sync.Mutex
+	rows []*domainfriendship.Friendship
+}
 
-func (r *skrFriendshipRepo) FindBetweenUsers(context.Context, sharedDomain.UserID, sharedDomain.UserID) ([]*domainfriendship.Friendship, error) {
-	return nil, domainfriendship.ErrFriendshipNotFound
+func (r *skrFriendshipRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rows = nil
+}
+
+func (r *skrFriendshipRepo) seedBlocked(userID, friendID sharedDomain.UserID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rows = append(r.rows, &domainfriendship.Friendship{
+		UserID:   userID,
+		FriendID: friendID,
+		Status:   domainfriendship.StatusBlocked,
+	})
+}
+
+func (r *skrFriendshipRepo) FindBetweenUsers(_ context.Context, userID, friendID sharedDomain.UserID) ([]*domainfriendship.Friendship, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*domainfriendship.Friendship, 0)
+	for _, row := range r.rows {
+		if (row.UserID == userID && row.FriendID == friendID) || (row.UserID == friendID && row.FriendID == userID) {
+			copied := *row
+			out = append(out, &copied)
+		}
+	}
+	if len(out) == 0 {
+		return nil, domainfriendship.ErrFriendshipNotFound
+	}
+	return out, nil
 }
 
 func (r *skrFriendshipRepo) FindByUserID(context.Context, sharedDomain.UserID) ([]*domainfriendship.Friendship, error) {
@@ -429,9 +777,10 @@ func (r *skrFriendshipRepo) Delete(context.Context, int64) error {
 }
 
 var (
-	_ participant.Repository      = (*skrParticipantRepo)(nil)
-	_ chatmember.Repository       = (*skrChatMemberRepo)(nil)
-	_ senderkeyrequest.Repository = (*skrSenderKeyRequestRepo)(nil)
-	_ membersenderkey.Repository  = (*skrMemberSenderKeyRepo)(nil)
-	_ domainfriendship.Repository = (*skrFriendshipRepo)(nil)
+	_ participant.Repository           = (*skrParticipantRepo)(nil)
+	_ chatmember.Repository            = (*skrChatMemberRepo)(nil)
+	_ senderkeyrequest.Repository      = (*skrSenderKeyRequestRepo)(nil)
+	_ membersenderkey.Repository       = (*skrMemberSenderKeyRepo)(nil)
+	_ senderkeydistribution.Repository = (*skrSenderKeyDistributionRepo)(nil)
+	_ domainfriendship.Repository      = (*skrFriendshipRepo)(nil)
 )

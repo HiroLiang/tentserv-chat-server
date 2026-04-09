@@ -10,17 +10,19 @@ import (
 )
 
 type E2EEHandler struct {
-	uploadIdentityKey              *usecase.UploadIdentityKeyUseCase
-	uploadSignedPreKey             *usecase.UploadSignedPreKeyUseCase
-	uploadOTPPreKeys               *usecase.UploadOTPPreKeysUseCase
-	countOTPPreKeys                *usecase.CountOTPPreKeysUseCase
-	getKeyBundle                   *usecase.GetKeyBundleUseCase
-	checkKeyStatus                 *usecase.CheckKeyStatusUseCase
-	getKeyPolicy                   *usecase.GetKeyPolicyUseCase
-	uploadSenderKey                *usecase.UploadSenderKeyUseCase
-	getSenderKeys                  *usecase.GetSenderKeysUseCase
-	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase
-	createSenderKeyRequest         *usecase.CreateSenderKeyRequestUseCase
+	uploadIdentityKey                *usecase.UploadIdentityKeyUseCase
+	uploadSignedPreKey               *usecase.UploadSignedPreKeyUseCase
+	uploadOTPPreKeys                 *usecase.UploadOTPPreKeysUseCase
+	countOTPPreKeys                  *usecase.CountOTPPreKeysUseCase
+	getKeyBundle                     *usecase.GetKeyBundleUseCase
+	checkKeyStatus                   *usecase.CheckKeyStatusUseCase
+	getKeyPolicy                     *usecase.GetKeyPolicyUseCase
+	uploadSenderKey                  *usecase.UploadSenderKeyUseCase
+	getSenderKeys                    *usecase.GetSenderKeysUseCase
+	getSenderKeyDistributionStatus   *usecase.GetSenderKeyDistributionStatusUseCase
+	getPendingSenderKeyDistributions *usecase.GetPendingSenderKeyDistributionsUseCase
+	consumeSenderKeyDistribution     *usecase.ConsumeSenderKeyDistributionUseCase
+	createSenderKeyRequest           *usecase.CreateSenderKeyRequestUseCase
 }
 
 func NewE2EEHandler(
@@ -34,20 +36,24 @@ func NewE2EEHandler(
 	uploadSenderKey *usecase.UploadSenderKeyUseCase,
 	getSenderKeys *usecase.GetSenderKeysUseCase,
 	getSenderKeyDistributionStatus *usecase.GetSenderKeyDistributionStatusUseCase,
+	getPendingSenderKeyDistributions *usecase.GetPendingSenderKeyDistributionsUseCase,
+	consumeSenderKeyDistribution *usecase.ConsumeSenderKeyDistributionUseCase,
 	createSenderKeyRequest *usecase.CreateSenderKeyRequestUseCase,
 ) *E2EEHandler {
 	return &E2EEHandler{
-		uploadIdentityKey:              uploadIdentityKey,
-		uploadSignedPreKey:             uploadSignedPreKey,
-		uploadOTPPreKeys:               uploadOTPPreKeys,
-		countOTPPreKeys:                countOTPPreKeys,
-		getKeyBundle:                   getKeyBundle,
-		checkKeyStatus:                 checkKeyStatus,
-		getKeyPolicy:                   getKeyPolicy,
-		uploadSenderKey:                uploadSenderKey,
-		getSenderKeys:                  getSenderKeys,
-		getSenderKeyDistributionStatus: getSenderKeyDistributionStatus,
-		createSenderKeyRequest:         createSenderKeyRequest,
+		uploadIdentityKey:                uploadIdentityKey,
+		uploadSignedPreKey:               uploadSignedPreKey,
+		uploadOTPPreKeys:                 uploadOTPPreKeys,
+		countOTPPreKeys:                  countOTPPreKeys,
+		getKeyBundle:                     getKeyBundle,
+		checkKeyStatus:                   checkKeyStatus,
+		getKeyPolicy:                     getKeyPolicy,
+		uploadSenderKey:                  uploadSenderKey,
+		getSenderKeys:                    getSenderKeys,
+		getSenderKeyDistributionStatus:   getSenderKeyDistributionStatus,
+		getPendingSenderKeyDistributions: getPendingSenderKeyDistributions,
+		consumeSenderKeyDistribution:     consumeSenderKeyDistribution,
+		createSenderKeyRequest:           createSenderKeyRequest,
 	}
 }
 
@@ -62,6 +68,8 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.POST("/sender-key", h.uploadSenderKey_)
 	r.GET("/sender-keys/:room_id", h.getSenderKeys_)
 	r.GET("/sender-key-distributions/:room_id", h.getSenderKeyDistributionStatus_)
+	r.GET("/sender-key-distributions/:room_id/pending", h.getPendingSenderKeyDistributions_)
+	r.POST("/sender-key-distributions/:distribution_id/consume", h.consumeSenderKeyDistribution_)
 	r.POST("/sender-key-request", h.createSenderKeyRequest_)
 }
 
@@ -301,7 +309,8 @@ func (h *E2EEHandler) uploadSenderKey_(c *gin.Context) {
 	}
 	input := adapter.BuildInput(c, usecase.UploadSenderKeyInput{
 		RoomID:              req.RoomID,
-		SenderKeyPublic:     req.SenderKeyPublic,
+		ReceiverMemberID:    req.ReceiverMemberID,
+		SenderKeyVersion:    req.SenderKeyVersion,
 		DistributionMessage: req.DistributionMessage,
 	})
 	if _, err := h.uploadSenderKey.Execute(c.Request.Context(), input); err != nil {
@@ -340,9 +349,8 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 	items := make([]SenderKeyItemResponse, len(out.Keys))
 	for i, k := range out.Keys {
 		items[i] = SenderKeyItemResponse{
-			ChatMemberID:        k.ChatMemberID,
-			SenderKeyPublic:     k.SenderKeyPublic,
-			DistributionMessage: k.DistributionMessage,
+			ChatMemberID:     k.ChatMemberID,
+			SenderKeyVersion: k.SenderKeyVersion,
 		}
 	}
 	c.JSON(http.StatusOK, GetSenderKeysResponse{Keys: items})
@@ -378,10 +386,90 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
-		OwnSenderKeyExists: out.OwnSenderKeyExists,
-		PendingReceivers:   normalizeMemberIDs(out.PendingReceivers),
-		PendingFromMembers: normalizeMemberIDs(out.PendingFromMembers),
+		OwnSenderKeyExists:     out.OwnSenderKeyExists,
+		RequestableMemberIDs:   normalizeMemberIDs(out.RequestableMemberIDs),
+		AvailableFromMemberIDs: normalizeMemberIDs(out.AvailableFromMemberIDs),
+		PendingReceivers:       normalizeMemberIDs(out.PendingReceivers),
+		PendingFromMembers:     normalizeMemberIDs(out.PendingFromMembers),
 	})
+}
+
+// @Summary Get pending sender key distributions for a room
+// @Description Returns all available sender key distributions addressed to the authenticated member in the room.
+// @Tags E2EE
+// @Produce json
+// @Security BearerAuth
+// @Param room_id path int true "Room ID"
+// @Success 200 {object} GetPendingSenderKeyDistributionsResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/sender-key-distributions/{room_id}/pending [get]
+func (h *E2EEHandler) getPendingSenderKeyDistributions_(c *gin.Context) {
+	roomID, err := strconv.ParseInt(c.Param("room_id"), 10, 64)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.GetPendingSenderKeyDistributionsInput{RoomID: roomID})
+	out, err := h.getPendingSenderKeyDistributions.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	items := make([]PendingSenderKeyDistributionItemResponse, 0, len(out.Distributions))
+	for _, dist := range out.Distributions {
+		items = append(items, PendingSenderKeyDistributionItemResponse{
+			DistributionID:      dist.DistributionID,
+			SenderMemberID:      dist.SenderMemberID,
+			ReceiverMemberID:    dist.ReceiverMemberID,
+			SenderKeyVersion:    dist.SenderKeyVersion,
+			DistributionMessage: dist.DistributionMessage,
+		})
+	}
+
+	c.JSON(http.StatusOK, GetPendingSenderKeyDistributionsResponse{Distributions: items})
+}
+
+// @Summary Consume sender key distribution
+// @Description Marks a sender key distribution as consumed or failed after the client processes it.
+// @Tags E2EE
+// @Accept json
+// @Security BearerAuth
+// @Param distribution_id path int true "Distribution ID"
+// @Param payload body ConsumeSenderKeyDistributionRequest true "Consume payload"
+// @Success 204
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 403 {object} response.ErrorResponse "Forbidden"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/e2ee/sender-key-distributions/{distribution_id}/consume [post]
+func (h *E2EEHandler) consumeSenderKeyDistribution_(c *gin.Context) {
+	distributionID, err := strconv.ParseInt(c.Param("distribution_id"), 10, 64)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	var req ConsumeSenderKeyDistributionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	input := adapter.BuildInput(c, usecase.ConsumeSenderKeyDistributionInput{
+		DistributionID: distributionID,
+		Status:         req.Status,
+	})
+	if _, err := h.consumeSenderKeyDistribution.Execute(c.Request.Context(), input); err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // @Summary Request sender key from another member

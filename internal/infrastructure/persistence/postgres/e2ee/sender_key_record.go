@@ -8,10 +8,10 @@ import (
 )
 
 type SenderKeyRecord struct {
-	ID                  membersenderkey.ID      `db:"id"`
-	ChatMemberID        chatmember.ID           `db:"chat_member_id"`
-	ChainID             membersenderkey.ChainID `db:"chain_id"`
-	SenderKeyPublic     []byte                  `db:"sender_key_public"`
-	DistributionMessage []byte                  `db:"distribution_message"`
-	CreatedAt           time.Time               `db:"created_at"`
+	ID               membersenderkey.ID      `db:"id"`
+	ChatMemberID     chatmember.ID           `db:"chat_member_id"`
+	ChainID          membersenderkey.ChainID `db:"chain_id"`
+	SenderKeyVersion int64                   `db:"sender_key_version"`
+	KeyFingerprint   *string                 `db:"key_fingerprint"`
+	CreatedAt        time.Time               `db:"created_at"`
 }

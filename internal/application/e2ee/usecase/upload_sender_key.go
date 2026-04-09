@@ -11,14 +11,17 @@ import (
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 )
 
 type UploadSenderKeyInput struct {
 	RoomID              int64
-	SenderKeyPublic     string // base64
+	ReceiverMemberID    int64
+	SenderKeyVersion    int64
 	DistributionMessage string // base64
 }
 
@@ -28,7 +31,9 @@ type UploadSenderKeyUseCase struct {
 	participantRepo      participant.Repository
 	chatMemberRepo       chatmember.Repository
 	memberSenderKeyRepo  membersenderkey.Repository
+	distributionRepo     senderkeydistribution.Repository
 	senderKeyRequestRepo senderkeyrequest.Repository
+	friendshipRepo       friendship.Repository
 	broadcaster          e2eePort.Broadcaster
 }
 
@@ -36,24 +41,22 @@ func NewUploadSenderKeyUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
 	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
 	senderKeyRequestRepo senderkeyrequest.Repository,
+	friendshipRepo friendship.Repository,
 	broadcaster e2eePort.Broadcaster,
 ) *UploadSenderKeyUseCase {
 	return &UploadSenderKeyUseCase{
 		participantRepo:      participantRepo,
 		chatMemberRepo:       chatMemberRepo,
 		memberSenderKeyRepo:  memberSenderKeyRepo,
+		distributionRepo:     distributionRepo,
 		senderKeyRequestRepo: senderKeyRequestRepo,
+		friendshipRepo:       friendshipRepo,
 		broadcaster:          broadcaster,
 	}
 }
 
-// [EN] Execute: validates room membership, decodes and validates the 32-byte sender public key,
-//      stores the MemberSenderKey record, then asynchronously notifies pending requesters.
-// [中] Execute：驗證房間成員身份，解碼並驗證 32 位元組 sender 公鑰，
-//      儲存 MemberSenderKey 記錄後非同步通知待處理的請求者。
-// [日] Execute：ルームメンバー資格を検証し、32 バイトの sender 公開鍵をデコード・検証して
-//      MemberSenderKey レコードを保存し、保留中のリクエスト者に非同期で通知する。
 func (u *UploadSenderKeyUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[UploadSenderKeyInput],
@@ -63,88 +66,137 @@ func (u *UploadSenderKeyUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
-	member, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, chatroom.ID(input.Data.RoomID), p.ID)
-	if err != nil {
+	roomID := chatroom.ID(input.Data.RoomID)
+	senderMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, p.ID)
+	if err != nil || senderMember.IsDeleted {
 		return nil, ErrNotRoomMember
 	}
 
-	pubBytes, err := base64.StdEncoding.DecodeString(input.Data.SenderKeyPublic)
-	if err != nil || len(pubBytes) != 32 {
-		return nil, fmt.Errorf("%w: decode sender key public", ErrInvalidSignature)
+	receiverMember, err := u.chatMemberRepo.FindByID(ctx, chatmember.ID(input.Data.ReceiverMemberID))
+	if err != nil || receiverMember.IsDeleted || receiverMember.RoomID != roomID {
+		return nil, ErrNotRoomMember
+	}
+
+	if blocked, err := u.hasBlockedRelationship(ctx, senderMember.ParticipantID, receiverMember.ParticipantID); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, ErrForbidden
 	}
 
 	distBytes, err := base64.StdEncoding.DecodeString(input.Data.DistributionMessage)
-	if err != nil {
+	if err != nil || len(distBytes) == 0 {
 		return nil, fmt.Errorf("%w: decode distribution message", ErrInvalidSignature)
 	}
 
-	var pub membersenderkey.SenderKeyPublic
-	copy(pub[:], pubBytes)
+	senderMeta := &membersenderkey.MemberSenderKey{
+		ChatMemberID:     senderMember.ID,
+		SenderKeyVersion: input.Data.SenderKeyVersion,
+		ChainID:          membersenderkey.ChainID(input.Data.SenderKeyVersion),
+	}
+	if err := u.memberSenderKeyRepo.UpsertLatest(ctx, senderMeta); err != nil {
+		return nil, fmt.Errorf("upsert sender key metadata: %w", err)
+	}
 
-	sk := &membersenderkey.MemberSenderKey{
-		ChatMemberID:        member.ID,
-		SenderKeyPublic:     pub,
+	dist := &senderkeydistribution.SenderKeyDistribution{
+		SenderMemberID:      senderMember.ID,
+		ReceiverMemberID:    receiverMember.ID,
+		RoomID:              int64(roomID),
+		SenderKeyVersion:    input.Data.SenderKeyVersion,
 		DistributionMessage: distBytes,
+		Status:              senderkeydistribution.StatusAvailable,
+	}
+	if err := u.distributionRepo.UpsertAvailable(ctx, dist); err != nil {
+		return nil, fmt.Errorf("upsert sender key distribution: %w", err)
 	}
 
-	if err := u.memberSenderKeyRepo.Add(ctx, sk); err != nil {
-		return nil, fmt.Errorf("add sender key: %w", err)
-	}
-
-	// Notify pending requesters and fulfill their requests in the background.
-	go u.notifyRequesters(context.Background(), member.ID, input.Data.RoomID)
+	_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, receiverMember.ID, senderMember.ID)
+	go u.notifyReceiver(context.Background(), dist, int64(roomID))
 
 	return &UploadSenderKeyOutput{}, nil
 }
 
-type wsDirectKeyReadyPayload struct {
+type wsSenderKeyDistributionAvailablePayload struct {
 	RoomID           int64 `json:"room_id"`
-	ProviderMemberID int64 `json:"provider_member_id"`
+	DistributionID   int64 `json:"distribution_id"`
+	SenderMemberID   int64 `json:"sender_member_id"`
+	ReceiverMemberID int64 `json:"receiver_member_id"`
+	SenderKeyVersion int64 `json:"sender_key_version"`
 }
 
-// [EN] notifyRequesters: finds all pending sender_key_requests for the provider member,
-//      sends "e2ee.direct_key_ready" via WebSocket to each requester's userID,
-//      and marks those requests as fulfilled in the DB.
-// [中] notifyRequesters：查詢該 provider 成員的所有待處理 sender_key_request，
-//      透過 WebSocket 傳送 "e2ee.direct_key_ready" 給每個請求者的 userID，並將這些請求標記為已完成。
-// [日] notifyRequesters：プロバイダーメンバーの保留中の sender_key_request をすべて取得し、
-//      各リクエスト者の userID に WebSocket 経由で "e2ee.direct_key_ready" を送信し、
-//      それらのリクエストを DB で完了済みにマークする。
-// notifyRequesters looks up pending sender_key_requests for this provider,
-// sends e2ee.direct_key_ready to each requester, and marks those requests fulfilled.
-func (u *UploadSenderKeyUseCase) notifyRequesters(ctx context.Context, providerMemberID chatmember.ID, roomID int64) {
-	requests, err := u.senderKeyRequestRepo.FindPendingByProvider(ctx, providerMemberID)
-	if err != nil || len(requests) == 0 {
+func (u *UploadSenderKeyUseCase) notifyReceiver(
+	ctx context.Context,
+	dist *senderkeydistribution.SenderKeyDistribution,
+	roomID int64,
+) {
+	receiverMember, err := u.chatMemberRepo.FindByID(ctx, dist.ReceiverMemberID)
+	if err != nil || receiverMember.IsDeleted {
 		return
 	}
+	receiverParticipant, err := u.participantRepo.FindByID(ctx, receiverMember.ParticipantID)
+	if err != nil || receiverParticipant.UserID == nil {
+		return
+	}
+	userIDStr := strconv.FormatInt(int64(*receiverParticipant.UserID), 10)
 
 	payload, err := json.Marshal(struct {
-		Type    string                  `json:"type"`
-		Payload wsDirectKeyReadyPayload `json:"payload"`
+		Type    string                                  `json:"type"`
+		Payload wsSenderKeyDistributionAvailablePayload `json:"payload"`
 	}{
-		Type: "e2ee.direct_key_ready",
-		Payload: wsDirectKeyReadyPayload{
+		Type: "e2ee.sender_key_distribution_available",
+		Payload: wsSenderKeyDistributionAvailablePayload{
 			RoomID:           roomID,
-			ProviderMemberID: int64(providerMemberID),
+			DistributionID:   int64(dist.ID),
+			SenderMemberID:   int64(dist.SenderMemberID),
+			ReceiverMemberID: int64(dist.ReceiverMemberID),
+			SenderKeyVersion: dist.SenderKeyVersion,
 		},
 	})
-	if err != nil {
-		return
-	}
-
-	for _, req := range requests {
-		// Find the requester's participant to get their user ID for WS routing.
-		requesterMember, err := u.chatMemberRepo.FindByID(ctx, req.RequesterMemberID)
-		if err != nil {
-			continue
-		}
-		requesterParticipant, err := u.participantRepo.FindByID(ctx, requesterMember.ParticipantID)
-		if err != nil || requesterParticipant.UserID == nil {
-			continue
-		}
-		userIDStr := strconv.FormatInt(int64(*requesterParticipant.UserID), 10)
+	if err == nil {
 		u.broadcaster.SendToUser(userIDStr, payload)
-
-		_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, req.RequesterMemberID, providerMemberID)
 	}
+
+	// Legacy shim kept during migration.
+	legacyPayload, err := json.Marshal(struct {
+		Type    string `json:"type"`
+		Payload struct {
+			RoomID           int64 `json:"room_id"`
+			ProviderMemberID int64 `json:"provider_member_id"`
+		} `json:"payload"`
+	}{
+		Type: "e2ee.direct_key_ready",
+		Payload: struct {
+			RoomID           int64 `json:"room_id"`
+			ProviderMemberID int64 `json:"provider_member_id"`
+		}{
+			RoomID:           roomID,
+			ProviderMemberID: int64(dist.SenderMemberID),
+		},
+	})
+	if err == nil {
+		u.broadcaster.SendToUser(userIDStr, legacyPayload)
+	}
+}
+
+func (u *UploadSenderKeyUseCase) hasBlockedRelationship(
+	ctx context.Context,
+	senderParticipantID, receiverParticipantID participant.ID,
+) (bool, error) {
+	senderParticipant, err := u.participantRepo.FindByID(ctx, senderParticipantID)
+	if err != nil || senderParticipant.UserID == nil {
+		return false, nil
+	}
+	receiverParticipant, err := u.participantRepo.FindByID(ctx, receiverParticipantID)
+	if err != nil || receiverParticipant.UserID == nil {
+		return false, nil
+	}
+	rows, err := u.friendshipRepo.FindBetweenUsers(ctx, *senderParticipant.UserID, *receiverParticipant.UserID)
+	if err != nil {
+		return false, nil
+	}
+	for _, row := range rows {
+		if row.Status == friendship.StatusBlocked {
+			return true, nil
+		}
+	}
+	return false, nil
 }

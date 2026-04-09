@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
@@ -15,7 +16,7 @@ import (
 var senderKeyTable = postgres.Table{
 	Name: "public.member_sender_keys",
 	Columns: []string{
-		"id", "chat_member_id", "chain_id", "sender_key_public", "distribution_message", "created_at",
+		"id", "chat_member_id", "chain_id", "sender_key_version", "key_fingerprint", "created_at",
 	},
 }
 
@@ -35,7 +36,7 @@ func (r *SenderKeyRepository) FindLatest(
 ) (*membersenderkey.MemberSenderKey, error) {
 	query, args, err := senderKeyTable.Select(senderKeyTable.Columns...).
 		Where(squirrel.Eq{"chat_member_id": chatMemberID}).
-		OrderBy("chain_id DESC").
+		OrderBy("sender_key_version DESC", "chain_id DESC").
 		Limit(1).
 		ToSql()
 	if err != nil {
@@ -61,8 +62,11 @@ func (r *SenderKeyRepository) FindAllByMembers(
 		return nil, nil
 	}
 
-	query, args, err := senderKeyTable.Select(senderKeyTable.Columns...).
+	query, args, err := squirrel.
+		Select("DISTINCT ON (chat_member_id) "+strings.Join(senderKeyTable.Columns, ", ")).
+		From(senderKeyTable.Name).
 		Where(squirrel.Eq{"chat_member_id": chatMemberIDs}).
+		OrderBy("chat_member_id", "sender_key_version DESC", "chain_id DESC").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build sender keys query: %w", err)
@@ -86,10 +90,13 @@ func (r *SenderKeyRepository) FindAllByMembers(
 
 func (r *SenderKeyRepository) Add(ctx context.Context, sk *membersenderkey.MemberSenderKey) error {
 	rec := toSenderKeyRecord(sk)
+	if rec.SenderKeyVersion == 0 {
+		rec.SenderKeyVersion = int64(rec.ChainID)
+	}
 
 	query, args, err := senderKeyTable.Insert().
-		Columns("chat_member_id", "chain_id", "sender_key_public", "distribution_message").
-		Values(rec.ChatMemberID, rec.ChainID, rec.SenderKeyPublic, rec.DistributionMessage).
+		Columns("chat_member_id", "chain_id", "sender_key_version", "key_fingerprint").
+		Values(rec.ChatMemberID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
 		Suffix("RETURNING id, created_at").
 		ToSql()
 	if err != nil {
@@ -102,4 +109,8 @@ func (r *SenderKeyRepository) Add(ctx context.Context, sk *membersenderkey.Membe
 		return fmt.Errorf("insert sender key: %w", err)
 	}
 	return nil
+}
+
+func (r *SenderKeyRepository) UpsertLatest(ctx context.Context, sk *membersenderkey.MemberSenderKey) error {
+	return r.Add(ctx, sk)
 }

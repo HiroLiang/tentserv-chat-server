@@ -12,8 +12,10 @@ import (
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	sharedDomain "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/stretchr/testify/assert"
@@ -21,8 +23,6 @@ import (
 )
 
 type uploadSenderKeyRequestRepoStub struct {
-	pending          map[chatmember.ID][]*senderkeyrequest.SenderKeyRequest
-	findPendingErr   error
 	markFulfilledFor [][2]chatmember.ID
 }
 
@@ -30,17 +30,8 @@ func (s *uploadSenderKeyRequestRepoStub) Upsert(context.Context, *senderkeyreque
 	return nil
 }
 
-func (s *uploadSenderKeyRequestRepoStub) FindPendingByProvider(_ context.Context, providerMemberID chatmember.ID) ([]*senderkeyrequest.SenderKeyRequest, error) {
-	if s.findPendingErr != nil {
-		return nil, s.findPendingErr
-	}
-	requests := s.pending[providerMemberID]
-	out := make([]*senderkeyrequest.SenderKeyRequest, len(requests))
-	for i, req := range requests {
-		copied := *req
-		out[i] = &copied
-	}
-	return out, nil
+func (s *uploadSenderKeyRequestRepoStub) FindPendingByProvider(context.Context, chatmember.ID) ([]*senderkeyrequest.SenderKeyRequest, error) {
+	return nil, nil
 }
 
 func (s *uploadSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
@@ -49,8 +40,8 @@ func (s *uploadSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, reques
 }
 
 type uploadSenderKeyMemberSenderKeyRepoStub struct {
-	addErr error
-	added  []*membersenderkey.MemberSenderKey
+	upsertErr error
+	upserted  []*membersenderkey.MemberSenderKey
 }
 
 func (s *uploadSenderKeyMemberSenderKeyRepoStub) FindLatest(context.Context, chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
@@ -62,23 +53,72 @@ func (s *uploadSenderKeyMemberSenderKeyRepoStub) FindAllByMembers(context.Contex
 }
 
 func (s *uploadSenderKeyMemberSenderKeyRepoStub) Add(_ context.Context, sk *membersenderkey.MemberSenderKey) error {
-	if s.addErr != nil {
-		return s.addErr
+	return s.UpsertLatest(context.Background(), sk)
+}
+
+func (s *uploadSenderKeyMemberSenderKeyRepoStub) UpsertLatest(_ context.Context, sk *membersenderkey.MemberSenderKey) error {
+	if s.upsertErr != nil {
+		return s.upsertErr
 	}
 	copied := *sk
-	copied.DistributionMessage = append([]byte(nil), sk.DistributionMessage...)
-	s.added = append(s.added, &copied)
+	s.upserted = append(s.upserted, &copied)
 	return nil
 }
 
-func makeUploadSenderKeyInput(callerUserID int64, roomID int64, senderKeyPublic string, distributionMessage string) appShared.UseCaseInput[UploadSenderKeyInput] {
+type uploadSenderKeyDistributionRepoStub struct {
+	upsertErr error
+	upserted  []*senderkeydistribution.SenderKeyDistribution
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) UpsertBatch(context.Context, []*senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int) ([]chatmember.ID, error) {
+	return nil, nil
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) UpsertAvailable(_ context.Context, dist *senderkeydistribution.SenderKeyDistribution) error {
+	if s.upsertErr != nil {
+		return s.upsertErr
+	}
+	copied := *dist
+	copied.ID = senderkeydistribution.ID(len(s.upserted) + 1)
+	copied.DistributionMessage = append([]byte(nil), dist.DistributionMessage...)
+	s.upserted = append(s.upserted, &copied)
+	dist.ID = copied.ID
+	return nil
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) FindLatest(context.Context, chatmember.ID, chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, nil
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) FindByID(context.Context, senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) MarkConsumed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func (s *uploadSenderKeyDistributionRepoStub) MarkFailed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func makeUploadSenderKeyInput(callerUserID int64, roomID int64, receiverMemberID int64, senderKeyVersion int64, distributionMessage string) appShared.UseCaseInput[UploadSenderKeyInput] {
 	uid := sharedDomain.UserID(callerUserID)
 	auth := appShared.AuthContext{UserID: uid}
 	return appShared.UseCaseInput[UploadSenderKeyInput]{
 		Base: appShared.BaseContext{Auth: &auth},
 		Data: UploadSenderKeyInput{
 			RoomID:              roomID,
-			SenderKeyPublic:     senderKeyPublic,
+			ReceiverMemberID:    receiverMemberID,
+			SenderKeyVersion:    senderKeyVersion,
 			DistributionMessage: distributionMessage,
 		},
 	}
@@ -88,7 +128,7 @@ func encodeB64(bytes []byte) string {
 	return base64.StdEncoding.EncodeToString(bytes)
 }
 
-func TestUploadSenderKey_SuccessNotifiesAndFulfillsRequesters(t *testing.T) {
+func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) {
 	const (
 		providerUID  = int64(21)
 		requesterUID = int64(22)
@@ -98,64 +138,89 @@ func TestUploadSenderKey_SuccessNotifiesAndFulfillsRequesters(t *testing.T) {
 	participantRepo := makeParticipantStub(providerUID, requesterUID)
 	chatMemberRepo, providerMemberID, requesterMemberID := makeChatMemberStub(roomID, providerUID, requesterUID, roomID)
 	memberSenderKeyRepo := &uploadSenderKeyMemberSenderKeyRepoStub{}
-	requestRepo := &uploadSenderKeyRequestRepoStub{
-		pending: map[chatmember.ID][]*senderkeyrequest.SenderKeyRequest{
-			providerMemberID: {
-				{
-					RequesterMemberID: requesterMemberID,
-					ProviderMemberID:  providerMemberID,
-				},
-			},
-		},
-	}
+	distributionRepo := &uploadSenderKeyDistributionRepoStub{}
+	requestRepo := &uploadSenderKeyRequestRepoStub{}
 	broadcaster := &senderKeyReqBroadcasterStub{}
 
 	uc := NewUploadSenderKeyUseCase(
 		participantRepo,
 		chatMemberRepo,
 		memberSenderKeyRepo,
+		distributionRepo,
 		requestRepo,
+		&senderKeyReqFriendshipStub{},
 		broadcaster,
 	)
 
-	pubBytes := senderKeyBytes(9, 32)
 	distBytes := []byte(`{"ciphertext":"dist"}`)
+	const senderKeyVersion = int64(1700000000000)
 
 	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
 		providerUID,
 		int64(roomID),
-		encodeB64(pubBytes),
+		int64(requesterMemberID),
+		senderKeyVersion,
 		encodeB64(distBytes),
 	))
 
 	require.NoError(t, err)
-	require.Len(t, memberSenderKeyRepo.added, 1)
-	assert.Equal(t, providerMemberID, memberSenderKeyRepo.added[0].ChatMemberID)
-	assert.Equal(t, distBytes, memberSenderKeyRepo.added[0].DistributionMessage)
-	assert.Equal(t, pubBytes, memberSenderKeyRepo.added[0].SenderKeyPublic[:])
+	require.Len(t, memberSenderKeyRepo.upserted, 1)
+	assert.Equal(t, providerMemberID, memberSenderKeyRepo.upserted[0].ChatMemberID)
+	assert.Equal(t, senderKeyVersion, memberSenderKeyRepo.upserted[0].SenderKeyVersion)
+
+	require.Len(t, distributionRepo.upserted, 1)
+	assert.Equal(t, providerMemberID, distributionRepo.upserted[0].SenderMemberID)
+	assert.Equal(t, requesterMemberID, distributionRepo.upserted[0].ReceiverMemberID)
+	assert.Equal(t, int64(roomID), distributionRepo.upserted[0].RoomID)
+	assert.Equal(t, senderKeyVersion, distributionRepo.upserted[0].SenderKeyVersion)
+	assert.Equal(t, distBytes, distributionRepo.upserted[0].DistributionMessage)
+	assert.Equal(t, senderkeydistribution.StatusAvailable, distributionRepo.upserted[0].Status)
 
 	require.Eventually(t, func() bool {
-		return broadcaster.callCount() == 1 && len(requestRepo.markFulfilledFor) == 1
+		return broadcaster.callCount() == 2 && len(requestRepo.markFulfilledFor) == 1
 	}, time.Second, 10*time.Millisecond)
 
-	call := broadcaster.lastCall()
-	assert.Equal(t, fmt.Sprint(requesterUID), call.userID)
+	assert.Equal(t, [2]chatmember.ID{requesterMemberID, providerMemberID}, requestRepo.markFulfilledFor[0])
 
-	var msg struct {
+	broadcaster.mu.Lock()
+	calls := append([]senderKeyReqBroadcastCall(nil), broadcaster.calls...)
+	broadcaster.mu.Unlock()
+	require.Len(t, calls, 2)
+	assert.Equal(t, fmt.Sprint(requesterUID), calls[0].userID)
+	assert.Equal(t, fmt.Sprint(requesterUID), calls[1].userID)
+
+	var availableMsg struct {
+		Type    string `json:"type"`
+		Payload struct {
+			RoomID           int64 `json:"room_id"`
+			DistributionID   int64 `json:"distribution_id"`
+			SenderMemberID   int64 `json:"sender_member_id"`
+			ReceiverMemberID int64 `json:"receiver_member_id"`
+			SenderKeyVersion int64 `json:"sender_key_version"`
+		} `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(calls[0].msg, &availableMsg))
+	assert.Equal(t, "e2ee.sender_key_distribution_available", availableMsg.Type)
+	assert.Equal(t, int64(roomID), availableMsg.Payload.RoomID)
+	assert.Equal(t, int64(distributionRepo.upserted[0].ID), availableMsg.Payload.DistributionID)
+	assert.Equal(t, int64(providerMemberID), availableMsg.Payload.SenderMemberID)
+	assert.Equal(t, int64(requesterMemberID), availableMsg.Payload.ReceiverMemberID)
+	assert.Equal(t, senderKeyVersion, availableMsg.Payload.SenderKeyVersion)
+
+	var legacyMsg struct {
 		Type    string `json:"type"`
 		Payload struct {
 			RoomID           int64 `json:"room_id"`
 			ProviderMemberID int64 `json:"provider_member_id"`
 		} `json:"payload"`
 	}
-	require.NoError(t, json.Unmarshal(call.msg, &msg))
-	assert.Equal(t, "e2ee.direct_key_ready", msg.Type)
-	assert.Equal(t, int64(roomID), msg.Payload.RoomID)
-	assert.Equal(t, int64(providerMemberID), msg.Payload.ProviderMemberID)
-	assert.Equal(t, [2]chatmember.ID{requesterMemberID, providerMemberID}, requestRepo.markFulfilledFor[0])
+	require.NoError(t, json.Unmarshal(calls[1].msg, &legacyMsg))
+	assert.Equal(t, "e2ee.direct_key_ready", legacyMsg.Type)
+	assert.Equal(t, int64(roomID), legacyMsg.Payload.RoomID)
+	assert.Equal(t, int64(providerMemberID), legacyMsg.Payload.ProviderMemberID)
 }
 
-func TestUploadSenderKey_InvalidSenderKey(t *testing.T) {
+func TestUploadSenderKey_InvalidDistributionMessage(t *testing.T) {
 	const (
 		providerUID = int64(31)
 		roomID      = chatroom.ID(300)
@@ -169,42 +234,17 @@ func TestUploadSenderKey_InvalidSenderKey(t *testing.T) {
 		participantRepo,
 		chatMemberRepo,
 		&uploadSenderKeyMemberSenderKeyRepoStub{},
+		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
 
 	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
 		providerUID,
 		int64(roomID),
-		"invalid-base64",
-		encodeB64([]byte("dist")),
-	))
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrInvalidSignature), "expected ErrInvalidSignature, got %v", err)
-}
-
-func TestUploadSenderKey_InvalidDistributionMessage(t *testing.T) {
-	const (
-		providerUID = int64(41)
-		roomID      = chatroom.ID(400)
-	)
-
-	participantRepo := makeParticipantStub(providerUID, 42)
-	chatMemberRepo, _, _ := makeChatMemberStub(roomID, providerUID, 42, roomID)
-
-	uc := NewUploadSenderKeyUseCase(
-		participantRepo,
-		chatMemberRepo,
-		&uploadSenderKeyMemberSenderKeyRepoStub{},
-		&uploadSenderKeyRequestRepoStub{},
-		&senderKeyReqBroadcasterStub{},
-	)
-
-	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
-		providerUID,
-		int64(roomID),
-		encodeB64(senderKeyBytes(7, 32)),
+		132,
+		1700000000001,
 		"invalid-dist",
 	))
 
@@ -228,14 +268,17 @@ func TestUploadSenderKey_CallerNotInRoom(t *testing.T) {
 		participantRepo,
 		chatMemberRepo,
 		&uploadSenderKeyMemberSenderKeyRepoStub{},
+		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
 
 	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
 		providerUID,
 		int64(roomID),
-		encodeB64(senderKeyBytes(8, 32)),
+		151,
+		1700000000002,
 		encodeB64([]byte("dist")),
 	))
 
@@ -243,7 +286,48 @@ func TestUploadSenderKey_CallerNotInRoom(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotRoomMember), "expected ErrNotRoomMember, got %v", err)
 }
 
-func TestUploadSenderKey_AddError(t *testing.T) {
+func TestUploadSenderKey_BlockedRelationship(t *testing.T) {
+	const (
+		providerUID  = int64(56)
+		requesterUID = int64(57)
+		roomID       = chatroom.ID(560)
+	)
+
+	providerUserID := sharedDomain.UserID(providerUID)
+	requesterUserID := sharedDomain.UserID(requesterUID)
+
+	participantRepo := makeParticipantStub(providerUID, requesterUID)
+	chatMemberRepo, _, requesterMemberID := makeChatMemberStub(roomID, providerUID, requesterUID, roomID)
+
+	uc := NewUploadSenderKeyUseCase(
+		participantRepo,
+		chatMemberRepo,
+		&uploadSenderKeyMemberSenderKeyRepoStub{},
+		&uploadSenderKeyDistributionRepoStub{},
+		&uploadSenderKeyRequestRepoStub{},
+		&senderKeyReqFriendshipStub{
+			rows: []*friendship.Friendship{{
+				Status:   friendship.StatusBlocked,
+				UserID:   providerUserID,
+				FriendID: requesterUserID,
+			}},
+		},
+		&senderKeyReqBroadcasterStub{},
+	)
+
+	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
+		providerUID,
+		int64(roomID),
+		int64(requesterMemberID),
+		1700000000003,
+		encodeB64([]byte("dist")),
+	))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrForbidden), "expected ErrForbidden, got %v", err)
+}
+
+func TestUploadSenderKey_UpsertMetadataError(t *testing.T) {
 	const (
 		providerUID = int64(61)
 		roomID      = chatroom.ID(600)
@@ -251,31 +335,26 @@ func TestUploadSenderKey_AddError(t *testing.T) {
 
 	participantRepo := makeParticipantStub(providerUID, 62)
 	chatMemberRepo, _, _ := makeChatMemberStub(roomID, providerUID, 62, roomID)
-	memberSenderKeyRepo := &uploadSenderKeyMemberSenderKeyRepoStub{addErr: errors.New("add failed")}
+	memberSenderKeyRepo := &uploadSenderKeyMemberSenderKeyRepoStub{upsertErr: errors.New("add failed")}
 
 	uc := NewUploadSenderKeyUseCase(
 		participantRepo,
 		chatMemberRepo,
 		memberSenderKeyRepo,
+		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
 
 	_, err := uc.Execute(context.Background(), makeUploadSenderKeyInput(
 		providerUID,
 		int64(roomID),
-		encodeB64(senderKeyBytes(6, 32)),
+		162,
+		1700000000004,
 		encodeB64([]byte("dist")),
 	))
 
 	require.Error(t, err)
-	assert.EqualError(t, err, "add sender key: add failed")
-}
-
-func senderKeyBytes(value byte, length int) []byte {
-	out := make([]byte, length)
-	for i := range out {
-		out[i] = value
-	}
-	return out
+	assert.EqualError(t, err, "upsert sender key metadata: add failed")
 }

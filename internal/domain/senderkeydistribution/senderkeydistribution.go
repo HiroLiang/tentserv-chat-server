@@ -9,9 +9,15 @@ import (
 // SenderKeyDistribution records that receiver_member_id has fetched
 // sender_member_id's sender key at chain_id.
 type SenderKeyDistribution struct {
-	ID               ID
-	SenderMemberID   chatmember.ID
-	ReceiverMemberID chatmember.ID
-	ChainID          int
-	DistributedAt    time.Time
+	ID                  ID
+	SenderMemberID      chatmember.ID
+	ReceiverMemberID    chatmember.ID
+	RoomID              int64
+	SenderKeyVersion    int64
+	DistributionMessage []byte
+	Status              Status
+	ChainID             int
+	DistributedAt       time.Time
+	ConsumedAt          *time.Time
+	FailedAt            *time.Time
 }
