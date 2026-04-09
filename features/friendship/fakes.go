@@ -31,6 +31,7 @@ type Deps struct {
 type UseCases struct {
 	SearchUsers       *userUseCase.SearchUsersUseCase
 	GetFriends        *friendshipUseCase.GetFriendsUseCase
+	GetBlockedUsers   *friendshipUseCase.GetBlockedUsersUseCase
 	ApplyFriendship   *friendshipUseCase.ApplyFriendshipUseCase
 	AcceptFriendship  *friendshipUseCase.AcceptFriendshipUseCase
 	GetFriendRequests *friendshipUseCase.GetFriendRequestsUseCase
@@ -65,6 +66,7 @@ func (d *Deps) RegisterUseCases(uow transaction.UnitOfWork) UseCases {
 	return UseCases{
 		SearchUsers:       userUseCase.NewSearchUsersUseCase(d.userRepo, d.friendshipRepo),
 		GetFriends:        friendshipUseCase.NewGetFriendsUseCase(d.friendshipRepo, d.userRepo),
+		GetBlockedUsers:   friendshipUseCase.NewGetBlockedUsersUseCase(d.friendshipRepo, d.userRepo),
 		ApplyFriendship:   friendshipUseCase.NewApplyFriendshipUseCase(d.friendshipRepo),
 		AcceptFriendship:  friendshipUseCase.NewAcceptFriendshipUseCase(uow, d.friendshipRepo, d.participantRepo, d.chatRoomRepo, d.chatMemberRepo),
 		GetFriendRequests: friendshipUseCase.NewGetFriendRequestsUseCase(d.friendshipRepo, d.userRepo),
@@ -472,10 +474,10 @@ func cloneBDDFriendship(row *domainfriendship.Friendship) *domainfriendship.Frie
 // ─── Participant repo ─────────────────────────────────────────────────────────
 
 type bddParticipantRepo struct {
-	mu      sync.Mutex
-	nextID  participant.ID
-	byID    map[participant.ID]*participant.Participant
-	byUser  map[shared.UserID]*participant.Participant
+	mu     sync.Mutex
+	nextID participant.ID
+	byID   map[participant.ID]*participant.Participant
+	byUser map[shared.UserID]*participant.Participant
 }
 
 func newBDDParticipantRepo() *bddParticipantRepo {

@@ -27,7 +27,9 @@ type handlerFriendshipRepoStub struct {
 	findByUserIDAndFriendID func(ctx context.Context, userID, friendID shared.UserID) (*domainfriendship.Friendship, error)
 	findByID                func(ctx context.Context, id int64) (*domainfriendship.Friendship, error)
 	create                  func(ctx context.Context, userID, friendID shared.UserID) error
+	createBlocked           func(ctx context.Context, userID, friendID shared.UserID) error
 	updateStatus            func(ctx context.Context, id int64, status domainfriendship.Status) error
+	delete                  func(ctx context.Context, id int64) error
 }
 
 func (s *handlerFriendshipRepoStub) FindByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
@@ -45,7 +47,10 @@ func (s *handlerFriendshipRepoStub) Create(ctx context.Context, userID, friendID
 	}
 	return nil
 }
-func (s *handlerFriendshipRepoStub) CreateBlocked(context.Context, shared.UserID, shared.UserID) error {
+func (s *handlerFriendshipRepoStub) CreateBlocked(ctx context.Context, userID, friendID shared.UserID) error {
+	if s.createBlocked != nil {
+		return s.createBlocked(ctx, userID, friendID)
+	}
 	return nil
 }
 func (s *handlerFriendshipRepoStub) FindByID(ctx context.Context, id int64) (*domainfriendship.Friendship, error) {
@@ -72,7 +77,12 @@ func (s *handlerFriendshipRepoStub) UpdateStatus(ctx context.Context, id int64, 
 	}
 	return nil
 }
-func (s *handlerFriendshipRepoStub) Delete(context.Context, int64) error { return nil }
+func (s *handlerFriendshipRepoStub) Delete(ctx context.Context, id int64) error {
+	if s.delete != nil {
+		return s.delete(ctx, id)
+	}
+	return nil
+}
 
 type handlerTxStub struct{}
 
@@ -147,7 +157,7 @@ func friendshipTestRouter(handler *FriendshipHandler) *gin.Engine {
 }
 
 func TestFriendshipHandler_ApplyRejectsInvalidPayload(t *testing.T) {
-	handler := NewFriendshipHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewFriendshipHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/friends/apply", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
@@ -165,7 +175,7 @@ func TestFriendshipHandler_ApplyRejectsInvalidPayload(t *testing.T) {
 }
 
 func TestFriendshipHandler_AcceptRejectsInvalidID(t *testing.T) {
-	handler := NewFriendshipHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewFriendshipHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/friends/not-a-number/accept", nil)
 	resp := httptest.NewRecorder()
 
@@ -189,6 +199,7 @@ func TestFriendshipHandler_MapsConflictAndSelfTargetErrors(t *testing.T) {
 	}
 	handler := NewFriendshipHandler(
 		friendshipUseCase.NewGetFriendsUseCase(repo, &handlerUserRepoStub{}),
+		friendshipUseCase.NewGetBlockedUsersUseCase(repo, &handlerUserRepoStub{}),
 		friendshipUseCase.NewApplyFriendshipUseCase(repo),
 		friendshipUseCase.NewAcceptFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
 		friendshipUseCase.NewGetFriendRequestsUseCase(repo, &handlerUserRepoStub{}),
@@ -213,6 +224,95 @@ func TestFriendshipHandler_MapsConflictAndSelfTargetErrors(t *testing.T) {
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusBadRequest, resp.Code)
 	assert.Contains(t, resp.Body.String(), "INVALID_FRIENDSHIP_TARGET")
+}
+
+func TestFriendshipHandler_RemoveCancelAndBlockRejectInvalidIDs(t *testing.T) {
+	handler := NewFriendshipHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := friendshipTestRouter(handler)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodDelete, path: "/friends/not-a-number"},
+		{method: http.MethodDelete, path: "/friends/sent/not-a-number"},
+		{method: http.MethodPost, path: "/block/not-a-number"},
+		{method: http.MethodDelete, path: "/block/not-a-number"},
+	}
+
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Body.String(), "INVALID_ID")
+	}
+}
+
+func TestFriendshipHandler_MapsRemoveCancelAndBlockErrors(t *testing.T) {
+	repo := &handlerFriendshipRepoStub{
+		findByID: func(_ context.Context, id int64) (*domainfriendship.Friendship, error) {
+			switch id {
+			case 11:
+				return nil, domainfriendship.ErrFriendshipNotFound
+			case 12:
+				return &domainfriendship.Friendship{ID: 12, UserID: 601, FriendID: 501, Status: domainfriendship.StatusAccepted}, nil
+			case 13:
+				return &domainfriendship.Friendship{ID: 13, UserID: 501, FriendID: 601, Status: domainfriendship.StatusAccepted}, nil
+			default:
+				return nil, domainfriendship.ErrFriendshipNotFound
+			}
+		},
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*domainfriendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &domainfriendship.Friendship{ID: 21, UserID: 501, FriendID: 601, Status: domainfriendship.StatusBlocked}, nil
+			}
+			return nil, domainfriendship.ErrFriendshipNotFound
+		},
+	}
+	handler := NewFriendshipHandler(
+		friendshipUseCase.NewGetFriendsUseCase(repo, &handlerUserRepoStub{}),
+		friendshipUseCase.NewGetBlockedUsersUseCase(repo, &handlerUserRepoStub{}),
+		friendshipUseCase.NewApplyFriendshipUseCase(repo),
+		friendshipUseCase.NewAcceptFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
+		friendshipUseCase.NewGetFriendRequestsUseCase(repo, &handlerUserRepoStub{}),
+		friendshipUseCase.NewRemoveFriendshipUseCase(repo),
+		friendshipUseCase.NewGetSentRequestsUseCase(repo, &handlerUserRepoStub{}),
+		friendshipUseCase.NewCancelSentRequestUseCase(repo),
+		friendshipUseCase.NewBlockUserUseCase(repo),
+		friendshipUseCase.NewUnblockUserUseCase(repo),
+	)
+	router := friendshipTestRouter(handler)
+
+	req := httptest.NewRequest(http.MethodDelete, "/friends/11", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusNotFound, resp.Code)
+	assert.Contains(t, resp.Body.String(), "NOT_FOUND")
+
+	req = httptest.NewRequest(http.MethodDelete, "/friends/sent/12", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusForbidden, resp.Code)
+	assert.Contains(t, resp.Body.String(), "FORBIDDEN")
+
+	req = httptest.NewRequest(http.MethodDelete, "/friends/sent/13", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Contains(t, resp.Body.String(), "FRIENDSHIP_NOT_PENDING")
+
+	req = httptest.NewRequest(http.MethodPost, "/block/601", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusConflict, resp.Code)
+	assert.Contains(t, resp.Body.String(), "ALREADY_BLOCKED")
+
+	req = httptest.NewRequest(http.MethodDelete, "/block/602", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Contains(t, resp.Body.String(), "NOT_BLOCKED")
 }
 
 type handlerUserRepoStub struct{}

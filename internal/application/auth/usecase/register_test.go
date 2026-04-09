@@ -119,6 +119,8 @@ type authAccountRepoStub struct {
 	updateCalls           int
 	registerDeviceCalls   int
 	recordLoginEventCalls int
+	lastFindByEmail       shared.EmailAddress
+	lastFindByAccountName string
 	lastCreated           *account.Account
 	lastUpdated           *account.Account
 	lastRegisteredDevice  *account.AccountDevice
@@ -152,6 +154,7 @@ func (s *authAccountRepoStub) FindByAccountName(_ context.Context, accountName s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.findByAccountCalls++
+	s.lastFindByAccountName = accountName
 	if s.findByAccountErr != nil {
 		return nil, s.findByAccountErr
 	}
@@ -166,6 +169,7 @@ func (s *authAccountRepoStub) FindByEmail(_ context.Context, email shared.EmailA
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.findByEmailCalls++
+	s.lastFindByEmail = email
 	if s.findByEmailErr != nil {
 		return nil, s.findByEmailErr
 	}

@@ -20,11 +20,11 @@ import (
 
 type steps struct {
 	*bddsupport.APITestContext
-	deps              *Deps
-	accountBDD        *accountfeatures.Deps
-	authHeader        string
-	start             time.Time
-	lastDirectRoomID  chatroom.ID
+	deps             *Deps
+	accountBDD       *accountfeatures.Deps
+	authHeader       string
+	start            time.Time
+	lastDirectRoomID chatroom.ID
 }
 
 type userSearchResponse struct {
@@ -71,11 +71,25 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request my friends$`, s.iRequestMyFriends)
 	ctx.Step(`^the friends response should include "([^"]*)" with status "([^"]*)"$`, s.theFriendsResponseShouldIncludeWithStatus)
 	ctx.Step(`^the friends response should not include user (\d+)$`, s.theFriendsResponseShouldNotIncludeUser)
+	ctx.Step(`^I request sent friend requests$`, s.iRequestSentFriendRequests)
+	ctx.Step(`^the sent requests response should include "([^"]*)"$`, s.theSentRequestsResponseShouldInclude)
+	ctx.Step(`^the sent requests response should not include user (\d+)$`, s.theSentRequestsResponseShouldNotIncludeUser)
 	ctx.Step(`^I request incoming friend requests$`, s.iRequestIncomingFriendRequests)
 	ctx.Step(`^the incoming requests response should include "([^"]*)"$`, s.theIncomingRequestsResponseShouldInclude)
 	ctx.Step(`^the incoming requests response should not include user (\d+)$`, s.theIncomingRequestsResponseShouldNotIncludeUser)
+	ctx.Step(`^I request blocked users$`, s.iRequestBlockedUsers)
+	ctx.Step(`^the blocked response should include "([^"]*)" with status "([^"]*)"$`, s.theBlockedResponseShouldIncludeWithStatus)
+	ctx.Step(`^the blocked response should not include user (\d+)$`, s.theBlockedResponseShouldNotIncludeUser)
 	ctx.Step(`^I accept the inbound friend request from user (\d+)$`, s.iAcceptTheInboundFriendRequestFromUser)
+	ctx.Step(`^I accept friendship id (\d+)$`, s.iAcceptFriendshipID)
+	ctx.Step(`^I reject the inbound friend request from user (\d+)$`, s.iRejectTheInboundFriendRequestFromUser)
+	ctx.Step(`^I cancel the sent friend request to user (\d+)$`, s.iCancelTheSentFriendRequestToUser)
+	ctx.Step(`^I unfriend user (\d+)$`, s.iUnfriendUser)
+	ctx.Step(`^I block user (\d+)$`, s.iBlockUser)
+	ctx.Step(`^I unblock user (\d+)$`, s.iUnblockUser)
 	ctx.Step(`^mutual friendship rows between the logged in user and user (\d+) should both be "([^"]*)"$`, s.mutualFriendshipRowsBetweenTheLoggedInUserAndUserShouldBothBe)
+	ctx.Step(`^friendship rows between the logged in user and user (\d+) should not exist$`, s.friendshipRowsBetweenTheLoggedInUserAndUserShouldNotExist)
+	ctx.Step(`^friendship row from user (\d+) to the logged in user should not exist$`, s.friendshipRowFromUserToTheLoggedInUserShouldNotExist)
 	ctx.Step(`^a direct chat room should exist between the logged in user and user (\d+)$`, s.aDirectChatRoomShouldExistBetweenLoggedInUserAndUser)
 	ctx.Step(`^both members should have role "([^"]*)" in that direct room$`, s.bothMembersShouldHaveRoleInThatDirectRoom)
 }
@@ -404,6 +418,68 @@ func (s *steps) theFriendsResponseShouldNotIncludeUser(userID int64) error {
 	return nil
 }
 
+func (s *steps) iRequestSentFriendRequests() error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the logged in user requests sent pending friendships")
+	fmt.Printf("Input: auth_header_present=%t\n", authHeader != "")
+	fmt.Println("Action: GET /api/user/friends/sent")
+
+	if err := s.DoRequestWithHeaders(http.MethodGet, "/api/user/friends/sent", s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theSentRequestsResponseShouldInclude(name string) error {
+	start := time.Now()
+	fmt.Println("Given: sent requests data should include an outbound request")
+	fmt.Printf("Input: name=%s\n", name)
+	fmt.Println("Action: decode sent requests response")
+
+	items, err := decodeRequestResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Name == name {
+			fmt.Printf("Output: friendship_id=%d matched=true\n", item.FriendshipID)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected sent requests response to include %s; body=%s", name, string(s.ResponseBody))
+}
+
+func (s *steps) theSentRequestsResponseShouldNotIncludeUser(userID int64) error {
+	start := time.Now()
+	fmt.Println("Given: sent requests data should exclude a user")
+	fmt.Printf("Input: user_id=%d\n", userID)
+	fmt.Println("Action: decode sent requests response")
+
+	items, err := decodeRequestResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.UserID == userID {
+			return fmt.Errorf("expected sent requests response not to include user %d", userID)
+		}
+	}
+	fmt.Println("Output: user_hidden=true")
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
 func (s *steps) iRequestIncomingFriendRequests() error {
 	s.start = time.Now()
 	authHeader, err := s.authorizationHeader()
@@ -466,6 +542,68 @@ func (s *steps) theIncomingRequestsResponseShouldNotIncludeUser(userID int64) er
 	return nil
 }
 
+func (s *steps) iRequestBlockedUsers() error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the logged in user requests blocked friendships")
+	fmt.Printf("Input: auth_header_present=%t\n", authHeader != "")
+	fmt.Println("Action: GET /api/user/block")
+
+	if err := s.DoRequestWithHeaders(http.MethodGet, "/api/user/block", s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theBlockedResponseShouldIncludeWithStatus(name, status string) error {
+	start := time.Now()
+	fmt.Println("Given: blocked users data should include a named relationship row")
+	fmt.Printf("Input: name=%s expected_status=%s\n", name, status)
+	fmt.Println("Action: decode blocked response")
+
+	items, err := decodeFriendsResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Name == name && item.Status == status {
+			fmt.Printf("Output: friendship_id=%d matched=true\n", item.FriendshipID)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected blocked response to include %s with status %s; body=%s", name, status, string(s.ResponseBody))
+}
+
+func (s *steps) theBlockedResponseShouldNotIncludeUser(userID int64) error {
+	start := time.Now()
+	fmt.Println("Given: blocked users data should exclude a user")
+	fmt.Printf("Input: user_id=%d\n", userID)
+	fmt.Println("Action: decode blocked response")
+
+	items, err := decodeFriendsResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.UserID == userID {
+			return fmt.Errorf("expected blocked response not to include user %d", userID)
+		}
+	}
+	fmt.Println("Output: user_hidden=true")
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
 func (s *steps) iAcceptTheInboundFriendRequestFromUser(userID int64) error {
 	s.start = time.Now()
 	authHeader, err := s.authorizationHeader()
@@ -483,6 +621,153 @@ func (s *steps) iAcceptTheInboundFriendRequestFromUser(userID int64) error {
 
 	path := fmt.Sprintf("/api/user/friends/%d/accept", row.ID)
 	if err := s.doJSONRequestWithHeaders(http.MethodPost, path, nil, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iAcceptFriendshipID(friendshipID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: an authenticated user accepts a friendship by id")
+	fmt.Printf("Input: friendship_id=%d auth_header_present=%t\n", friendshipID, authHeader != "")
+	fmt.Println("Action: POST /api/user/friends/:id/accept")
+
+	path := fmt.Sprintf("/api/user/friends/%d/accept", friendshipID)
+	if err := s.doJSONRequestWithHeaders(http.MethodPost, path, nil, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iRejectTheInboundFriendRequestFromUser(userID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	currentUserID := s.accountBDD.LastSessionUserID()
+	row, ok := s.deps.FindFriendship(shared.UserID(userID), currentUserID)
+	if !ok {
+		return fmt.Errorf("no inbound friendship found from user %d", userID)
+	}
+	fmt.Println("Given: an inbound pending request exists and can be rejected")
+	fmt.Printf("Input: friendship_id=%d from_user_id=%d to_user_id=%d\n", row.ID, userID, currentUserID)
+	fmt.Println("Action: DELETE /api/user/friends/:id")
+
+	path := fmt.Sprintf("/api/user/friends/%d", row.ID)
+	if err := s.DoRequestWithHeaders(http.MethodDelete, path, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iCancelTheSentFriendRequestToUser(userID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	currentUserID := s.accountBDD.LastSessionUserID()
+	row, ok := s.deps.FindFriendship(currentUserID, shared.UserID(userID))
+	if !ok {
+		return fmt.Errorf("no outbound friendship found to user %d", userID)
+	}
+	fmt.Println("Given: an outbound pending request exists and can be cancelled")
+	fmt.Printf("Input: friendship_id=%d from_user_id=%d to_user_id=%d\n", row.ID, currentUserID, userID)
+	fmt.Println("Action: DELETE /api/user/friends/sent/:id")
+
+	path := fmt.Sprintf("/api/user/friends/sent/%d", row.ID)
+	if err := s.DoRequestWithHeaders(http.MethodDelete, path, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iUnfriendUser(userID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	currentUserID := s.accountBDD.LastSessionUserID()
+	row, ok := s.deps.FindFriendship(currentUserID, shared.UserID(userID))
+	if !ok {
+		return fmt.Errorf("no friendship found to user %d", userID)
+	}
+	fmt.Println("Given: an accepted friendship exists and can be removed")
+	fmt.Printf("Input: friendship_id=%d from_user_id=%d to_user_id=%d\n", row.ID, currentUserID, userID)
+	fmt.Println("Action: DELETE /api/user/friends/:id")
+
+	path := fmt.Sprintf("/api/user/friends/%d", row.ID)
+	if err := s.DoRequestWithHeaders(http.MethodDelete, path, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iBlockUser(userID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: an authenticated user blocks another user")
+	fmt.Printf("Input: target_user_id=%d auth_header_present=%t\n", userID, authHeader != "")
+	fmt.Println("Action: POST /api/user/block/:id")
+
+	path := fmt.Sprintf("/api/user/block/%d", userID)
+	if err := s.doJSONRequestWithHeaders(http.MethodPost, path, nil, s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	pending, accepted, blocked := s.deps.FriendshipCounts()
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Printf("Mutation: pending=%d accepted=%d blocked=%d\n", pending, accepted, blocked)
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iUnblockUser(userID int64) error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: an authenticated user unblocks another user")
+	fmt.Printf("Input: target_user_id=%d auth_header_present=%t\n", userID, authHeader != "")
+	fmt.Println("Action: DELETE /api/user/block/:id")
+
+	path := fmt.Sprintf("/api/user/block/%d", userID)
+	if err := s.DoRequestWithHeaders(http.MethodDelete, path, s.authHeaders(authHeader)); err != nil {
 		return err
 	}
 
@@ -515,6 +800,41 @@ func (s *steps) mutualFriendshipRowsBetweenTheLoggedInUserAndUserShouldBothBe(us
 	if !match {
 		return fmt.Errorf("expected both rows to be %s, got forward=%s reverse=%s", status, forward.Status, reverse.Status)
 	}
+	return nil
+}
+
+func (s *steps) friendshipRowsBetweenTheLoggedInUserAndUserShouldNotExist(userID int64) error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	fmt.Println("Given: a friendship mutation should remove all rows between two users")
+	fmt.Printf("Input: current_user_id=%d other_user_id=%d\n", currentUserID, userID)
+	fmt.Println("Action: inspect both friendship directions")
+
+	if _, ok := s.deps.FindFriendship(currentUserID, shared.UserID(userID)); ok {
+		return fmt.Errorf("expected no friendship row from %d to %d", currentUserID, userID)
+	}
+	if _, ok := s.deps.FindFriendship(shared.UserID(userID), currentUserID); ok {
+		return fmt.Errorf("expected no friendship row from %d to %d", userID, currentUserID)
+	}
+	fmt.Println("Output: friendship_absent=true")
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (s *steps) friendshipRowFromUserToTheLoggedInUserShouldNotExist(userID int64) error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	fmt.Println("Given: a friendship mutation should remove a reverse directed row")
+	fmt.Printf("Input: from_user_id=%d to_user_id=%d\n", userID, currentUserID)
+	fmt.Println("Action: inspect reverse friendship direction")
+
+	if _, ok := s.deps.FindFriendship(shared.UserID(userID), currentUserID); ok {
+		return fmt.Errorf("expected no friendship row from %d to %d", userID, currentUserID)
+	}
+	fmt.Println("Output: reverse_row_absent=true")
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
 	return nil
 }
 

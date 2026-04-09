@@ -12,6 +12,7 @@ import (
 
 type FriendshipHandler struct {
 	getFriendsUseCase        *friendshipUseCase.GetFriendsUseCase
+	getBlockedUsersUseCase   *friendshipUseCase.GetBlockedUsersUseCase
 	applyFriendshipUseCase   *friendshipUseCase.ApplyFriendshipUseCase
 	acceptFriendshipUseCase  *friendshipUseCase.AcceptFriendshipUseCase
 	getFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase
@@ -24,6 +25,7 @@ type FriendshipHandler struct {
 
 func NewFriendshipHandler(
 	getFriendsUseCase *friendshipUseCase.GetFriendsUseCase,
+	getBlockedUsersUseCase *friendshipUseCase.GetBlockedUsersUseCase,
 	applyFriendshipUseCase *friendshipUseCase.ApplyFriendshipUseCase,
 	acceptFriendshipUseCase *friendshipUseCase.AcceptFriendshipUseCase,
 	getFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase,
@@ -35,6 +37,7 @@ func NewFriendshipHandler(
 ) *FriendshipHandler {
 	return &FriendshipHandler{
 		getFriendsUseCase:        getFriendsUseCase,
+		getBlockedUsersUseCase:   getBlockedUsersUseCase,
 		applyFriendshipUseCase:   applyFriendshipUseCase,
 		acceptFriendshipUseCase:  acceptFriendshipUseCase,
 		getFriendRequestsUseCase: getFriendRequestsUseCase,
@@ -44,6 +47,37 @@ func NewFriendshipHandler(
 		blockUserUseCase:         blockUserUseCase,
 		unblockUserUseCase:       unblockUserUseCase,
 	}
+}
+
+// @Summary Get blocked users list
+// @Description Get the current user's blocked users with name and avatar
+// @Tags User
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} FriendResponse
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/user/block [get]
+func (h *FriendshipHandler) getBlockedUsers(c *gin.Context) {
+	input := adapter.BuildEmptyInput(c)
+	out, err := h.getBlockedUsersUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleFriendshipError(c, err)
+		return
+	}
+
+	resp := make([]FriendResponse, 0, len(out.Blocked))
+	for _, f := range out.Blocked {
+		resp = append(resp, FriendResponse{
+			FriendshipID: f.FriendshipID,
+			UserID:       f.UserID,
+			Name:         f.Name,
+			Avatar:       f.Avatar,
+			Status:       f.Status,
+			CreatedAt:    f.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // @Summary Get friends list
@@ -311,6 +345,7 @@ func (h *FriendshipHandler) RegisterFriendshipRoutes(r *gin.RouterGroup) {
 	r.DELETE("/friends/:id", h.removeFriend)
 	r.GET("/friends/sent", h.getSentRequests)
 	r.DELETE("/friends/sent/:id", h.cancelSentRequest)
+	r.GET("/block", h.getBlockedUsers)
 	r.POST("/block/:id", h.blockUser)
 	r.DELETE("/block/:id", h.unblockUser)
 }

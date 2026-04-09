@@ -62,18 +62,27 @@ func (d *SKRDeps) RegisterCreateSenderKeyRequestUseCase() *e2eeUseCase.CreateSen
 	)
 }
 
-// SeedMember creates a participant + chat member for a user in a room.
-func (d *SKRDeps) SeedMember(userID sharedDomain.UserID, participantID participant.ID, memberID chatmember.ID, roomID chatroom.ID) {
+// SeedParticipant creates a participant for a user without adding room membership.
+func (d *SKRDeps) SeedParticipant(userID sharedDomain.UserID, participantID participant.ID) {
 	p := &participant.Participant{ID: participantID, Type: participant.UserType, UserID: &userID, CreatedAt: time.Now()}
 	d.participantRepo.byUserID[userID] = p
 	d.participantRepo.byID[participantID] = p
+}
 
+// SeedRoomMember creates only the room membership row for an existing participant.
+func (d *SKRDeps) SeedRoomMember(participantID participant.ID, memberID chatmember.ID, roomID chatroom.ID) {
 	m := &chatmember.ChatMember{ID: memberID, RoomID: roomID, ParticipantID: participantID}
 	d.chatMemberRepo.byID[memberID] = m
 	if d.chatMemberRepo.byRoomAndParticipant[roomID] == nil {
 		d.chatMemberRepo.byRoomAndParticipant[roomID] = map[participant.ID]*chatmember.ChatMember{}
 	}
 	d.chatMemberRepo.byRoomAndParticipant[roomID][participantID] = m
+}
+
+// SeedMember creates a participant + chat member for a user in a room.
+func (d *SKRDeps) SeedMember(userID sharedDomain.UserID, participantID participant.ID, memberID chatmember.ID, roomID chatroom.ID) {
+	d.SeedParticipant(userID, participantID)
+	d.SeedRoomMember(participantID, memberID, roomID)
 }
 
 // SeedProviderKey stores a sender key for the given member (provider already has a key).
@@ -86,10 +95,18 @@ func (d *SKRDeps) FindSKRRequest(requesterMemberID, providerMemberID chatmember.
 	return d.skrRepo.find(requesterMemberID, providerMemberID)
 }
 
+func (d *SKRDeps) PendingSKRCount(requesterMemberID, providerMemberID chatmember.ID) int {
+	return d.skrRepo.countPending(requesterMemberID, providerMemberID)
+}
+
+func (d *SKRDeps) FulfilledSKRCount(requesterMemberID, providerMemberID chatmember.ID) int {
+	return d.skrRepo.countFulfilled(requesterMemberID, providerMemberID)
+}
+
 // ─── participant repo ─────────────────────────────────────────────────────────
 
 type skrParticipantRepo struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	byUserID map[sharedDomain.UserID]*participant.Participant
 	byID     map[participant.ID]*participant.Participant
 }
@@ -297,6 +314,26 @@ func (r *skrSenderKeyRequestRepo) find(requesterID, providerID chatmember.ID) (*
 	}
 	copied := *req
 	return &copied, true
+}
+
+func (r *skrSenderKeyRequestRepo) countPending(requesterID, providerID chatmember.ID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	req, ok := r.records[r.key(requesterID, providerID)]
+	if !ok || req.FulfilledAt != nil {
+		return 0
+	}
+	return 1
+}
+
+func (r *skrSenderKeyRequestRepo) countFulfilled(requesterID, providerID chatmember.ID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	req, ok := r.records[r.key(requesterID, providerID)]
+	if !ok || req.FulfilledAt == nil {
+		return 0
+	}
+	return 1
 }
 
 // ─── member sender key repo ───────────────────────────────────────────────────

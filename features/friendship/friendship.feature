@@ -80,3 +80,74 @@ Feature: Friendship search and requests
     Then the response status should be 200
     And a direct chat room should exist between the logged in user and user 607
     And both members should have role "owner" in that direct room
+
+  Scenario: Reject removes an inbound pending friend request
+    Given a searchable user "Iris" exists with id 608, account "iris_account", public id "iris-public", and avatar "avatars/iris.png"
+    And an inbound pending friend request exists from user 608
+    When I request incoming friend requests
+    Then the response status should be 200
+    And the incoming requests response should include "Iris"
+    When I reject the inbound friend request from user 608
+    Then the response status should be 200
+    And friendship rows between the logged in user and user 608 should not exist
+    When I request incoming friend requests
+    Then the response status should be 200
+    And the incoming requests response should not include user 608
+
+  Scenario: Cancel removes a sent pending friend request
+    Given a searchable user "Kai" exists with id 609, account "kai_account", public id "kai-public", and avatar "avatars/kai.png"
+    And I have sent a pending friend request to user 609
+    When I request sent friend requests
+    Then the response status should be 200
+    And the sent requests response should include "Kai"
+    When I cancel the sent friend request to user 609
+    Then the response status should be 200
+    And friendship rows between the logged in user and user 609 should not exist
+    When I request sent friend requests
+    Then the response status should be 200
+    And the sent requests response should not include user 609
+
+  Scenario: Unfriend removes both accepted friendship rows
+    Given a searchable user "Aki" exists with id 610, account "aki_account", public id "aki-public", and avatar "avatars/aki.png"
+    And I am accepted friends with user 610
+    When I request my friends
+    Then the response status should be 200
+    And the friends response should include "Aki" with status "accepted"
+    When I unfriend user 610
+    Then the response status should be 200
+    And friendship rows between the logged in user and user 610 should not exist
+    When I request my friends
+    Then the response status should be 200
+    And the friends response should not include user 610
+
+  Scenario: Block and unblock move a relationship into the blocked list
+    Given a searchable user "Sora" exists with id 611, account "sora_account", public id "sora-public", and avatar "avatars/sora.png"
+    And I am accepted friends with user 611
+    When I block user 611
+    Then the response status should be 200
+    And friendship row from user 611 to the logged in user should not exist
+    When I request blocked users
+    Then the response status should be 200
+    And the blocked response should include "Sora" with status "blocked"
+    When I search friends by name "Sora"
+    Then the response status should be 200
+    And search results should include "Sora" with public id "sora-public", avatar "avatars/sora.png", and friendship status "blocked"
+    When I unblock user 611
+    Then the response status should be 200
+    When I request blocked users
+    Then the response status should be 200
+    And the blocked response should not include user 611
+
+  Scenario: Accept returns not found for an unknown friendship id
+    When I accept friendship id 9999
+    Then the response status should be 404
+    And the response error code should be "NOT_FOUND"
+
+  Scenario: Accept rejects an already accepted friendship
+    Given a searchable user "Mio" exists with id 612, account "mio_account", public id "mio-public", and avatar "avatars/mio.png"
+    And an inbound pending friend request exists from user 612
+    When I accept the inbound friend request from user 612
+    Then the response status should be 200
+    When I accept the inbound friend request from user 612
+    Then the response status should be 400
+    And the response error code should be "FRIENDSHIP_NOT_PENDING"

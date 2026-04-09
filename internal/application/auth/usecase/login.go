@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
@@ -14,6 +15,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	domainSecurity "github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -33,6 +35,7 @@ type LoginOutput struct {
 type LoginUseCase struct {
 	uow                transaction.UnitOfWork
 	hasher             security.Hasher
+	loginLimiter       security.LoginRateLimiter
 	sessionManager     port.SessionManager
 	accountRepo        account.Repository
 	userRepo           user.Repository
@@ -46,6 +49,7 @@ type LoginUseCase struct {
 func NewLoginUseCase(
 	uow transaction.UnitOfWork,
 	hasher security.Hasher,
+	loginLimiter security.LoginRateLimiter,
 	sessionManager port.SessionManager,
 	accountRepo account.Repository,
 	userRepo user.Repository,
@@ -58,6 +62,7 @@ func NewLoginUseCase(
 	return &LoginUseCase{
 		uow:                uow,
 		hasher:             hasher,
+		loginLimiter:       loginLimiter,
 		sessionManager:     sessionManager,
 		accountRepo:        accountRepo,
 		userRepo:           userRepo,
@@ -70,6 +75,11 @@ func NewLoginUseCase(
 }
 
 func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInput[LoginInput]) (LoginOutput, error) {
+	normalizedIdentifier := normalizeLoginIdentifier(input.Data.Identifier)
+
+	if err := uc.checkLoginAttempt(ctx, input.Base.Request.IP.String(), normalizedIdentifier); err != nil {
+		return LoginOutput{}, err
+	}
 
 	// Begin transaction
 	ctx, tx, err := uc.uow.Begin(ctx)
@@ -84,9 +94,10 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	}()
 
 	// Find an account by identifier (email or account name)
-	accountData, err := uc.findAccount(ctx, input.Data.Identifier)
+	accountData, err := uc.findAccount(ctx, normalizedIdentifier)
 	if err != nil {
 		if errors.Is(err, account.ErrAccountNotFound) {
+			uc.recordFailedLoginAttempt(ctx, input.Base.Request.IP.String(), normalizedIdentifier)
 			return LoginOutput{}, ErrAccountNotFound
 		}
 		return LoginOutput{}, ErrLoginFailed
@@ -99,6 +110,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 
 	// Verify password
 	if !uc.hasher.Verify(input.Data.Password, accountData.Password) {
+		uc.recordFailedLoginAttempt(ctx, input.Base.Request.IP.String(), normalizedIdentifier)
 		return LoginOutput{}, ErrPasswordError
 	}
 
@@ -189,6 +201,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrLoginFailed
 	}
 	committed = true
+	uc.recordSuccessfulLoginAttempt(ctx, input.Base.Request.IP.String(), normalizedIdentifier)
 
 	// Send login notification email (fire-and-forget)
 	if config.Env("APP_ENV", "dev") != "dev" {
@@ -211,7 +224,8 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 
 func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*account.Account, error) {
 	if emailAddr, err := shared.ParseEmail(identifier); err == nil {
-		acc, err := uc.accountRepo.FindByEmail(ctx, emailAddr)
+		normalizedEmail := shared.EmailAddress(strings.ToLower(string(emailAddr)))
+		acc, err := uc.accountRepo.FindByEmail(ctx, normalizedEmail)
 		if err == nil {
 			return acc, nil
 		}
@@ -220,6 +234,36 @@ func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*ac
 		}
 	}
 	return uc.accountRepo.FindByAccountName(ctx, identifier)
+}
+
+func (uc *LoginUseCase) checkLoginAttempt(ctx context.Context, ip, identifier string) error {
+	if uc.loginLimiter == nil || identifier == "" {
+		return nil
+	}
+
+	err := uc.loginLimiter.CheckLoginAttempt(ctx, ip, identifier)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, domainSecurity.ErrRateLimitExceeded):
+		return ErrLoginLocked
+	default:
+		return ErrLoginFailed
+	}
+}
+
+func (uc *LoginUseCase) recordFailedLoginAttempt(ctx context.Context, ip, identifier string) {
+	if uc.loginLimiter == nil || identifier == "" {
+		return
+	}
+	_ = uc.loginLimiter.RecordLoginAttempt(ctx, ip, identifier, false)
+}
+
+func (uc *LoginUseCase) recordSuccessfulLoginAttempt(ctx context.Context, ip, identifier string) {
+	if uc.loginLimiter == nil || identifier == "" {
+		return
+	}
+	_ = uc.loginLimiter.RecordLoginAttempt(ctx, ip, identifier, true)
 }
 
 func (uc *LoginUseCase) ensureParticipant(ctx context.Context, userID shared.UserID) error {
@@ -259,4 +303,12 @@ func (uc *LoginUseCase) castStatusError(status account.Status) error {
 	default:
 		return ErrLoginFailed
 	}
+}
+
+func normalizeLoginIdentifier(identifier string) string {
+	trimmed := strings.TrimSpace(identifier)
+	if emailAddr, err := shared.ParseEmail(trimmed); err == nil {
+		return strings.ToLower(string(emailAddr))
+	}
+	return trimmed
 }

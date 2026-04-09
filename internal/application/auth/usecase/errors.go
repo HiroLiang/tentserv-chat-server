@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrRegisterFailed = errors.New("failed to register account")
 	ErrLoginFailed    = errors.New("failed to login")
+	ErrLoginLocked    = errors.New("login is temporarily locked")
 	ErrLogoutFailed   = errors.New("failed to logout")
 
 	ErrInvalidDeviceID = errors.New("invalid device id")

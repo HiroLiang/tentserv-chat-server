@@ -67,6 +67,7 @@ type UseCases struct {
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
 
 	GetFriendsUseCase        *friendshipUseCase.GetFriendsUseCase
+	GetBlockedUsersUseCase   *friendshipUseCase.GetBlockedUsersUseCase
 	ApplyFriendshipUseCase   *friendshipUseCase.ApplyFriendshipUseCase
 	AcceptFriendshipUseCase  *friendshipUseCase.AcceptFriendshipUseCase
 	GetFriendRequestsUseCase *friendshipUseCase.GetFriendRequestsUseCase
@@ -100,7 +101,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			},
 		),
 		LoginUseCase: authUseCase.NewLoginUseCase(
-			deps.Uow, deps.PwdHasher, deps.SessionManager,
+			deps.Uow, deps.PwdHasher, deps.LoginRateLimiter, deps.SessionManager,
 			deps.AccountRepo, deps.UserRepo, deps.UserRoleRepo,
 			deps.DeviceRepo, deps.ParticipantRepository,
 			deps.EmailService,
@@ -271,6 +272,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		),
 
 		GetFriendsUseCase:      friendshipUseCase.NewGetFriendsUseCase(deps.FriendshipRepo, deps.UserRepo),
+		GetBlockedUsersUseCase: friendshipUseCase.NewGetBlockedUsersUseCase(deps.FriendshipRepo, deps.UserRepo),
 		ApplyFriendshipUseCase: friendshipUseCase.NewApplyFriendshipUseCase(deps.FriendshipRepo),
 		AcceptFriendshipUseCase: friendshipUseCase.NewAcceptFriendshipUseCase(
 			deps.Uow,

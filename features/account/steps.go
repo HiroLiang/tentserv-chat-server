@@ -2,6 +2,7 @@ package account
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	infraSecurity "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
@@ -19,12 +21,13 @@ import (
 
 type steps struct {
 	*bddsupport.APITestContext
-	deps  *Deps
-	start time.Time
+	deps             *Deps
+	start            time.Time
+	rememberedTokens map[string]string
 }
 
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps) {
-	s := &steps{APITestContext: apiCtx, deps: deps}
+	s := &steps{APITestContext: apiCtx, deps: deps, rememberedTokens: map[string]string{}}
 
 	ctx.Step(`^account registration state is clean$`, s.accountRegistrationStateIsClean)
 	ctx.Step(`^the registration rate limit is exceeded$`, s.theRegistrationRateLimitIsExceeded)
@@ -50,11 +53,18 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the login account has an existing participant$`, s.theLoginAccountHasAnExistingParticipant)
 	ctx.Step(`^I login with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iLoginWithIdentifier)
 	ctx.Step(`^I login with an invalid payload$`, s.iLoginWithAnInvalidPayload)
+	ctx.Step(`^I attempt login (\d+) times with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iAttemptLoginTimesWithIdentifierPasswordAndDevice)
 	ctx.Step(`^login response should include a bearer token$`, s.loginResponseShouldIncludeABearerToken)
+	ctx.Step(`^I remember the login token as "([^"]*)"$`, s.iRememberTheLoginTokenAs)
 	ctx.Step(`^login mutation should include session, device link, participant, and login event$`, s.loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent)
 	ctx.Step(`^login mutation should reuse the existing participant$`, s.loginMutationShouldReuseTheExistingParticipant)
 	ctx.Step(`^login mutation should stop before session creation$`, s.loginMutationShouldStopBeforeSessionCreation)
+	ctx.Step(`^the login identifier "([^"]*)" should be locked$`, s.theLoginIdentifierShouldBeLocked)
 	ctx.Step(`^I request my auth profile using the login token and device "([^"]*)"$`, s.iRequestMyAuthProfileUsingTheLoginToken)
+	ctx.Step(`^I request my auth profile using remembered login token "([^"]*)" and device "([^"]*)"$`, s.iRequestMyAuthProfileUsingRememberedLoginTokenAndDevice)
+	ctx.Step(`^I logout using remembered login token "([^"]*)" and device "([^"]*)"$`, s.iLogoutUsingRememberedLoginTokenAndDevice)
+	ctx.Step(`^logout mutation should revoke the remembered login token "([^"]*)"$`, s.logoutMutationShouldRevokeTheRememberedLoginToken)
+	ctx.Step(`^the remembered login token "([^"]*)" is revoked$`, s.theRememberedLoginTokenIsRevoked)
 	ctx.Step(`^auth profile response should describe the current login user$`, s.authProfileResponseShouldDescribeTheCurrentLoginUser)
 }
 
@@ -392,6 +402,7 @@ func (a *steps) theEmailVerificationMutationShouldNotUpdateAnAccount() error {
 
 func (a *steps) loginStateIsClean() error {
 	a.start = time.Now()
+	a.rememberedTokens = map[string]string{}
 	fmt.Println("Given: login state is clean")
 	fmt.Printf("Input: existing_accounts=%d sessions=%d participants=%d\n",
 		len(a.deps.accountRepo.accountsByID), len(a.deps.sessionManager.sessions), len(a.deps.participantRepo.participantsByUser))
@@ -523,6 +534,32 @@ func (a *steps) iLoginWithAnInvalidPayload() error {
 	return nil
 }
 
+func (a *steps) iAttemptLoginTimesWithIdentifierPasswordAndDevice(attempts int, identifier, password, deviceID string) error {
+	a.start = time.Now()
+	fmt.Println("Given: login HTTP endpoint is available for repeated attempts")
+	fmt.Printf("Input: attempts=%d identifier=%s password_present=%t device_id=%s\n", attempts, identifier, password != "", deviceID)
+	fmt.Println("Action: repeat POST /api/auth/login")
+
+	for i := 0; i < attempts; i++ {
+		payload := map[string]string{
+			"identifier": identifier,
+			"password":   password,
+			"device_id":  deviceID,
+		}
+		if err := a.DoJSONRequestWithHeaders(http.MethodPost, "/api/auth/login", payload, map[string]string{
+			"User-Agent": "TentservDesktop/BDD",
+		}); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("Output: last_status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: login_check_calls=%d login_record_calls=%d failure_count=%d\n",
+		a.deps.loginLimiter.checkCalls, a.deps.loginLimiter.recordCalls, a.deps.loginLimiter.count(normalizeLoginIdentifierForBDD(identifier)))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
 func (a *steps) loginResponseShouldIncludeABearerToken() error {
 	start := time.Now()
 	fmt.Println("Given: login response should contain a session token header")
@@ -539,6 +576,24 @@ func (a *steps) loginResponseShouldIncludeABearerToken() error {
 	if !hasBearer {
 		return fmt.Errorf("expected Authorization bearer header, got present=%t", header != "")
 	}
+	return nil
+}
+
+func (a *steps) iRememberTheLoginTokenAs(label string) error {
+	start := time.Now()
+	fmt.Println("Given: the last login response returned an Authorization header")
+	fmt.Printf("Input: label=%s\n", label)
+	fmt.Println("Action: store the bearer token for later requests")
+
+	header := a.Response.Header.Get("Authorization")
+	if header == "" {
+		return fmt.Errorf("no Authorization header to remember")
+	}
+	a.rememberedTokens[label] = header
+
+	fmt.Printf("Output: token_saved=%t saved_tokens=%d\n", a.rememberedTokens[label] != "", len(a.rememberedTokens))
+	fmt.Println("Mutation: remembered_token_saved=true")
+	fmt.Printf("Duration: %s\n", time.Since(start))
 	return nil
 }
 
@@ -608,6 +663,26 @@ func (a *steps) loginMutationShouldStopBeforeSessionCreation() error {
 	return nil
 }
 
+func (a *steps) theLoginIdentifierShouldBeLocked(identifier string) error {
+	start := time.Now()
+	normalizedIdentifier := normalizeLoginIdentifierForBDD(identifier)
+	fmt.Println("Given: repeated failed logins should eventually lock the identifier")
+	fmt.Printf("Input: identifier=%s normalized_identifier=%s\n", identifier, normalizedIdentifier)
+	fmt.Println("Action: inspect login limiter failure count")
+
+	failureCount := a.deps.loginLimiter.count(normalizedIdentifier)
+	locked := failureCount >= 5
+
+	fmt.Printf("Output: failure_count=%d locked=%t\n", failureCount, locked)
+	fmt.Printf("Mutation: login_check_calls=%d login_record_calls=%d\n", a.deps.loginLimiter.checkCalls, a.deps.loginLimiter.recordCalls)
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !locked {
+		return fmt.Errorf("expected identifier %s to be locked after failed attempts, got count=%d", normalizedIdentifier, failureCount)
+	}
+	return nil
+}
+
 func (a *steps) iRequestMyAuthProfileUsingTheLoginToken(deviceID string) error {
 	a.start = time.Now()
 	fmt.Println("Given: a login bearer token was returned")
@@ -618,7 +693,47 @@ func (a *steps) iRequestMyAuthProfileUsingTheLoginToken(deviceID string) error {
 	if authHeader == "" {
 		return fmt.Errorf("no Authorization header from login response")
 	}
-	if err := a.DoRequestWithHeaders(http.MethodGet, "/api/auth/profile", map[string]string{
+	if err := a.doAuthProfileRequest(authHeader, deviceID); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: session_find_calls=%d\n", a.deps.sessionManager.findCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iRequestMyAuthProfileUsingRememberedLoginTokenAndDevice(label, deviceID string) error {
+	a.start = time.Now()
+	fmt.Println("Given: a remembered login bearer token is available")
+	fmt.Printf("Input: label=%s device_id=%s\n", label, deviceID)
+	fmt.Println("Action: GET /api/auth/profile with remembered token")
+
+	authHeader, ok := a.rememberedTokens[label]
+	if !ok {
+		return fmt.Errorf("no remembered token for label %q", label)
+	}
+	if err := a.doAuthProfileRequest(authHeader, deviceID); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: session_find_calls=%d\n", a.deps.sessionManager.findCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iLogoutUsingRememberedLoginTokenAndDevice(label, deviceID string) error {
+	a.start = time.Now()
+	fmt.Println("Given: a remembered login bearer token is available")
+	fmt.Printf("Input: label=%s device_id=%s\n", label, deviceID)
+	fmt.Println("Action: POST /api/auth/logout")
+
+	authHeader, ok := a.rememberedTokens[label]
+	if !ok {
+		return fmt.Errorf("no remembered token for label %q", label)
+	}
+	if err := a.DoRequestWithHeaders(http.MethodPost, "/api/auth/logout", map[string]string{
 		"Authorization": authHeader,
 		"X-Device-ID":   deviceID,
 	}); err != nil {
@@ -626,8 +741,54 @@ func (a *steps) iRequestMyAuthProfileUsingTheLoginToken(deviceID string) error {
 	}
 
 	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
-	fmt.Printf("Mutation: session_find_calls=%d\n", a.deps.sessionManager.findCalls)
+	fmt.Printf("Mutation: session_revoke_calls=%d remaining_sessions=%d\n", a.deps.sessionManager.revokeCalls, len(a.deps.sessionManager.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) logoutMutationShouldRevokeTheRememberedLoginToken(label string) error {
+	start := time.Now()
+	fmt.Println("Given: logout should revoke the selected bearer token")
+	fmt.Printf("Input: label=%s\n", label)
+	fmt.Println("Action: inspect session manager state")
+
+	rawToken, err := rawRememberedAccessToken(a.rememberedTokens[label])
+	if err != nil {
+		return err
+	}
+	_, exists := a.deps.sessionManager.sessions[auth.AccessToken(rawToken)]
+
+	fmt.Printf("Output: token_removed=%t revoke_calls=%d\n", !exists, a.deps.sessionManager.revokeCalls)
+	fmt.Printf("Mutation: remaining_sessions=%d\n", len(a.deps.sessionManager.sessions))
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if exists || a.deps.sessionManager.revokeCalls == 0 {
+		return fmt.Errorf("expected remembered token %q to be revoked", label)
+	}
+	return nil
+}
+
+func (a *steps) theRememberedLoginTokenIsRevoked(label string) error {
+	start := time.Now()
+	fmt.Println("Given: a remembered login token exists and should be revoked manually")
+	fmt.Printf("Input: label=%s\n", label)
+	fmt.Println("Action: revoke the remembered token in the fake session manager")
+
+	authHeader, ok := a.rememberedTokens[label]
+	if !ok {
+		return fmt.Errorf("no remembered token for label %q", label)
+	}
+	rawToken, err := rawRememberedAccessToken(authHeader)
+	if err != nil {
+		return err
+	}
+	if err := a.deps.sessionManager.Revoke(context.Background(), auth.AccessToken(rawToken)); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: revoke_calls=%d remaining_sessions=%d\n", a.deps.sessionManager.revokeCalls, len(a.deps.sessionManager.sessions))
+	fmt.Println("Mutation: token_revoked=true")
+	fmt.Printf("Duration: %s\n", time.Since(start))
 	return nil
 }
 
@@ -681,4 +842,29 @@ func (a *steps) firstAccountStatus() (domainaccount.Status, bool) {
 		return acc.Status, true
 	}
 	return "", false
+}
+
+func (a *steps) doAuthProfileRequest(authHeader, deviceID string) error {
+	return a.DoRequestWithHeaders(http.MethodGet, "/api/auth/profile", map[string]string{
+		"Authorization": authHeader,
+		"X-Device-ID":   deviceID,
+	})
+}
+
+func normalizeLoginIdentifierForBDD(identifier string) string {
+	trimmed := strings.TrimSpace(identifier)
+	if emailAddr, err := shared.ParseEmail(trimmed); err == nil {
+		return strings.ToLower(string(emailAddr))
+	}
+	return trimmed
+}
+
+func rawRememberedAccessToken(authHeader string) (string, error) {
+	if authHeader == "" {
+		return "", fmt.Errorf("remembered Authorization header is empty")
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", fmt.Errorf("expected Bearer header, got %q", authHeader)
+	}
+	return strings.TrimPrefix(authHeader, "Bearer "), nil
 }

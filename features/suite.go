@@ -49,7 +49,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			bddsupport.UOW{},
 			hasher,
 		)
-		loginUseCase, getProfileUseCase := accountBDD.LoginUseCases(bddsupport.UOW{}, hasher)
+		loginUseCase, logoutUseCase, getProfileUseCase := accountBDD.LoginUseCases(bddsupport.UOW{}, hasher)
 		deviceRegisterUseCase, deviceUpdateUseCase := deviceBDD.RegisterUseCases(bddsupport.UOW{})
 		e2eeUseCases := e2eeBDD.RegisterUseCases()
 		createSKRUseCase := e2eeBDD.SKR.RegisterCreateSenderKeyRequestUseCase()
@@ -58,7 +58,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
 		router.Use(middleware.ContextMiddleware())
-		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, loginUseCase, nil, getProfileUseCase, verifyEmailUseCase, resendVerifyEmailUseCase, accountBDD.RegisterLimiter())
+		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, loginUseCase, logoutUseCase, getProfileUseCase, verifyEmailUseCase, resendVerifyEmailUseCase, accountBDD.RegisterLimiter())
 		authHandler.RegisterAuthRoutes(router.Group("/api/auth"))
 		deviceRoutes := deviceHandler.NewDeviceHandler(deviceRegisterUseCase, nil, deviceUpdateUseCase, nil, nil, nil)
 		deviceRoutes.RegisterPublicDeviceRoutes(router.Group("/api/device"))
@@ -71,6 +71,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		).RegisterUserRoutes(router.Group("/api/user"))
 		friendshipHandler.NewFriendshipHandler(
 			friendshipUseCases.GetFriends,
+			friendshipUseCases.GetBlockedUsers,
 			friendshipUseCases.ApplyFriendship,
 			friendshipUseCases.AcceptFriendship,
 			friendshipUseCases.GetFriendRequests,

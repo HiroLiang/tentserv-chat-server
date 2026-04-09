@@ -2,11 +2,15 @@ package e2ee
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	accountfeatures "github.com/HiroLiang/tentserv-chat-server/features/account"
@@ -61,11 +65,13 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I upload E2EE signed pre-key "([^"]*)" with key id (\d+) for device "([^"]*)"$`, s.iUploadE2EESignedPreKeyWithKeyIDForDevice)
 	ctx.Step(`^I upload (\d+) E2EE one-time pre-keys starting at key id (\d+) for device "([^"]*)"$`, s.iUploadE2EEOneTimePreKeysStartingAtKeyIDForDevice)
 	ctx.Step(`^E2EE key status should expose identity "([^"]*)", signed pre-key "([^"]*)", key id (\d+), and (\d+) OTP keys for device "([^"]*)"$`, s.e2eeKeyStatusShouldExposeIdentitySignedPreKeyKeyIDAndOTPKeysForDevice)
+	ctx.Step(`^the E2EE identity key response fingerprint should equal SHA-256 of key "([^"]*)"$`, s.theE2EEIdentityKeyResponseFingerprintShouldEqualSHA256OfKey)
 	ctx.Step(`^the E2EE key status check should not consume OTP keys$`, s.theE2EEKeyStatusCheckShouldNotConsumeOTPKeys)
 	ctx.Step(`^I upload an invalid E2EE identity key for device "([^"]*)"$`, s.iUploadAnInvalidE2EEIdentityKeyForDevice)
 	ctx.Step(`^I upload an invalid E2EE signed pre-key for device "([^"]*)"$`, s.iUploadAnInvalidE2EESignedPreKeyForDevice)
 	ctx.Step(`^I upload invalid E2EE one-time pre-keys for device "([^"]*)"$`, s.iUploadInvalidE2EEOneTimePreKeysForDevice)
 	ctx.Step(`^E2EE key repositories should remain empty$`, s.e2eeKeyRepositoriesShouldRemainEmpty)
+	ctx.Step(`^I call the E2EE endpoint "([^"]*)" with "([^"]*)" authentication$`, s.iCallTheE2EEEndpointWithAuthentication)
 	ctx.Step(`^I request E2EE key bundle for the logged in user and device "([^"]*)"$`, s.iRequestE2EEKeyBundleForTheLoggedInUserAndDevice)
 	ctx.Step(`^E2EE key bundle should include OTP key id (\d+) and server should have (\d+) OTP keys for device "([^"]*)"$`, s.e2eeKeyBundleShouldIncludeOTPKeyIDAndServerShouldHaveOTPKeysForDevice)
 	ctx.Step(`^E2EE key bundle should omit OTP and server should have (\d+) OTP keys for device "([^"]*)"$`, s.e2eeKeyBundleShouldOmitOTPAndServerShouldHaveOTPKeysForDevice)
@@ -77,9 +83,11 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with no existing sender key$`, s.roomMemberSetupSameRoomNoKey)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with an existing sender key for provider$`, s.roomMemberSetupSameRoomWithKey)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) where provider is in a different room$`, s.roomMemberSetupDifferentRoom)
+	ctx.Step(`^a room member setup exists with room id (\d+), provider member id (\d+) in that room, and the caller has no room membership$`, s.roomMemberSetupCallerNotInRoom)
 	ctx.Step(`^I create a sender key request for room (\d+) and provider member (\d+)$`, s.iCreateASenderKeyRequestForRoomAndProviderMember)
 	ctx.Step(`^a sender key request row should exist from member (\d+) to provider (\d+)$`, s.aSenderKeyRequestRowShouldExist)
 	ctx.Step(`^no sender key request row should exist from member (\d+) to provider (\d+)$`, s.noSenderKeyRequestRowShouldExist)
+	ctx.Step(`^pending sender key request count from member (\d+) to provider (\d+) should be (\d+)$`, s.pendingSenderKeyRequestCountFromMemberToProviderShouldBe)
 }
 
 func (s *steps) e2eeKeyBootstrapStateIsClean() error {
@@ -316,6 +324,41 @@ func (s *steps) e2eeKeyStatusShouldExposeIdentitySignedPreKeyKeyIDAndOTPKeysForD
 	return nil
 }
 
+func (s *steps) theE2EEIdentityKeyResponseFingerprintShouldEqualSHA256OfKey(keyName string) error {
+	start := time.Now()
+	fmt.Println("Given: identity key upload returns a deterministic fingerprint")
+	fmt.Printf("Input: key_name=%s\n", keyName)
+	fmt.Println("Action: decode upload response and compare fingerprint")
+
+	var body struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	keyBytes, err := base64.StdEncoding.DecodeString(namedKeyMaterial(keyName, 32))
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(keyBytes)
+	expected := hex.EncodeToString(sum[:])
+	isLowerHex64, err := regexp.MatchString("^[0-9a-f]{64}$", body.Fingerprint)
+	if err != nil {
+		return err
+	}
+	matches := isLowerHex64 && body.Fingerprint == expected
+
+	fmt.Printf("Output: fingerprint_len=%d lowercase_hex_64=%t match=%t\n",
+		len(body.Fingerprint), isLowerHex64, matches)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !matches {
+		return fmt.Errorf("expected fingerprint %s, got %s", expected, body.Fingerprint)
+	}
+	return nil
+}
+
 func (s *steps) theE2EEKeyStatusCheckShouldNotConsumeOTPKeys() error {
 	start := time.Now()
 	fmt.Println("Given: key status must be non-consuming")
@@ -394,6 +437,55 @@ func (s *steps) e2eeKeyRepositoriesShouldRemainEmpty() error {
 	if !empty {
 		return fmt.Errorf("expected E2EE repositories to remain empty, got identity=%d signed=%d otp=%d", identity, signed, otp)
 	}
+	return nil
+}
+
+func (s *steps) iCallTheE2EEEndpointWithAuthentication(endpoint, authMode string) error {
+	s.start = time.Now()
+	deviceID := s.accountBDD.LastSessionDeviceID().String()
+	if deviceID == "" {
+		return fmt.Errorf("no logged-in device available for endpoint call")
+	}
+
+	headers := map[string]string{
+		"X-Device-ID": deviceID,
+	}
+	switch authMode {
+	case "no token":
+	case "revoked token":
+		authHeader, err := s.authorizationHeader()
+		if err != nil {
+			return err
+		}
+		if err := s.accountBDD.RevokeLastAccessToken(); err != nil {
+			return err
+		}
+		headers["Authorization"] = authHeader
+	default:
+		return fmt.Errorf("unsupported auth mode %q", authMode)
+	}
+
+	method, path, payload, err := s.e2eeEndpointRequest(endpoint, deviceID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Given: a protected E2EE endpoint is invoked with invalid authentication")
+	fmt.Printf("Input: endpoint=%s auth_mode=%s method=%s device_id=%s payload_present=%t\n",
+		endpoint, authMode, method, deviceID, payload != nil)
+	fmt.Printf("Action: %s %s\n", method, path)
+
+	if payload != nil {
+		if err := s.doJSONRequestWithHeaders(method, path, payload, headers); err != nil {
+			return err
+		}
+	} else if err := s.DoRequestWithHeaders(method, path, headers); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
 	return nil
 }
 
@@ -495,6 +587,64 @@ func (s *steps) e2eeKeyBundleShouldOmitOTPAndServerShouldHaveOTPKeysForDevice(ex
 	return nil
 }
 
+func (s *steps) e2eeEndpointRequest(endpoint, deviceID string) (method string, path string, payload map[string]any, err error) {
+	userID := s.accountBDD.LastSessionUserID()
+	switch endpoint {
+	case "identity-key":
+		return http.MethodPost, "/api/e2ee/identity-key", map[string]any{
+			"device_id":       deviceID,
+			"public_key":      namedKeyMaterial("alpha", 32),
+			"sign_public_key": namedSignKeyMaterial("alpha", 32),
+		}, nil
+	case "signed-prekey":
+		return http.MethodPost, "/api/e2ee/signed-prekey", map[string]any{
+			"device_id":  deviceID,
+			"key_id":     1,
+			"public_key": namedSignedPreKeyMaterial("alpha", 32),
+			"signature":  namedSignatureMaterial("alpha", 64),
+		}, nil
+	case "otp-prekeys":
+		return http.MethodPost, "/api/e2ee/otp-prekeys", map[string]any{
+			"device_id": deviceID,
+			"keys": []map[string]any{{
+				"key_id":     1,
+				"public_key": otpKeyMaterial(1, 32),
+			}},
+		}, nil
+	case "otp-prekeys-count":
+		return http.MethodGet, fmt.Sprintf("/api/e2ee/otp-prekeys/count?device_id=%s", deviceID), nil, nil
+	case "key-bundle":
+		if userID == 0 {
+			return "", "", nil, fmt.Errorf("no logged-in user id available for key-bundle")
+		}
+		return http.MethodGet, fmt.Sprintf("/api/e2ee/key-bundle/%d?device_id=%s", userID, deviceID), nil, nil
+	case "key-status":
+		if userID == 0 {
+			return "", "", nil, fmt.Errorf("no logged-in user id available for key-status")
+		}
+		return http.MethodGet, fmt.Sprintf("/api/e2ee/key-status/%d?device_id=%s", userID, deviceID), nil, nil
+	case "key-policy":
+		return http.MethodGet, "/api/e2ee/key-policy", nil, nil
+	case "sender-key":
+		return http.MethodPost, "/api/e2ee/sender-key", map[string]any{
+			"room_id":              1,
+			"sender_key_public":    "sender-key-public",
+			"distribution_message": "distribution-message",
+		}, nil
+	case "sender-keys":
+		return http.MethodGet, "/api/e2ee/sender-keys/1", nil, nil
+	case "sender-key-distributions":
+		return http.MethodGet, "/api/e2ee/sender-key-distributions/1", nil, nil
+	case "sender-key-request":
+		return http.MethodPost, "/api/e2ee/sender-key-request", map[string]any{
+			"room_id":            1,
+			"provider_member_id": 202,
+		}, nil
+	default:
+		return "", "", nil, fmt.Errorf("unsupported E2EE endpoint %q", endpoint)
+	}
+}
+
 func (s *steps) e2eeOTPReplenishEventShouldBeQueuedForDevice(deviceID string) error {
 	start := time.Now()
 	fmt.Println("Given: OTP count is below the replenish threshold after key-bundle consumption")
@@ -546,18 +696,23 @@ func (s *steps) noE2EEOTPReplenishEventShouldBeQueued() error {
 }
 
 func (s *steps) authorizationHeader() (string, error) {
+	if s.Response == nil {
+		if s.authHeader != "" {
+			return s.authHeader, nil
+		}
+		return "", fmt.Errorf("no login response available")
+	}
+	if header := s.Response.Header.Get("Authorization"); header != "" {
+		if !strings.HasPrefix(header, "Bearer ") {
+			header = "Bearer " + header
+		}
+		s.authHeader = header
+		return header, nil
+	}
 	if s.authHeader != "" {
 		return s.authHeader, nil
 	}
-	if s.Response == nil {
-		return "", fmt.Errorf("no login response available")
-	}
-	header := s.Response.Header.Get("Authorization")
-	if header == "" {
-		return "", fmt.Errorf("no Authorization header from login response")
-	}
-	s.authHeader = header
-	return header, nil
+	return "", fmt.Errorf("no Authorization header from latest response")
 }
 
 func (s *steps) authHeaders(authHeader, deviceID string) map[string]string {
@@ -683,6 +838,29 @@ func (s *steps) roomMemberSetupDifferentRoom(roomID, callerMemberID, providerMem
 	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID+100, false)
 }
 
+func (s *steps) roomMemberSetupCallerNotInRoom(roomID, providerMemberID int64) error {
+	s.start = time.Now()
+	callerUserID := s.accountBDD.LastSessionUserID()
+	if callerUserID == 0 {
+		return fmt.Errorf("no logged in user available for room member setup")
+	}
+
+	callerPID := participant.ID(roomID + 5000)
+	providerUID := shared.UserID(providerMemberID + 2000)
+	providerPID := participant.ID(providerMemberID + 1000)
+
+	s.deps.SKR.SeedParticipant(callerUserID, callerPID)
+	s.deps.SKR.SeedMember(providerUID, providerPID, chatmember.ID(providerMemberID), chatroom.ID(roomID))
+
+	fmt.Println("Given: provider membership exists but caller is not a member of the room")
+	fmt.Printf("Input: room_id=%d provider_member=%d caller_user_id=%d\n", roomID, providerMemberID, callerUserID)
+	fmt.Println("Action: seed caller participant without room membership and seed provider room membership")
+	fmt.Printf("Output: caller_participant_seeded=true provider_member_seeded=true\n")
+	fmt.Println("Mutation: caller participant seeded without chat membership")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
 func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, providerRoomID int64, seedProviderKey bool) error {
 	s.start = time.Now()
 	callerUserID := s.accountBDD.LastSessionUserID()
@@ -757,19 +935,25 @@ func (s *steps) noSenderKeyRequestRowShouldExist(requesterMemberID, providerMemb
 	return nil
 }
 
+func (s *steps) pendingSenderKeyRequestCountFromMemberToProviderShouldBe(requesterMemberID, providerMemberID int64, expected int) error {
+	start := time.Now()
+	fmt.Println("Given: sender key requests should remain idempotent per requester/provider pair")
+	fmt.Printf("Input: requester_member_id=%d provider_member_id=%d expected_pending=%d\n", requesterMemberID, providerMemberID, expected)
+	fmt.Println("Action: inspect in-memory sender_key_requests state")
+
+	actual := s.deps.SKR.PendingSKRCount(chatmember.ID(requesterMemberID), chatmember.ID(providerMemberID))
+	fmt.Printf("Output: actual_pending=%d\n", actual)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if actual != int(expected) {
+		return fmt.Errorf("expected %d pending sender key requests from member %d to provider %d, got %d", expected, requesterMemberID, providerMemberID, actual)
+	}
+	return nil
+}
+
 func (s *steps) e2eeAuthorizationHeader() (string, error) {
-	if s.authHeader != "" {
-		return s.authHeader, nil
-	}
-	if s.Response == nil {
-		return "", fmt.Errorf("no login response available")
-	}
-	header := s.Response.Header.Get("Authorization")
-	if header == "" {
-		return "", fmt.Errorf("no Authorization header from login response")
-	}
-	s.authHeader = header
-	return header, nil
+	return s.authorizationHeader()
 }
 
 func (s *steps) doE2EEJSONRequest(method, path string, payload any, authHeader string) error {

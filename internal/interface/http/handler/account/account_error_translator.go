@@ -23,6 +23,7 @@ func HandleError(ctx *gin.Context, err error) {
 	}{
 		{usecase.ErrRegisterFailed, errResponse{http.StatusInternalServerError, "REGISTER_FAILED", "register failed"}},
 		{usecase.ErrLoginFailed, errResponse{http.StatusInternalServerError, "LOGIN_FAILED", "login failed"}},
+		{usecase.ErrLoginLocked, errResponse{http.StatusTooManyRequests, "LOGIN_LOCKED", "login is temporarily locked"}},
 		{usecase.ErrLogoutFailed, errResponse{http.StatusInternalServerError, "LOGOUT_FAILED", "logout failed"}},
 		{usecase.ErrInvalidDeviceID, errResponse{http.StatusBadRequest, "INVALID_DEVICE_ID", "invalid device id"}},
 		{usecase.ErrInvalidPassword, errResponse{http.StatusBadRequest, "INVALID_PASSWORD", "invalid password"}},

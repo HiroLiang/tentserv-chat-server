@@ -26,6 +26,7 @@ type friendshipRepoStub struct {
 	findAllByUserID         func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
 	findPendingByUserID     func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
 	create                  func(ctx context.Context, userID, friendID shared.UserID) error
+	createBlocked           func(ctx context.Context, userID, friendID shared.UserID) error
 	findByID                func(ctx context.Context, id int64) (*friendship.Friendship, error)
 	findByUserIDAndFriendID func(ctx context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error)
 	findPendingByFriendID   func(ctx context.Context, userID shared.UserID) ([]*friendship.Friendship, error)
@@ -60,7 +61,10 @@ func (s *friendshipRepoStub) Create(ctx context.Context, userID, friendID shared
 	}
 	return nil
 }
-func (s *friendshipRepoStub) CreateBlocked(context.Context, shared.UserID, shared.UserID) error {
+func (s *friendshipRepoStub) CreateBlocked(ctx context.Context, userID, friendID shared.UserID) error {
+	if s.createBlocked != nil {
+		return s.createBlocked(ctx, userID, friendID)
+	}
 	return nil
 }
 func (s *friendshipRepoStub) FindByID(ctx context.Context, id int64) (*friendship.Friendship, error) {
@@ -281,6 +285,7 @@ func TestGetFriendsAndRequestsUseCases_FilterStatusesAndSkipMissingUsers(t *test
 	userRepo := &friendshipUserRepoStub{users: map[shared.UserID]*user.User{
 		601: {ID: 601, Name: "Accepted", Avatar: "accepted.png"},
 		602: {ID: 602, Name: "Pending", Avatar: "pending.png"},
+		603: {ID: 603, Name: "Blocked", Avatar: "blocked.png"},
 		605: {ID: 605, Name: "Requester", Avatar: "requester.png"},
 	}}
 
@@ -299,6 +304,12 @@ func TestGetFriendsAndRequestsUseCases_FilterStatusesAndSkipMissingUsers(t *test
 	require.NoError(t, err)
 	require.Len(t, sentOut.Requests, 1)
 	assert.Equal(t, int64(602), sentOut.Requests[0].UserID)
+
+	blockedOut, err := NewGetBlockedUsersUseCase(friendRepo, userRepo).Execute(context.Background(), authedInput(501, struct{}{}))
+	require.NoError(t, err)
+	require.Len(t, blockedOut.Blocked, 1)
+	assert.Equal(t, int64(603), blockedOut.Blocked[0].UserID)
+	assert.Equal(t, "blocked", blockedOut.Blocked[0].Status)
 }
 
 func TestAcceptFriendshipUseCase_CreatesMutualAcceptedRowsAndCommits(t *testing.T) {
@@ -351,4 +362,200 @@ func TestAcceptFriendshipUseCase_MapsPendingForbiddenAndCommitErrors(t *testing.
 	}
 	err = uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
 	require.ErrorIs(t, err, commitErr)
+}
+
+func TestAcceptFriendshipUseCase_ReturnsNotFound(t *testing.T) {
+	uc := NewAcceptFriendshipUseCase(
+		&friendshipUOWStub{},
+		&friendshipRepoStub{
+			findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+				return nil, friendship.ErrFriendshipNotFound
+			},
+		},
+		noopParticipantRepo{},
+		noopChatRoomRepo{},
+		noopChatMemberRepo{},
+	)
+
+	err := uc.Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 999}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipNotFound)
+}
+
+func TestRemoveFriendshipUseCase_DeletesPrimaryAndReverseRows(t *testing.T) {
+	deletedIDs := make([]int64, 0, 2)
+	repo := &friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+		},
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+	}
+
+	err := NewRemoveFriendshipUseCase(repo).Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11, 12}, deletedIDs)
+}
+
+func TestRemoveFriendshipUseCase_MapsNotFoundAndForbidden(t *testing.T) {
+	uc := NewRemoveFriendshipUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	})
+	err := uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipNotFound)
+
+	uc = NewRemoveFriendshipUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 602, Status: friendship.StatusAccepted}, nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrForbidden)
+}
+
+func TestCancelSentRequestUseCase_DeletesOnlyPendingRequestsOwnedByCaller(t *testing.T) {
+	deletedIDs := make([]int64, 0, 1)
+	uc := NewCancelSentRequestUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 501, FriendID: 601, Status: friendship.StatusPending}, nil
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+	})
+
+	err := uc.Execute(context.Background(), authedInput(501, CancelSentRequestInput{FriendshipID: 11}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11}, deletedIDs)
+
+	uc = NewCancelSentRequestUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, CancelSentRequestInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrForbidden)
+
+	uc = NewCancelSentRequestUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted}, nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, CancelSentRequestInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipNotPending)
+
+	uc = NewCancelSentRequestUseCase(&friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, CancelSentRequestInput{FriendshipID: 11}))
+	require.ErrorIs(t, err, friendship.ErrFriendshipNotFound)
+}
+
+func TestBlockUserUseCase_CreatesOrUpdatesBlockedRelationships(t *testing.T) {
+	createBlockedCalls := make([][2]shared.UserID, 0, 1)
+	deletedIDs := make([]int64, 0, 1)
+	uc := NewBlockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 601 && friendID == 501 {
+				return &friendship.Friendship{ID: 22, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		createBlocked: func(_ context.Context, userID, friendID shared.UserID) error {
+			createBlockedCalls = append(createBlockedCalls, [2]shared.UserID{userID, friendID})
+			return nil
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+	})
+
+	err := uc.Execute(context.Background(), authedInput(501, BlockUserInput{TargetUserID: 601}))
+	require.NoError(t, err)
+	assert.Equal(t, [][2]shared.UserID{{501, 601}}, createBlockedCalls)
+	assert.Equal(t, []int64{22}, deletedIDs)
+
+	updateCalls := make([]int64, 0, 1)
+	uc = NewBlockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 11, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted}, nil
+			}
+			if userID == 601 && friendID == 501 {
+				return &friendship.Friendship{ID: 12, UserID: 601, FriendID: 501, Status: friendship.StatusAccepted}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		updateStatus: func(_ context.Context, id int64, status friendship.Status) error {
+			updateCalls = append(updateCalls, id)
+			assert.Equal(t, friendship.StatusBlocked, status)
+			return nil
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+	})
+
+	err = uc.Execute(context.Background(), authedInput(501, BlockUserInput{TargetUserID: 601}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11}, updateCalls)
+	assert.Contains(t, deletedIDs, int64(12))
+
+	uc = NewBlockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 11, UserID: 501, FriendID: 601, Status: friendship.StatusBlocked}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, BlockUserInput{TargetUserID: 601}))
+	require.ErrorIs(t, err, friendship.ErrAlreadyBlocked)
+}
+
+func TestUnblockUserUseCase_DeletesBlockedRelationshipsOnly(t *testing.T) {
+	deletedIDs := make([]int64, 0, 1)
+	uc := NewUnblockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusBlocked}, nil
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+	})
+
+	err := uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11}, deletedIDs)
+
+	uc = NewUnblockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusAccepted}, nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
+	require.ErrorIs(t, err, friendship.ErrNotBlocked)
+
+	uc = NewUnblockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(context.Context, shared.UserID, shared.UserID) (*friendship.Friendship, error) {
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
+	require.ErrorIs(t, err, friendship.ErrNotBlocked)
 }

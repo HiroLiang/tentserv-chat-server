@@ -2,8 +2,12 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	e2eePort "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -17,8 +21,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// ─── Stubs ───────────────────────────────────────────────────────────────────
 
 type senderKeyReqParticipantStub struct {
 	byUserID map[sharedDomain.UserID]*participant.Participant
@@ -100,11 +102,17 @@ func (s *senderKeyReqChatMemberStub) Remove(context.Context, chatroom.ID, partic
 }
 
 type senderKeyReqSKRRepoStub struct {
-	upserted []*senderkeyrequest.SenderKeyRequest
+	records     map[string]*senderkeyrequest.SenderKeyRequest
+	upsertCount int
 }
 
 func (s *senderKeyReqSKRRepoStub) Upsert(_ context.Context, req *senderkeyrequest.SenderKeyRequest) error {
-	s.upserted = append(s.upserted, req)
+	if s.records == nil {
+		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
+	}
+	copied := *req
+	s.records[s.key(req.RequesterMemberID, req.ProviderMemberID)] = &copied
+	s.upsertCount++
 	return nil
 }
 
@@ -114,6 +122,21 @@ func (s *senderKeyReqSKRRepoStub) FindPendingByProvider(context.Context, chatmem
 
 func (s *senderKeyReqSKRRepoStub) MarkFulfilled(context.Context, chatmember.ID, chatmember.ID) error {
 	return nil
+}
+
+func (s *senderKeyReqSKRRepoStub) key(requesterMemberID, providerMemberID chatmember.ID) string {
+	return fmt.Sprintf("%d:%d", requesterMemberID, providerMemberID)
+}
+
+func (s *senderKeyReqSKRRepoStub) storedRequest(requesterMemberID, providerMemberID chatmember.ID) *senderkeyrequest.SenderKeyRequest {
+	if s.records == nil {
+		return nil
+	}
+	return s.records[s.key(requesterMemberID, providerMemberID)]
+}
+
+func (s *senderKeyReqSKRRepoStub) storedCount() int {
+	return len(s.records)
 }
 
 type senderKeyReqMSKRepoStub struct {
@@ -187,13 +210,35 @@ func (s *senderKeyReqFriendshipStub) Delete(context.Context, int64) error {
 	return nil
 }
 
-type senderKeyReqBroadcasterStub struct{}
+type senderKeyReqBroadcastCall struct {
+	userID string
+	msg    []byte
+}
 
-func (s *senderKeyReqBroadcasterStub) SendToUser(string, []byte) {}
+type senderKeyReqBroadcasterStub struct {
+	mu    sync.Mutex
+	calls []senderKeyReqBroadcastCall
+}
+
+func (s *senderKeyReqBroadcasterStub) SendToUser(userID string, msg []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, senderKeyReqBroadcastCall{userID: userID, msg: append([]byte(nil), msg...)})
+}
+
+func (s *senderKeyReqBroadcasterStub) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+func (s *senderKeyReqBroadcasterStub) lastCall() senderKeyReqBroadcastCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls[len(s.calls)-1]
+}
 
 var _ e2eePort.Broadcaster = (*senderKeyReqBroadcasterStub)(nil)
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 func makeCreateSKRInput(callerUserID int64, roomID, providerMemberID int64) appShared.UseCaseInput[CreateSenderKeyRequestInput] {
 	uid := sharedDomain.UserID(callerUserID)
@@ -240,8 +285,6 @@ func makeChatMemberStub(roomID chatroom.ID, callerUID, providerUID int64, provid
 	return stub, callerMemberID, providerMemberID
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
 func TestCreateSenderKeyRequest_ProviderInDifferentRoom(t *testing.T) {
 	const (
 		callerUID   = int64(1)
@@ -264,7 +307,34 @@ func TestCreateSenderKeyRequest_ProviderInDifferentRoom(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotRoomMember), "expected ErrNotRoomMember, got %v", err)
-	assert.Empty(t, skrStub.upserted, "no request should be stored for cross-room provider")
+	assert.Zero(t, skrStub.storedCount(), "no request should be stored for cross-room provider")
+}
+
+func TestCreateSenderKeyRequest_CallerNotInRoom(t *testing.T) {
+	const (
+		callerUID   = int64(11)
+		providerUID = int64(12)
+		roomID      = chatroom.ID(110)
+	)
+
+	pStub := makeParticipantStub(callerUID, providerUID)
+	cmStub, callerMemberID, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
+	delete(cmStub.byRoomAndParticipant[roomID], participant.ID(callerUID))
+	delete(cmStub.byID, callerMemberID)
+
+	uc := NewCreateSenderKeyRequestUseCase(
+		pStub,
+		cmStub,
+		&senderKeyReqSKRRepoStub{},
+		&senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound},
+		&senderKeyReqFriendshipStub{},
+		&senderKeyReqBroadcasterStub{},
+	)
+
+	_, err := uc.Execute(context.Background(), makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID)))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNotRoomMember), "expected ErrNotRoomMember, got %v", err)
 }
 
 func TestCreateSenderKeyRequest_ProviderAlreadyHasKey(t *testing.T) {
@@ -277,7 +347,7 @@ func TestCreateSenderKeyRequest_ProviderAlreadyHasKey(t *testing.T) {
 	pStub := makeParticipantStub(callerUID, providerUID)
 	cmStub, _, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
 	skrStub := &senderKeyReqSKRRepoStub{}
-	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: nil} // nil err = key exists
+	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: nil}
 
 	uc := NewCreateSenderKeyRequestUseCase(
 		pStub, cmStub, skrStub, mskStub, &senderKeyReqFriendshipStub{}, &senderKeyReqBroadcasterStub{},
@@ -287,7 +357,7 @@ func TestCreateSenderKeyRequest_ProviderAlreadyHasKey(t *testing.T) {
 	_, err := uc.Execute(context.Background(), input)
 
 	require.NoError(t, err)
-	assert.Empty(t, skrStub.upserted, "no request should be stored when provider already has a key")
+	assert.Zero(t, skrStub.storedCount(), "no request should be stored when provider already has a key")
 }
 
 func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
@@ -316,7 +386,7 @@ func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrForbidden), "expected ErrForbidden for blocked relationship, got %v", err)
-	assert.Empty(t, skrStub.upserted)
+	assert.Zero(t, skrStub.storedCount())
 }
 
 func TestCreateSenderKeyRequest_Success(t *testing.T) {
@@ -330,16 +400,83 @@ func TestCreateSenderKeyRequest_Success(t *testing.T) {
 	cmStub, callerMemberID, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
 	skrStub := &senderKeyReqSKRRepoStub{}
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
+	broadcaster := &senderKeyReqBroadcasterStub{}
 
 	uc := NewCreateSenderKeyRequestUseCase(
-		pStub, cmStub, skrStub, mskStub, &senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound}, &senderKeyReqBroadcasterStub{},
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
+		broadcaster,
 	)
 	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
 	require.NoError(t, err)
-	require.Len(t, skrStub.upserted, 1)
-	assert.Equal(t, callerMemberID, skrStub.upserted[0].RequesterMemberID)
-	assert.Equal(t, providerMemberID, skrStub.upserted[0].ProviderMemberID)
+	require.Equal(t, 1, skrStub.storedCount())
+	stored := skrStub.storedRequest(callerMemberID, providerMemberID)
+	require.NotNil(t, stored)
+	assert.Equal(t, callerMemberID, stored.RequesterMemberID)
+	assert.Equal(t, providerMemberID, stored.ProviderMemberID)
+
+	require.Eventually(t, func() bool {
+		return broadcaster.callCount() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	call := broadcaster.lastCall()
+	assert.Equal(t, fmt.Sprint(providerUID), call.userID)
+
+	var msg struct {
+		Type    string `json:"type"`
+		Payload struct {
+			RoomID            int64 `json:"room_id"`
+			ProviderMemberID  int64 `json:"provider_member_id"`
+			RequesterMemberID int64 `json:"requester_member_id"`
+			RequesterUserID   int64 `json:"requester_user_id"`
+		} `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(call.msg, &msg))
+	assert.Equal(t, "e2ee.sender_key_needed", msg.Type)
+	assert.Equal(t, int64(roomID), msg.Payload.RoomID)
+	assert.Equal(t, int64(providerMemberID), msg.Payload.ProviderMemberID)
+	assert.Equal(t, int64(callerMemberID), msg.Payload.RequesterMemberID)
+	assert.Equal(t, callerUID, msg.Payload.RequesterUserID)
+}
+
+func TestCreateSenderKeyRequest_RepeatedRequestsUseUpsertContract(t *testing.T) {
+	const (
+		callerUID   = int64(13)
+		providerUID = int64(14)
+		roomID      = chatroom.ID(140)
+	)
+
+	pStub := makeParticipantStub(callerUID, providerUID)
+	cmStub, callerMemberID, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
+	skrStub := &senderKeyReqSKRRepoStub{}
+	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
+
+	uc := NewCreateSenderKeyRequestUseCase(
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
+		&senderKeyReqBroadcasterStub{},
+	)
+	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+
+	_, err := uc.Execute(context.Background(), input)
+	require.NoError(t, err)
+
+	_, err = uc.Execute(context.Background(), input)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, skrStub.upsertCount)
+	assert.Equal(t, 1, skrStub.storedCount())
+	stored := skrStub.storedRequest(callerMemberID, providerMemberID)
+	require.NotNil(t, stored)
+	assert.Equal(t, callerMemberID, stored.RequesterMemberID)
+	assert.Equal(t, providerMemberID, stored.ProviderMemberID)
 }

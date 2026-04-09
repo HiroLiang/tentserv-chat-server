@@ -10,10 +10,12 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
+	appSecurity "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	domainSecurity "github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
@@ -59,6 +61,44 @@ func (s *authSessionManagerStub) RevokeAllForUser(context.Context, shared.Accoun
 func (s *authSessionManagerStub) RevokeAll(context.Context) error { return nil }
 
 func (s *authSessionManagerStub) SwitchUser(context.Context, auth.AccessToken, shared.UserID) error {
+	return nil
+}
+
+type authLoginRateLimiterStub struct {
+	checkErr              error
+	recordErr             error
+	checkCalls            int
+	recordCalls           int
+	failureRecordCalls    int
+	successRecordCalls    int
+	lastCheckedIP         string
+	lastCheckedIdentifier string
+	lastRecordIP          string
+	lastRecordIdentifier  string
+	lastRecordSuccess     bool
+}
+
+func (s *authLoginRateLimiterStub) CheckLoginAttempt(_ context.Context, ip, identifier string) error {
+	s.checkCalls++
+	s.lastCheckedIP = ip
+	s.lastCheckedIdentifier = identifier
+	return s.checkErr
+}
+
+func (s *authLoginRateLimiterStub) RecordLoginAttempt(_ context.Context, ip, identifier string, success bool) error {
+	s.recordCalls++
+	s.lastRecordIP = ip
+	s.lastRecordIdentifier = identifier
+	s.lastRecordSuccess = success
+	if success {
+		s.successRecordCalls++
+	} else {
+		s.failureRecordCalls++
+	}
+	return s.recordErr
+}
+
+func (s *authLoginRateLimiterStub) ReleaseLock(context.Context, string) error {
 	return nil
 }
 
@@ -232,7 +272,7 @@ func seedLoginAccount(repo *authAccountRepoStub, identifier string, status accou
 	return acc
 }
 
-func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, *authHasherStub, *authAccountRepoStub, *authUserRepoStub, *authUserRoleRepoStub, *authDeviceRepoStub, *authParticipantRepoStub, *authSessionManagerStub, *loginMailFactoryCapture) {
+func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, *authHasherStub, *authAccountRepoStub, *authUserRepoStub, *authUserRoleRepoStub, *authDeviceRepoStub, *authParticipantRepoStub, *authSessionManagerStub, *authLoginRateLimiterStub, *loginMailFactoryCapture) {
 	t.Helper()
 	t.Setenv("APP_ENV", "dev")
 
@@ -244,6 +284,7 @@ func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, 
 	deviceRepo := newAuthDeviceRepoStub()
 	participantRepo := newAuthParticipantRepoStub()
 	sessionManager := &authSessionManagerStub{}
+	loginLimiter := &authLoginRateLimiterStub{}
 	emailService := &authEmailServiceStub{}
 	factory := &loginMailFactoryCapture{}
 	deviceRepo.seed(parseLoginDeviceID(t), "Hiro's Mac")
@@ -251,6 +292,7 @@ func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, 
 	uc := NewLoginUseCase(
 		uow,
 		hasher,
+		loginLimiter,
 		sessionManager,
 		accountRepo,
 		userRepo,
@@ -260,7 +302,7 @@ func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, 
 		emailService,
 		factory.factory,
 	)
-	return uc, uow, hasher, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, sessionManager, factory
+	return uc, uow, hasher, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, sessionManager, loginLimiter, factory
 }
 
 func loginInput(identifier, password, deviceID string) *appShared.UseCaseInput[LoginInput] {
@@ -288,7 +330,7 @@ func assertLoginError(t *testing.T, got, want error) {
 
 func TestLoginUseCase_EmailLoginCreatesSessionParticipantAndAuditLogHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, uow, hasher, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, sessionManager, mailFactory := newLoginUseCaseFixture(t)
+	uc, uow, hasher, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, sessionManager, loginLimiter, mailFactory := newLoginUseCaseFixture(t)
 	seedLoginAccount(accountRepo, "login@example.com", account.Active)
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
 
@@ -299,10 +341,10 @@ func TestLoginUseCase_EmailLoginCreatesSessionParticipantAndAuditLogHasStructure
 	out, err := uc.Execute(context.Background(), input)
 
 	t.Logf("Output: token_present=%t err=%v", out.TokenPair.AccessToken != "", err)
-	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d verify_calls=%d user_create_calls=%d role_assign_calls=%d device_find_calls=%d participant_find_calls=%d participant_create_calls=%d register_device_calls=%d session_create_calls=%d login_event_calls=%d account_update_calls=%d commit_calls=%d rollback_calls=%d email_factory_calls=%d",
+	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d verify_calls=%d user_create_calls=%d role_assign_calls=%d device_find_calls=%d participant_find_calls=%d participant_create_calls=%d register_device_calls=%d session_create_calls=%d login_event_calls=%d account_update_calls=%d commit_calls=%d rollback_calls=%d login_check_calls=%d login_success_record_calls=%d email_factory_calls=%d",
 		accountRepo.findByEmailCalls, accountRepo.findByAccountCalls, hasher.verifyCalls, userRepo.createCalls, roleRepo.assignCalls, deviceRepo.findByIDCalls,
 		participantRepo.findByUserCalls, participantRepo.createCalls, accountRepo.registerDeviceCalls, sessionManager.createCalls,
-		accountRepo.recordLoginEventCalls, accountRepo.updateCalls, uow.tx.commitCalls, uow.tx.rollbackCalls, mailFactory.calls)
+		accountRepo.recordLoginEventCalls, accountRepo.updateCalls, uow.tx.commitCalls, uow.tx.rollbackCalls, loginLimiter.checkCalls, loginLimiter.successRecordCalls, mailFactory.calls)
 	t.Logf("Duration: %s", time.Since(start))
 
 	if err != nil {
@@ -332,14 +374,47 @@ func TestLoginUseCase_EmailLoginCreatesSessionParticipantAndAuditLogHasStructure
 	if accountRepo.lastUpdated == nil || len(accountRepo.lastUpdated.UserIDs) != 1 || accountRepo.lastUpdated.UserIDs[0] != 501 {
 		t.Fatalf("expected account update to link user 501, got %+v", accountRepo.lastUpdated)
 	}
+	if loginLimiter.lastCheckedIdentifier != "login@example.com" || loginLimiter.successRecordCalls != 1 || loginLimiter.lastRecordIdentifier != "login@example.com" || !loginLimiter.lastRecordSuccess {
+		t.Fatalf("expected login limiter check+success reset for normalized email, got checked=%q success_calls=%d record=%q success=%t",
+			loginLimiter.lastCheckedIdentifier, loginLimiter.successRecordCalls, loginLimiter.lastRecordIdentifier, loginLimiter.lastRecordSuccess)
+	}
 	if uow.tx.commitCalls != 1 || uow.tx.rollbackCalls != 0 || mailFactory.calls != 0 {
 		t.Fatalf("expected commit=1 rollback=0 no dev email, got commit=%d rollback=%d email=%d", uow.tx.commitCalls, uow.tx.rollbackCalls, mailFactory.calls)
 	}
 }
 
+func TestLoginUseCase_EmailLoginNormalizesIdentifierCaseHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uc, _, _, accountRepo, _, _, _, _, _, loginLimiter, _ := newLoginUseCaseFixture(t)
+	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
+	input := loginInput("Login@Example.com", "redacted-password", loginDeviceID)
+
+	t.Log("Given: login email exists in lowercase but the request uses mixed case")
+	t.Log("Input: identifier_type=email_mixed_case password_present=true")
+	t.Log("Action: execute login usecase mixed-case email path")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: token_present=%t err=%v", out.TokenPair.AccessToken != "", err)
+	t.Logf("Mutation: checked_identifier=%q find_email_calls=%d found_email=%q success_record_identifier=%q",
+		loginLimiter.lastCheckedIdentifier, accountRepo.findByEmailCalls, accountRepo.lastFindByEmail, loginLimiter.lastRecordIdentifier)
+	t.Logf("Duration: %s", time.Since(start))
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if accountRepo.lastFindByEmail != shared.EmailAddress("login@example.com") {
+		t.Fatalf("expected lower-cased email lookup, got %q", accountRepo.lastFindByEmail)
+	}
+	if loginLimiter.lastCheckedIdentifier != "login@example.com" || loginLimiter.lastRecordIdentifier != "login@example.com" {
+		t.Fatalf("expected normalized identifier in login limiter, got checked=%q recorded=%q",
+			loginLimiter.lastCheckedIdentifier, loginLimiter.lastRecordIdentifier)
+	}
+}
+
 func TestLoginUseCase_AccountIdentifierReusesExistingUserAndParticipantHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, _, _, accountRepo, userRepo, roleRepo, _, participantRepo, sessionManager, _ := newLoginUseCaseFixture(t)
+	uc, _, _, accountRepo, userRepo, roleRepo, _, participantRepo, sessionManager, _, _ := newLoginUseCaseFixture(t)
 	seedLoginAccount(accountRepo, "login_account", account.Active, 777)
 	participantRepo.seedUser(777)
 	input := loginInput("login_account", "redacted-password", loginDeviceID)
@@ -371,7 +446,7 @@ func TestLoginUseCase_AccountIdentifierReusesExistingUserAndParticipantHasStruct
 
 func TestLoginUseCase_ParticipantDuplicateRaceIsAcceptedHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, _, _, accountRepo, _, _, _, participantRepo, _, _ := newLoginUseCaseFixture(t)
+	uc, _, _, accountRepo, _, _, _, participantRepo, _, _, _ := newLoginUseCaseFixture(t)
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
 	participantRepo.createErr = participant.ErrAlreadyExists
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
@@ -396,7 +471,7 @@ func TestLoginUseCase_ParticipantDuplicateRaceIsAcceptedHasStructuredLog(t *test
 
 func TestLoginUseCase_RejectsPasswordErrorBeforeSideEffectsHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, uow, hasher, accountRepo, _, _, _, participantRepo, sessionManager, _ := newLoginUseCaseFixture(t)
+	uc, uow, hasher, accountRepo, _, _, _, participantRepo, sessionManager, loginLimiter, _ := newLoginUseCaseFixture(t)
 	hasher.verifyResult = false
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
 	input := loginInput("login@example.com", "wrong-password", loginDeviceID)
@@ -408,14 +483,69 @@ func TestLoginUseCase_RejectsPasswordErrorBeforeSideEffectsHasStructuredLog(t *t
 	out, err := uc.Execute(context.Background(), input)
 
 	t.Logf("Output: token_present=%t err=%v", out.TokenPair.AccessToken != "", err)
-	t.Logf("Mutation: verify_calls=%d participant_create_calls=%d register_device_calls=%d session_create_calls=%d login_event_calls=%d commit_calls=%d rollback_calls=%d",
-		hasher.verifyCalls, participantRepo.createCalls, accountRepo.registerDeviceCalls, sessionManager.createCalls, accountRepo.recordLoginEventCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Mutation: verify_calls=%d participant_create_calls=%d register_device_calls=%d session_create_calls=%d login_event_calls=%d failure_record_calls=%d commit_calls=%d rollback_calls=%d",
+		hasher.verifyCalls, participantRepo.createCalls, accountRepo.registerDeviceCalls, sessionManager.createCalls, accountRepo.recordLoginEventCalls, loginLimiter.failureRecordCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertLoginError(t, err, ErrPasswordError)
+	if loginLimiter.failureRecordCalls != 1 || loginLimiter.lastRecordIdentifier != "login@example.com" || loginLimiter.lastRecordSuccess {
+		t.Fatalf("expected password failure to be recorded for normalized identifier, got calls=%d record=%q success=%t",
+			loginLimiter.failureRecordCalls, loginLimiter.lastRecordIdentifier, loginLimiter.lastRecordSuccess)
+	}
 	if sessionManager.createCalls != 0 || accountRepo.recordLoginEventCalls != 0 || uow.tx.commitCalls != 0 || uow.tx.rollbackCalls != 1 {
 		t.Fatalf("expected rollback before side effects, got session=%d event=%d commit=%d rollback=%d",
 			sessionManager.createCalls, accountRepo.recordLoginEventCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	}
+}
+
+func TestLoginUseCase_UnknownAccountRecordsFailedAttemptHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uc, uow, _, _, _, _, _, _, sessionManager, loginLimiter, _ := newLoginUseCaseFixture(t)
+	input := loginInput("missing@example.com", "redacted-password", loginDeviceID)
+
+	t.Log("Given: login identifier does not match any account")
+	t.Log("Input: identifier_type=email_missing password_present=true")
+	t.Log("Action: execute login usecase missing-account path")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: token_present=%t err=%v", out.TokenPair.AccessToken != "", err)
+	t.Logf("Mutation: failure_record_calls=%d checked_identifier=%q recorded_identifier=%q session_create_calls=%d begin_calls=%d rollback_calls=%d",
+		loginLimiter.failureRecordCalls, loginLimiter.lastCheckedIdentifier, loginLimiter.lastRecordIdentifier, sessionManager.createCalls, uow.beginCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertLoginError(t, err, ErrAccountNotFound)
+	if loginLimiter.failureRecordCalls != 1 || loginLimiter.lastRecordIdentifier != "missing@example.com" || loginLimiter.lastRecordSuccess {
+		t.Fatalf("expected missing account to record a failed attempt, got calls=%d record=%q success=%t",
+			loginLimiter.failureRecordCalls, loginLimiter.lastRecordIdentifier, loginLimiter.lastRecordSuccess)
+	}
+	if sessionManager.createCalls != 0 || uow.beginCalls != 1 || uow.tx.rollbackCalls != 1 {
+		t.Fatalf("expected no session and one rolled-back transaction, got session=%d begin=%d rollback=%d",
+			sessionManager.createCalls, uow.beginCalls, uow.tx.rollbackCalls)
+	}
+}
+
+func TestLoginUseCase_LockedIdentifierStopsBeforeTransactionHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uc, uow, _, accountRepo, _, _, _, _, sessionManager, loginLimiter, _ := newLoginUseCaseFixture(t)
+	loginLimiter.checkErr = domainSecurity.ErrRateLimitExceeded
+	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
+
+	t.Log("Given: login identifier is already locked by the limiter")
+	t.Log("Input: identifier_type=email password_present=true")
+	t.Log("Action: execute login usecase locked-identifier path")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: token_present=%t err=%v", out.TokenPair.AccessToken != "", err)
+	t.Logf("Mutation: begin_calls=%d find_email_calls=%d session_create_calls=%d record_calls=%d checked_identifier=%q",
+		uow.beginCalls, accountRepo.findByEmailCalls, sessionManager.createCalls, loginLimiter.recordCalls, loginLimiter.lastCheckedIdentifier)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertLoginError(t, err, ErrLoginLocked)
+	if uow.beginCalls != 0 || accountRepo.findByEmailCalls != 0 || sessionManager.createCalls != 0 || loginLimiter.recordCalls != 0 {
+		t.Fatalf("expected locked identifier to stop before transaction or side effects, got begin=%d find=%d session=%d record=%d",
+			uow.beginCalls, accountRepo.findByEmailCalls, sessionManager.createCalls, loginLimiter.recordCalls)
 	}
 }
 
@@ -434,7 +564,7 @@ func TestLoginUseCase_MapsAccountStatusesHasStructuredLog(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
-			uc, uow, _, accountRepo, _, _, _, _, sessionManager, _ := newLoginUseCaseFixture(t)
+			uc, uow, _, accountRepo, _, _, _, _, sessionManager, _, _ := newLoginUseCaseFixture(t)
 			seedLoginAccount(accountRepo, "login@example.com", tc.status, 777)
 			input := loginInput("login@example.com", "redacted-password", loginDeviceID)
 
@@ -470,7 +600,7 @@ func TestLoginUseCase_RejectsInvalidOrUnknownDeviceHasStructuredLog(t *testing.T
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
-			uc, uow, _, accountRepo, _, _, deviceRepo, _, sessionManager, _ := newLoginUseCaseFixture(t)
+			uc, uow, _, accountRepo, _, _, deviceRepo, _, sessionManager, _, _ := newLoginUseCaseFixture(t)
 			seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
 			if tc.clearMap {
 				deviceRepo.devices = map[string]*device.Device{}
@@ -499,7 +629,7 @@ func TestLoginUseCase_RejectsInvalidOrUnknownDeviceHasStructuredLog(t *testing.T
 
 func TestLoginUseCase_SessionCreateFailureStopsBeforeAuditLogHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, uow, _, accountRepo, _, _, _, _, sessionManager, _ := newLoginUseCaseFixture(t)
+	uc, uow, _, accountRepo, _, _, _, _, sessionManager, _, _ := newLoginUseCaseFixture(t)
 	sessionManager.createErr = errors.New("redis unavailable")
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
@@ -524,7 +654,7 @@ func TestLoginUseCase_SessionCreateFailureStopsBeforeAuditLogHasStructuredLog(t 
 
 func TestLoginUseCase_CommitFailureReturnsLoginFailedHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	uc, uow, _, accountRepo, _, _, _, _, _, _ := newLoginUseCaseFixture(t)
+	uc, uow, _, accountRepo, _, _, _, _, _, _, _ := newLoginUseCaseFixture(t)
 	uow.tx = &authRegisterTxStub{commitErr: errors.New("commit failed")}
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
@@ -556,11 +686,12 @@ func TestLoginUseCase_NonDevSendsLoginEmailWithDeviceNameHasStructuredLog(t *tes
 	deviceRepo := newAuthDeviceRepoStub()
 	participantRepo := newAuthParticipantRepoStub()
 	sessionManager := &authSessionManagerStub{}
+	loginLimiter := &authLoginRateLimiterStub{}
 	emailService := loginEmailServiceStub{sent: make(chan appEmail.EmailBuilder, 1)}
 	factory := &loginMailFactoryCapture{}
 	deviceRepo.seed(parseLoginDeviceID(t), "Hiro's Mac")
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
-	uc := NewLoginUseCase(uow, hasher, sessionManager, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, emailService, factory.factory)
+	uc := NewLoginUseCase(uow, hasher, loginLimiter, sessionManager, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, emailService, factory.factory)
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
 
 	t.Log("Given: production login succeeds and email service is available")
@@ -588,8 +719,9 @@ func TestLoginUseCase_NonDevSendsLoginEmailWithDeviceNameHasStructuredLog(t *tes
 }
 
 var (
-	_ port.SessionManager    = (*authSessionManagerStub)(nil)
-	_ device.Repository      = (*authDeviceRepoStub)(nil)
-	_ participant.Repository = (*authParticipantRepoStub)(nil)
-	_ appEmail.EmailService  = (*loginEmailServiceStub)(nil)
+	_ port.SessionManager          = (*authSessionManagerStub)(nil)
+	_ appSecurity.LoginRateLimiter = (*authLoginRateLimiterStub)(nil)
+	_ device.Repository            = (*authDeviceRepoStub)(nil)
+	_ participant.Repository       = (*authParticipantRepoStub)(nil)
+	_ appEmail.EmailService        = (*loginEmailServiceStub)(nil)
 )

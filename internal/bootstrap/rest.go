@@ -67,6 +67,7 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 
 	var friendshipHandler = friendship.NewFriendshipHandler(
 		useCases.GetFriendsUseCase,
+		useCases.GetBlockedUsersUseCase,
 		useCases.ApplyFriendshipUseCase,
 		useCases.AcceptFriendshipUseCase,
 		useCases.GetFriendRequestsUseCase,

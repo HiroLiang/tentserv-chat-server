@@ -25,3 +25,17 @@ Feature: E2EE sender key request distribution
     When I create a sender key request for room 3 and provider member 206
     Then the response status should be 403
     And the response error code should be "NOT_ROOM_MEMBER"
+
+  Scenario: Sender key request is rejected when caller is not a member of the room
+    Given a room member setup exists with room id 4, provider member id 208 in that room, and the caller has no room membership
+    When I create a sender key request for room 4 and provider member 208
+    Then the response status should be 403
+    And the response error code should be "NOT_ROOM_MEMBER"
+
+  Scenario: Repeated sender key request stays idempotent
+    Given a room member setup exists with room id 5, caller member id 209, and provider member id 210 in the same room with no existing sender key
+    When I create a sender key request for room 5 and provider member 210
+    Then the response status should be 204
+    When I create a sender key request for room 5 and provider member 210
+    Then the response status should be 204
+    And pending sender key request count from member 209 to provider 210 should be 1

@@ -425,6 +425,7 @@ func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
 	loginUseCase := authUseCase.NewLoginUseCase(
 		uow,
 		accountHandlerHasherStub{verifyResult: true},
+		nil,
 		accountHandlerSessionManagerStub{},
 		accountHandlerAccountRepoStub{
 			emailExists:   true,

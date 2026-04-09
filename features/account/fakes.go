@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	domaindevice "github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	domainSecurity "github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	domainuser "github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -32,6 +34,7 @@ type Deps struct {
 	store           *bddVerificationStore
 	email           *bddEmailService
 	registerLimiter *bddRegisterRateLimiter
+	loginLimiter    *bddLoginRateLimiter
 }
 
 func NewDeps() *Deps {
@@ -45,6 +48,7 @@ func NewDeps() *Deps {
 		store:           newBDDVerificationStore(),
 		email:           &bddEmailService{},
 		registerLimiter: &bddRegisterRateLimiter{},
+		loginLimiter:    &bddLoginRateLimiter{},
 	}
 	deps.Reset()
 	return deps
@@ -60,6 +64,7 @@ func (d *Deps) Reset() {
 	d.store.reset()
 	d.email.reset()
 	d.registerLimiter.reset()
+	d.loginLimiter.reset()
 }
 
 func (d *Deps) RegisterLimiter() appSecurity.RegisterRateLimiter {
@@ -98,6 +103,24 @@ func (d *Deps) LastSessionDeviceID() shared.DeviceID {
 	return d.sessionManager.lastCreated.DeviceID
 }
 
+func (d *Deps) LastAccessToken() auth.AccessToken {
+	d.sessionManager.mu.Lock()
+	defer d.sessionManager.mu.Unlock()
+
+	if d.sessionManager.lastCreated == nil {
+		return ""
+	}
+	return d.sessionManager.lastCreated.Token.AccessToken
+}
+
+func (d *Deps) RevokeLastAccessToken() error {
+	token := d.LastAccessToken()
+	if token == "" {
+		return fmt.Errorf("no access token available to revoke")
+	}
+	return d.sessionManager.Revoke(context.Background(), token)
+}
+
 func (d *Deps) RegisterUseCases(
 	uow transaction.UnitOfWork,
 	hasher appSecurity.Hasher,
@@ -129,10 +152,11 @@ func (d *Deps) RegisterUseCases(
 func (d *Deps) LoginUseCases(
 	uow transaction.UnitOfWork,
 	hasher appSecurity.Hasher,
-) (*authUseCase.LoginUseCase, *authUseCase.GetProfileUseCase) {
+) (*authUseCase.LoginUseCase, *authUseCase.LogoutUseCase, *authUseCase.GetProfileUseCase) {
 	loginUseCase := authUseCase.NewLoginUseCase(
 		uow,
 		hasher,
+		d.loginLimiter,
 		d.sessionManager,
 		d.accountRepo,
 		d.userRepo,
@@ -144,8 +168,9 @@ func (d *Deps) LoginUseCases(
 			return bddEmailBuilder{}
 		},
 	)
+	logoutUseCase := authUseCase.NewLogoutUseCase(d.sessionManager)
 	profileUseCase := authUseCase.NewGetProfileUseCase(d.accountRepo, d.userRepo)
-	return loginUseCase, profileUseCase
+	return loginUseCase, logoutUseCase, profileUseCase
 }
 
 type bddAccountRepo struct {
@@ -441,6 +466,7 @@ type bddSessionManager struct {
 	sessions    map[auth.AccessToken]*auth.Session
 	createCalls int
 	findCalls   int
+	revokeCalls int
 	lastCreated *auth.Session
 }
 
@@ -456,6 +482,7 @@ func (s *bddSessionManager) reset() {
 	s.sessions = map[auth.AccessToken]*auth.Session{}
 	s.createCalls = 0
 	s.findCalls = 0
+	s.revokeCalls = 0
 	s.lastCreated = nil
 }
 
@@ -465,12 +492,12 @@ func (s *bddSessionManager) Create(_ context.Context, input auth.CreateSessionIn
 
 	s.nextID++
 	tokenPair := auth.TokenPair{
-		AccessToken:  auth.AccessToken("bdd-access-token"),
-		RefreshToken: auth.RefreshToken("bdd-refresh-token"),
+		AccessToken:  auth.AccessToken(fmt.Sprintf("bdd-access-token-%d", s.nextID)),
+		RefreshToken: auth.RefreshToken(fmt.Sprintf("bdd-refresh-token-%d", s.nextID)),
 		ExpiresAt:    time.Now().Add(time.Hour),
 	}
 	session := &auth.Session{
-		ID:        "900",
+		ID:        fmt.Sprintf("%d", s.nextID),
 		AccountID: input.AccountID,
 		UserID:    input.UserID,
 		DeviceID:  input.DeviceID,
@@ -504,6 +531,7 @@ func (s *bddSessionManager) Revoke(_ context.Context, token auth.AccessToken) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.revokeCalls++
 	delete(s.sessions, token)
 	return nil
 }
@@ -790,14 +818,72 @@ func (l *bddRegisterRateLimiter) CheckRegisterAttempt(_ context.Context, _ strin
 	return nil
 }
 
+type bddLoginRateLimiter struct {
+	mu           sync.Mutex
+	failureCount map[string]int64
+	checkCalls   int
+	recordCalls  int
+	releaseCalls int
+}
+
+func (l *bddLoginRateLimiter) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.failureCount = map[string]int64{}
+	l.checkCalls = 0
+	l.recordCalls = 0
+	l.releaseCalls = 0
+}
+
+func (l *bddLoginRateLimiter) CheckLoginAttempt(_ context.Context, _, identifier string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.checkCalls++
+	if l.failureCount[identifier] >= 5 {
+		return domainSecurity.ErrRateLimitExceeded
+	}
+	return nil
+}
+
+func (l *bddLoginRateLimiter) RecordLoginAttempt(_ context.Context, _, identifier string, success bool) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.recordCalls++
+	if success {
+		delete(l.failureCount, identifier)
+		return nil
+	}
+	l.failureCount[identifier]++
+	return nil
+}
+
+func (l *bddLoginRateLimiter) ReleaseLock(_ context.Context, identifier string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.releaseCalls++
+	delete(l.failureCount, identifier)
+	return nil
+}
+
+func (l *bddLoginRateLimiter) count(identifier string) int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.failureCount[identifier]
+}
+
 var (
-	_ domainaccount.Repository       = (*bddAccountRepo)(nil)
-	_ domainuser.Repository          = (*bddUserRepo)(nil)
-	_ userrole.Repository            = (*bddUserRoleRepo)(nil)
-	_ authPort.SessionManager        = (*bddSessionManager)(nil)
-	_ domaindevice.Repository        = (*bddDeviceRepo)(nil)
-	_ participant.Repository         = (*bddParticipantRepo)(nil)
-	_ appEmail.EmailService          = (*bddEmailService)(nil)
-	_ appEmail.EmailBuilder          = (*bddEmailBuilder)(nil)
+	_ domainaccount.Repository        = (*bddAccountRepo)(nil)
+	_ domainuser.Repository           = (*bddUserRepo)(nil)
+	_ userrole.Repository             = (*bddUserRoleRepo)(nil)
+	_ authPort.SessionManager         = (*bddSessionManager)(nil)
+	_ domaindevice.Repository         = (*bddDeviceRepo)(nil)
+	_ participant.Repository          = (*bddParticipantRepo)(nil)
+	_ appEmail.EmailService           = (*bddEmailService)(nil)
+	_ appEmail.EmailBuilder           = (*bddEmailBuilder)(nil)
 	_ appSecurity.RegisterRateLimiter = (*bddRegisterRateLimiter)(nil)
+	_ appSecurity.LoginRateLimiter    = (*bddLoginRateLimiter)(nil)
 )
