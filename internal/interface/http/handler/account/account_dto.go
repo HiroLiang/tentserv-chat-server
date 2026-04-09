@@ -2,9 +2,9 @@ package account
 
 // RegisterRequest represents the payload required for user registration.
 type RegisterRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Account  string `json:"account" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
+	Name     string `json:"name" binding:"required,max=100"`
+	Account  string `json:"account" binding:"required,max=50"`
+	Email    string `json:"email" binding:"required,email,max=254"`
 	Password string `json:"password" binding:"required,min=6"`
 }
 
@@ -39,3 +39,9 @@ type UserProfileItem struct {
 }
 
 type VerifyEmailResponse struct{}
+
+type ResendVerifyEmailRequest struct {
+	Email string `json:"email" binding:"required,email,max=254"`
+}
+
+type ResendVerifyEmailResponse struct{}

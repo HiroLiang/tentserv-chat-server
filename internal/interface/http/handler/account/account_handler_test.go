@@ -399,7 +399,7 @@ func newAccountHandlerRouter(emailExists, accountExists bool, createErr error) (
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(registerUseCase, nil, nil, nil, nil)
+	handler := NewAuthHandler(registerUseCase, nil, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router, uow
 }
@@ -413,7 +413,7 @@ func newAccountHandlerVerifyEmailRouter(
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, nil, nil, nil, verifyEmailUseCase)
+	handler := NewAuthHandler(nil, nil, nil, nil, verifyEmailUseCase, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router
 }
@@ -442,7 +442,7 @@ func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, loginUseCase, nil, nil, nil)
+	handler := NewAuthHandler(nil, loginUseCase, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router, uow
 }
@@ -451,7 +451,7 @@ func newAccountHandlerLoginInvalidPayloadRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, nil, nil, nil, nil)
+	handler := NewAuthHandler(nil, nil, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router
 }
@@ -519,6 +519,11 @@ func TestAuthHandler_RegisterInvalidPayloadHasStructuredLog(t *testing.T) {
 	}{
 		{name: "invalid email", body: `{"email":"not-an-email","account":"new_account","name":"New Display","password":"redacted-password"}`},
 		{name: "missing fields", body: `{"email":"new@example.com"}`},
+		{name: "password too short", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":"abc"}`},
+		{name: "empty password", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":""}`},
+		{name: "account name too long", body: `{"email":"new@example.com","account":"` + strings.Repeat("a", 51) + `","name":"New Display","password":"redacted-password"}`},
+		{name: "display name too long", body: `{"email":"new@example.com","account":"new_account","name":"` + strings.Repeat("a", 101) + `","password":"redacted-password"}`},
+		{name: "email too long", body: `{"email":"` + strings.Repeat("a", 243) + `@example.com","account":"new_account","name":"New Display","password":"redacted-password"}`},
 	}
 
 	for _, tc := range cases {
@@ -614,6 +619,78 @@ func TestAuthHandler_RegisterFailedHasStructuredLog(t *testing.T) {
 	}
 	if errResp.Code != "REGISTER_FAILED" {
 		t.Fatalf("expected REGISTER_FAILED, got %+v", errResp)
+	}
+}
+
+func TestAuthHandler_RegisterUseCaseValidationHasStructuredLog(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		wantCode string
+		wantHTTP int
+	}{
+		{
+			name:     "invalid account name format",
+			body:     `{"email":"new@example.com","account":"invalid account!","name":"New Display","password":"redacted-password"}`,
+			wantCode: "INVALID_ACCOUNT",
+			wantHTTP: http.StatusBadRequest,
+		},
+		{
+			name:     "common password",
+			body:     `{"email":"new@example.com","account":"new_account","name":"New Display","password":"password"}`,
+			wantCode: "WEAK_PASSWORD",
+			wantHTTP: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			router, _ := newAccountHandlerRouter(false, false, nil)
+
+			t.Log("Given: register payload passes DTO binding but fails usecase validation")
+			t.Logf("Input: case=%s body_len=%d", tc.name, len(tc.body))
+			t.Log("Action: POST /api/auth/register")
+
+			resp := performAccountRegisterRequest(router, tc.body)
+			errResp := decodeAccountHandlerError(t, resp.Body)
+
+			t.Logf("Output: status=%d code=%s message=%q", resp.Code, errResp.Code, errResp.Message)
+			t.Log("Mutation: account not created")
+			t.Logf("Duration: %s", time.Since(start))
+
+			if resp.Code != tc.wantHTTP {
+				t.Fatalf("expected %d, got %d body=%s", tc.wantHTTP, resp.Code, resp.Body.String())
+			}
+			if errResp.Code != tc.wantCode {
+				t.Fatalf("expected error code %s, got %s", tc.wantCode, errResp.Code)
+			}
+		})
+	}
+}
+
+func TestAuthHandler_RegisterLocalhostEmailRejectedByBindingHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	router, _ := newAccountHandlerRouter(false, false, nil)
+	body := `{"email":"user@localhost","account":"local_account","name":"Local User","password":"redacted-password"}`
+
+	t.Log("Given: email uses localhost single-label domain")
+	t.Log("Input: email=user@localhost account=local_account name=Local User password_present=true")
+	t.Log("Action: POST /api/auth/register")
+	t.Log("Note: go-playground/validator email tag rejects single-label domains at the binding layer")
+
+	resp := performAccountRegisterRequest(router, body)
+	errResp := decodeAccountHandlerError(t, resp.Body)
+
+	t.Logf("Output: status=%d code=%s message=%q", resp.Code, errResp.Code, errResp.Message)
+	t.Log("Mutation: register usecase not invoked")
+	t.Logf("Duration: %s", time.Since(start))
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for localhost email at binding layer, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if errResp.Code != "INVALID_REQUEST" {
+		t.Fatalf("expected INVALID_REQUEST, got %s", errResp.Code)
 	}
 }
 

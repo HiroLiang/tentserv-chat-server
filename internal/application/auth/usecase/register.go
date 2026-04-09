@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
@@ -80,6 +81,11 @@ func (uc *RegisterUseCase) Execute(
 		}
 	}()
 
+	// Reject emails that exceed RFC 5321 maximum length
+	if len(input.Data.Email) > 254 {
+		return RegisterOutput{}, ErrInvalidEmail
+	}
+
 	// Validate email
 	emailAddr, err := shared.ParseEmail(input.Data.Email)
 	if err != nil {
@@ -92,10 +98,20 @@ func (uc *RegisterUseCase) Execute(
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
+	// Validate account name format (alphanumeric + underscore only)
+	if !accountNameRegex.MatchString(input.Data.Account) {
+		return RegisterOutput{}, ErrInvalidAccount
+	}
+
 	if _, err := uc.accountRepo.FindByAccountName(ctx, input.Data.Account); err == nil {
 		return RegisterOutput{}, ErrAccountExist
 	} else if !errors.Is(err, account.ErrAccountNotFound) {
 		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	// Reject common/weak passwords
+	if _, weak := commonPasswords[strings.ToLower(input.Data.Password)]; weak {
+		return RegisterOutput{}, ErrWeakPassword
 	}
 
 	// Hash password
@@ -180,6 +196,17 @@ func (uc *RegisterUseCase) Execute(
 	}
 
 	return RegisterOutput{int64(accountId)}, nil
+}
+
+var accountNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+var commonPasswords = map[string]struct{}{
+	"123456": {}, "password": {}, "12345678": {}, "qwerty": {},
+	"123456789": {}, "12345": {}, "1234567": {}, "password1": {},
+	"iloveyou": {}, "abc123": {}, "1234567890": {}, "123123": {},
+	"111111": {}, "letmein": {}, "monkey": {}, "dragon": {},
+	"master": {}, "sunshine": {}, "princess": {}, "welcome": {},
+	"shadow": {}, "batman": {}, "football": {}, "1q2w3e4r": {},
 }
 
 func generateVerificationToken() (string, error) {

@@ -10,6 +10,8 @@ var (
 	ErrInvalidDeviceID = errors.New("invalid device id")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrInvalidEmail    = errors.New("invalid email")
+	ErrInvalidAccount  = errors.New("invalid account name")
+	ErrWeakPassword    = errors.New("password is too common or weak")
 
 	ErrEmailExist = errors.New("email exist")
 

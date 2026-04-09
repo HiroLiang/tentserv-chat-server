@@ -27,6 +27,8 @@ func HandleError(ctx *gin.Context, err error) {
 		{usecase.ErrInvalidDeviceID, errResponse{http.StatusBadRequest, "INVALID_DEVICE_ID", "invalid device id"}},
 		{usecase.ErrInvalidPassword, errResponse{http.StatusBadRequest, "INVALID_PASSWORD", "invalid password"}},
 		{usecase.ErrInvalidEmail, errResponse{http.StatusBadRequest, "INVALID_EMAIL", "invalid email"}},
+		{usecase.ErrInvalidAccount, errResponse{http.StatusBadRequest, "INVALID_ACCOUNT", "invalid account name"}},
+		{usecase.ErrWeakPassword, errResponse{http.StatusBadRequest, "WEAK_PASSWORD", "password is too common or weak"}},
 		{usecase.ErrEmailExist, errResponse{http.StatusConflict, "EMAIL_EXIST", "email already exists"}},
 		{usecase.ErrAccountExist, errResponse{http.StatusConflict, "ACCOUNT_EXIST", "account already exists"}},
 		{usecase.ErrAccountNotFound, errResponse{http.StatusNotFound, "ACCOUNT_NOT_FOUND", "account not found"}},

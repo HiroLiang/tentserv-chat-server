@@ -57,10 +57,11 @@ import (
 
 // Dependencies Base dependency container
 type Dependencies struct {
-	Uow            transaction.UnitOfWork
-	SessionManager port.SessionManager
-	RateLimiter    appSecurity.RateLimiter
-	RedisCache     cache.Cache
+	Uow                  transaction.UnitOfWork
+	SessionManager       port.SessionManager
+	RateLimiter          appSecurity.RateLimiter
+	RegisterRateLimiter  appSecurity.RegisterRateLimiter
+	RedisCache           cache.Cache
 
 	PwdHasher     appSecurity.Hasher
 	ContextHasher appSecurity.Hasher
@@ -122,6 +123,13 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 			Window: conf.RateLimitConfig.IPUnit,
 		},
 	)
+	registerRateLimiter := infraSharedSecurity.NewRedisRegisterRateLimiter(
+		rateLimitRepo,
+		security.RateLimitPolicy{
+			Limit:  conf.RateLimitConfig.RegisterIPLimit,
+			Window: conf.RateLimitConfig.RegisterIPUnit,
+		},
+	)
 
 	sessionRepo := postgresSession.NewSessionRepository(postgresDB)
 	emailRecorder := postgresEmail.NewPostgresEmailRecorder(postgresDB)
@@ -140,6 +148,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 			conf.AuthToken.Expiration,
 		),
 		RateLimiter:           rateLimiter,
+		RegisterRateLimiter:   registerRateLimiter,
 		RedisCache:            redisCache,
 		PwdHasher:             infraSharedSecurity.NewArgon2Hasher(),
 		ContextHasher:         infraSharedSecurity.NewContentHasher(),

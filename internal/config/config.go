@@ -27,12 +27,14 @@ type AppConfig struct {
 	} `mapstructure:"secrets"`
 
 	RateLimitConfig struct {
-		GlobalLimit int64         `mapstructure:"global_limit"`
-		IPLimit     int64         `mapstructure:"ip_limit"`
-		UserLimit   int64         `mapstructure:"user_limit"`
-		GlobalUnit  time.Duration `mapstructure:"global_unit"`
-		IPUnit      time.Duration `mapstructure:"ip_unit"`
-		UserUnit    time.Duration `mapstructure:"user_unit"`
+		GlobalLimit      int64         `mapstructure:"global_limit"`
+		IPLimit          int64         `mapstructure:"ip_limit"`
+		UserLimit        int64         `mapstructure:"user_limit"`
+		GlobalUnit       time.Duration `mapstructure:"global_unit"`
+		IPUnit           time.Duration `mapstructure:"ip_unit"`
+		UserUnit         time.Duration `mapstructure:"user_unit"`
+		RegisterIPLimit  int64         `mapstructure:"register_ip_limit"`
+		RegisterIPUnit   time.Duration `mapstructure:"register_ip_unit"`
 	} `mapstructure:"rate_limit_config"`
 
 	Storage struct {

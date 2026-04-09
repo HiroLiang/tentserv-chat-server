@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"sync"
+
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
@@ -96,6 +98,7 @@ func (s *authHasherStub) Verify(plain, hash string) bool {
 }
 
 type authAccountRepoStub struct {
+	mu              sync.Mutex
 	accountsByID    map[shared.AccountID]*account.Account
 	accountsByEmail map[shared.EmailAddress]*account.Account
 	accountsByName  map[string]*account.Account
@@ -132,6 +135,8 @@ func newAuthAccountRepoStub() *authAccountRepoStub {
 }
 
 func (s *authAccountRepoStub) FindByID(_ context.Context, id shared.AccountID) (*account.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.findByIDCalls++
 	if s.findByIDErr != nil {
 		return nil, s.findByIDErr
@@ -144,6 +149,8 @@ func (s *authAccountRepoStub) FindByID(_ context.Context, id shared.AccountID) (
 }
 
 func (s *authAccountRepoStub) FindByAccountName(_ context.Context, accountName string) (*account.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.findByAccountCalls++
 	if s.findByAccountErr != nil {
 		return nil, s.findByAccountErr
@@ -156,6 +163,8 @@ func (s *authAccountRepoStub) FindByAccountName(_ context.Context, accountName s
 }
 
 func (s *authAccountRepoStub) FindByEmail(_ context.Context, email shared.EmailAddress) (*account.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.findByEmailCalls++
 	if s.findByEmailErr != nil {
 		return nil, s.findByEmailErr
@@ -168,6 +177,8 @@ func (s *authAccountRepoStub) FindByEmail(_ context.Context, email shared.EmailA
 }
 
 func (s *authAccountRepoStub) Create(_ context.Context, acc *account.Account) (shared.AccountID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.createCalls++
 	if s.createErr != nil {
 		return 0, s.createErr
@@ -183,6 +194,8 @@ func (s *authAccountRepoStub) Create(_ context.Context, acc *account.Account) (s
 }
 
 func (s *authAccountRepoStub) Update(_ context.Context, acc *account.Account) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.updateCalls++
 	if s.updateErr != nil {
 		return s.updateErr
@@ -289,6 +302,7 @@ func (s *authUserRoleRepoStub) Revoke(context.Context, shared.UserID, role.Code)
 }
 
 type authVerificationStoreStub struct {
+	mu          sync.Mutex
 	tokens      map[string]int64
 	storeErr    error
 	getErr      error
@@ -307,6 +321,8 @@ func newAuthVerificationStoreStub() *authVerificationStoreStub {
 }
 
 func (s *authVerificationStoreStub) Store(_ context.Context, token string, accountID int64, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.storeCalls++
 	if s.storeErr != nil {
 		return s.storeErr
@@ -319,6 +335,8 @@ func (s *authVerificationStoreStub) Store(_ context.Context, token string, accou
 }
 
 func (s *authVerificationStoreStub) Get(_ context.Context, token string) (int64, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.getCalls++
 	if s.getErr != nil {
 		return 0, false, s.getErr
@@ -328,6 +346,8 @@ func (s *authVerificationStoreStub) Get(_ context.Context, token string) (int64,
 }
 
 func (s *authVerificationStoreStub) Delete(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.deleteCalls++
 	if s.deleteErr != nil {
 		return s.deleteErr
@@ -797,6 +817,144 @@ func TestRegisterUseCase_CommitFailureHasStructuredLog(t *testing.T) {
 	if tx.commitCalls != 1 || tx.rollbackCalls != 1 || store.storeCalls != 0 || emailService.sendCalls != 0 {
 		t.Fatalf("expected rollback and no external effects on commit failure, got commit=%d rollback=%d store=%d email=%d",
 			tx.commitCalls, tx.rollbackCalls, store.storeCalls, emailService.sendCalls)
+	}
+}
+
+func TestRegisterUseCase_LongEmailHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uow := &authRegisterUOWStub{}
+	hasher := &authHasherStub{}
+	accountRepo := newAuthAccountRepoStub()
+	uc := newAuthRegisterUseCase(uow, hasher, accountRepo, &authUserRepoStub{}, &authUserRoleRepoStub{}, newAuthVerificationStoreStub(), &authEmailServiceStub{}, &registerMailFactoryCapture{})
+	longEmail := strings.Repeat("a", 243) + "@example.com" // 255 chars total
+	input := authRegisterInput(longEmail, "new_account", "New Display", "redacted-password")
+
+	t.Log("Given: email string exceeds RFC 5321 maximum length of 254 characters")
+	t.Logf("Input: email_len=%d account=%s display_name=%q", len(input.Data.Email), input.Data.Account, input.Data.Name)
+	t.Log("Action: execute account registration with oversized email")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: out=%+v err=%v", out, err)
+	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d hash_calls=%d account_create_calls=%d commit_calls=%d rollback_calls=%d",
+		accountRepo.findByEmailCalls, accountRepo.findByAccountCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertRegisterError(t, err, ErrInvalidEmail)
+	if accountRepo.findByEmailCalls != 0 || hasher.hashCalls != 0 || accountRepo.createCalls != 0 || uow.tx.commitCalls != 0 {
+		t.Fatalf("expected long email to stop flow before repo calls, got find_email=%d hash=%d create=%d commit=%d",
+			accountRepo.findByEmailCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls)
+	}
+}
+
+func TestRegisterUseCase_InvalidAccountNameHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uow := &authRegisterUOWStub{}
+	hasher := &authHasherStub{}
+	accountRepo := newAuthAccountRepoStub()
+	uc := newAuthRegisterUseCase(uow, hasher, accountRepo, &authUserRepoStub{}, &authUserRoleRepoStub{}, newAuthVerificationStoreStub(), &authEmailServiceStub{}, &registerMailFactoryCapture{})
+	input := authRegisterInput("new@example.com", "invalid account!", "New Display", "redacted-password")
+
+	t.Log("Given: account name contains disallowed characters (spaces and punctuation)")
+	t.Logf("Input: email=%s account=%q display_name=%q", input.Data.Email, input.Data.Account, input.Data.Name)
+	t.Log("Action: execute account registration with invalid account name format")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: out=%+v err=%v", out, err)
+	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d hash_calls=%d account_create_calls=%d commit_calls=%d rollback_calls=%d",
+		accountRepo.findByEmailCalls, accountRepo.findByAccountCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertRegisterError(t, err, ErrInvalidAccount)
+	if accountRepo.findByAccountCalls != 0 || hasher.hashCalls != 0 || accountRepo.createCalls != 0 || uow.tx.commitCalls != 0 {
+		t.Fatalf("expected invalid account name to stop flow, got find_account=%d hash=%d create=%d commit=%d",
+			accountRepo.findByAccountCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls)
+	}
+}
+
+func TestRegisterUseCase_CommonPasswordHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uow := &authRegisterUOWStub{}
+	hasher := &authHasherStub{}
+	accountRepo := newAuthAccountRepoStub()
+	uc := newAuthRegisterUseCase(uow, hasher, accountRepo, &authUserRepoStub{}, &authUserRoleRepoStub{}, newAuthVerificationStoreStub(), &authEmailServiceStub{}, &registerMailFactoryCapture{})
+	input := authRegisterInput("new@example.com", "new_account", "New Display", "password")
+
+	t.Log("Given: password is in the common/weak password list")
+	t.Logf("Input: email=%s account=%s display_name=%q password_present=true", input.Data.Email, input.Data.Account, input.Data.Name)
+	t.Log("Action: execute account registration with common password")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: out=%+v err=%v", out, err)
+	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d hash_calls=%d account_create_calls=%d commit_calls=%d rollback_calls=%d",
+		accountRepo.findByEmailCalls, accountRepo.findByAccountCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertRegisterError(t, err, ErrWeakPassword)
+	if hasher.hashCalls != 0 || accountRepo.createCalls != 0 || uow.tx.commitCalls != 0 {
+		t.Fatalf("expected common password to stop flow before hashing, got hash=%d create=%d commit=%d",
+			hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls)
+	}
+}
+
+func TestRegisterUseCase_CommonPasswordCaseInsensitiveHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uow := &authRegisterUOWStub{}
+	hasher := &authHasherStub{}
+	accountRepo := newAuthAccountRepoStub()
+	uc := newAuthRegisterUseCase(uow, hasher, accountRepo, &authUserRepoStub{}, &authUserRoleRepoStub{}, newAuthVerificationStoreStub(), &authEmailServiceStub{}, &registerMailFactoryCapture{})
+	input := authRegisterInput("new@example.com", "new_account", "New Display", "PASSWORD")
+
+	t.Log("Given: password matches a common password when lowercased")
+	t.Logf("Input: email=%s account=%s display_name=%q password_present=true", input.Data.Email, input.Data.Account, input.Data.Name)
+	t.Log("Action: execute account registration with uppercased common password")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: out=%+v err=%v", out, err)
+	t.Logf("Mutation: hash_calls=%d account_create_calls=%d commit_calls=%d rollback_calls=%d",
+		hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	assertRegisterError(t, err, ErrWeakPassword)
+	if hasher.hashCalls != 0 {
+		t.Fatalf("expected common password check to run before hashing, got hash_calls=%d", hasher.hashCalls)
+	}
+}
+
+func TestRegisterUseCase_LocalhostEmailAcceptedHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	uow := &authRegisterUOWStub{}
+	hasher := &authHasherStub{hash: "hashed-password"}
+	accountRepo := newAuthAccountRepoStub()
+	userRepo := &authUserRepoStub{nextID: 501}
+	roleRepo := &authUserRoleRepoStub{}
+	store := newAuthVerificationStoreStub()
+	emailService := &authEmailServiceStub{}
+	mailFactory := &registerMailFactoryCapture{}
+	uc := newAuthRegisterUseCase(uow, hasher, accountRepo, userRepo, roleRepo, store, emailService, mailFactory)
+	input := authRegisterInput("user@localhost", "local_account", "Local User", "redacted-password")
+
+	t.Log("Given: email uses a single-label domain (localhost) which is RFC 5322 valid")
+	t.Log("Note: the HTTP binding layer (go-playground/validator) rejects user@localhost with 400 INVALID_REQUEST.")
+	t.Log("      This test validates the usecase behavior when the binding layer is bypassed (e.g. internal calls).")
+	t.Logf("Input: email=%s account=%s display_name=%q", input.Data.Email, input.Data.Account, input.Data.Name)
+	t.Log("Action: execute account registration with user@localhost email directly at usecase layer")
+
+	out, err := uc.Execute(context.Background(), input)
+
+	t.Logf("Output: account_id=%d err=%v", out.ID, err)
+	t.Logf("Mutation: find_email_calls=%d hash_calls=%d account_create_calls=%d commit_calls=%d rollback_calls=%d",
+		accountRepo.findByEmailCalls, hasher.hashCalls, accountRepo.createCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	if err != nil {
+		t.Fatalf("expected user@localhost to be accepted as valid email, got err=%v", err)
+	}
+	if out.ID == 0 {
+		t.Fatalf("expected non-zero account ID, got 0")
 	}
 }
 

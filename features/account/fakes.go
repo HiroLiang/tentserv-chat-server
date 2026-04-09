@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type Deps struct {
 	sessionManager  *bddSessionManager
 	store           *bddVerificationStore
 	email           *bddEmailService
+	registerLimiter *bddRegisterRateLimiter
 }
 
 func NewDeps() *Deps {
@@ -42,6 +44,7 @@ func NewDeps() *Deps {
 		sessionManager:  newBDDSessionManager(),
 		store:           newBDDVerificationStore(),
 		email:           &bddEmailService{},
+		registerLimiter: &bddRegisterRateLimiter{},
 	}
 	deps.Reset()
 	return deps
@@ -56,6 +59,15 @@ func (d *Deps) Reset() {
 	d.sessionManager.reset()
 	d.store.reset()
 	d.email.reset()
+	d.registerLimiter.reset()
+}
+
+func (d *Deps) RegisterLimiter() appSecurity.RegisterRateLimiter {
+	return d.registerLimiter
+}
+
+func (d *Deps) SetRegisterLimitExceeded(exceeded bool) {
+	d.registerLimiter.exceeded = exceeded
 }
 
 func (d *Deps) SessionManager() authPort.SessionManager {
@@ -89,7 +101,7 @@ func (d *Deps) LastSessionDeviceID() shared.DeviceID {
 func (d *Deps) RegisterUseCases(
 	uow transaction.UnitOfWork,
 	hasher appSecurity.Hasher,
-) (*authUseCase.RegisterUseCase, *authUseCase.VerifyEmailUseCase) {
+) (*authUseCase.RegisterUseCase, *authUseCase.VerifyEmailUseCase, *authUseCase.ResendVerifyEmailUseCase) {
 	registerUseCase := authUseCase.NewRegisterUseCase(
 		uow,
 		hasher,
@@ -103,7 +115,15 @@ func (d *Deps) RegisterUseCases(
 		},
 	)
 	verifyUseCase := authUseCase.NewVerifyEmailUseCase(d.store, d.accountRepo)
-	return registerUseCase, verifyUseCase
+	resendVerifyUseCase := authUseCase.NewResendVerifyEmailUseCase(
+		d.store,
+		d.accountRepo,
+		d.email,
+		func(string, string, string) appEmail.EmailBuilder {
+			return bddEmailBuilder{}
+		},
+	)
+	return registerUseCase, verifyUseCase, resendVerifyUseCase
 }
 
 func (d *Deps) LoginUseCases(
@@ -686,6 +706,15 @@ func (s *bddVerificationStore) Store(_ context.Context, token string, accountID 
 	return nil
 }
 
+// expireToken simulates Redis TTL elapse: removes the token from the store without
+// incrementing deleteCalls, so mutation assertions can distinguish TTL expiry from
+// use-case-initiated Delete calls.
+func (s *bddVerificationStore) expireToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tokens, token)
+}
+
 func (s *bddVerificationStore) Get(_ context.Context, token string) (int64, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -738,13 +767,37 @@ func cloneBDDAccount(acc *domainaccount.Account) *domainaccount.Account {
 	return &cloned
 }
 
+type bddRegisterRateLimiter struct {
+	mu       sync.Mutex
+	exceeded bool
+	calls    int
+}
+
+func (l *bddRegisterRateLimiter) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.exceeded = false
+	l.calls = 0
+}
+
+func (l *bddRegisterRateLimiter) CheckRegisterAttempt(_ context.Context, _ string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls++
+	if l.exceeded {
+		return errors.New("registration rate limit exceeded")
+	}
+	return nil
+}
+
 var (
-	_ domainaccount.Repository = (*bddAccountRepo)(nil)
-	_ domainuser.Repository    = (*bddUserRepo)(nil)
-	_ userrole.Repository      = (*bddUserRoleRepo)(nil)
-	_ authPort.SessionManager  = (*bddSessionManager)(nil)
-	_ domaindevice.Repository  = (*bddDeviceRepo)(nil)
-	_ participant.Repository   = (*bddParticipantRepo)(nil)
-	_ appEmail.EmailService    = (*bddEmailService)(nil)
-	_ appEmail.EmailBuilder    = (*bddEmailBuilder)(nil)
+	_ domainaccount.Repository       = (*bddAccountRepo)(nil)
+	_ domainuser.Repository          = (*bddUserRepo)(nil)
+	_ userrole.Repository            = (*bddUserRoleRepo)(nil)
+	_ authPort.SessionManager        = (*bddSessionManager)(nil)
+	_ domaindevice.Repository        = (*bddDeviceRepo)(nil)
+	_ participant.Repository         = (*bddParticipantRepo)(nil)
+	_ appEmail.EmailService          = (*bddEmailService)(nil)
+	_ appEmail.EmailBuilder          = (*bddEmailBuilder)(nil)
+	_ appSecurity.RegisterRateLimiter = (*bddRegisterRateLimiter)(nil)
 )

@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
 	"github.com/gin-gonic/gin"
@@ -35,5 +37,21 @@ func IPRateLimitMiddleware(limiter security.RateLimiter) gin.HandlerFunc {
 		}
 		c.Next()
 
+	}
+}
+
+func RegisterRateLimitMiddleware(limiter security.RegisterRateLimiter) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+
+		if err := limiter.CheckRegisterAttempt(c.Request.Context(), ip); err != nil {
+			c.JSON(http.StatusTooManyRequests, response.ErrorResponse{
+				Code:    "RATE_LIMIT_EXCEEDED",
+				Message: "Too many registration attempts from your IP, please try again later",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }

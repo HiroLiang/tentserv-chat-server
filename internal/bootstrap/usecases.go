@@ -22,6 +22,7 @@ type UseCases struct {
 	LogoutUseCase            *authUseCase.LogoutUseCase
 	GetAccountProfileUseCase *authUseCase.GetProfileUseCase
 	VerifyEmailUseCase       *authUseCase.VerifyEmailUseCase
+	ResendVerifyEmailUseCase *authUseCase.ResendVerifyEmailUseCase
 
 	UpdateUserProfileUseCase *userUseCase.UpdateProfileUseCase
 	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
@@ -110,6 +111,14 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		LogoutUseCase:            authUseCase.NewLogoutUseCase(deps.SessionManager),
 		GetAccountProfileUseCase: authUseCase.NewGetProfileUseCase(deps.AccountRepo, deps.UserRepo),
 		VerifyEmailUseCase:       authUseCase.NewVerifyEmailUseCase(deps.VerificationStore, deps.AccountRepo),
+		ResendVerifyEmailUseCase: authUseCase.NewResendVerifyEmailUseCase(
+			deps.VerificationStore,
+			deps.AccountRepo,
+			deps.EmailService,
+			func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder {
+				return infraBuilder.NewRegisterMailBuilder(sender, recipientEmail, recipientName, verifyURL)
+			},
+		),
 
 		UpdateUserProfileUseCase: userUseCase.NewUpdateProfileUseCase(deps.UserRepo, deps.UserRoleRepo),
 		UploadAvatarUseCase:      userUseCase.NewUploadAvatarUseCase(deps.ContextHasher, deps.LocalFileStorage, deps.UserRepo),

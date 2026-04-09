@@ -18,6 +18,8 @@ rate_limit_config:
   ip_unit: 10s
   user_limit: 1800
   user_unit: 1m
+  register_ip_limit: 10
+  register_ip_unit: 1h
 secrets:
   hmac: ${HMAC_SECRET}
 token:

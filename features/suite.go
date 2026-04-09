@@ -45,7 +45,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		friendshipBDD = friendshipfeatures.NewDeps()
 
 		hasher := security.NewArgon2Hasher()
-		accountRegisterUseCase, verifyEmailUseCase := accountBDD.RegisterUseCases(
+		accountRegisterUseCase, verifyEmailUseCase, resendVerifyEmailUseCase := accountBDD.RegisterUseCases(
 			bddsupport.UOW{},
 			hasher,
 		)
@@ -58,7 +58,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
 		router.Use(middleware.ContextMiddleware())
-		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, loginUseCase, nil, getProfileUseCase, verifyEmailUseCase)
+		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, loginUseCase, nil, getProfileUseCase, verifyEmailUseCase, resendVerifyEmailUseCase, accountBDD.RegisterLimiter())
 		authHandler.RegisterAuthRoutes(router.Group("/api/auth"))
 		deviceRoutes := deviceHandler.NewDeviceHandler(deviceRegisterUseCase, nil, deviceUpdateUseCase, nil, nil, nil)
 		deviceRoutes.RegisterPublicDeviceRoutes(router.Group("/api/device"))

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
+	appSecurity "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/security"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/middleware"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/response"
@@ -12,11 +13,13 @@ import (
 )
 
 type AuthHandler struct {
-	registerUsecase    *authUseCase.RegisterUseCase
-	loginUsecase       *authUseCase.LoginUseCase
-	logoutUsecase      *authUseCase.LogoutUseCase
-	getProfileUsecase  *authUseCase.GetProfileUseCase
-	verifyEmailUsecase *authUseCase.VerifyEmailUseCase
+	registerUsecase          *authUseCase.RegisterUseCase
+	loginUsecase             *authUseCase.LoginUseCase
+	logoutUsecase            *authUseCase.LogoutUseCase
+	getProfileUsecase        *authUseCase.GetProfileUseCase
+	verifyEmailUsecase       *authUseCase.VerifyEmailUseCase
+	resendVerifyEmailUsecase *authUseCase.ResendVerifyEmailUseCase
+	registerLimiter          appSecurity.RegisterRateLimiter
 }
 
 func NewAuthHandler(
@@ -25,22 +28,31 @@ func NewAuthHandler(
 	logoutUsecase *authUseCase.LogoutUseCase,
 	getProfileUsecase *authUseCase.GetProfileUseCase,
 	verifyEmailUsecase *authUseCase.VerifyEmailUseCase,
+	resendVerifyEmailUsecase *authUseCase.ResendVerifyEmailUseCase,
+	registerLimiter appSecurity.RegisterRateLimiter,
 ) *AuthHandler {
 	return &AuthHandler{
-		registerUsecase:    registerUsecase,
-		loginUsecase:       loginUsecase,
-		logoutUsecase:      logoutUsecase,
-		getProfileUsecase:  getProfileUsecase,
-		verifyEmailUsecase: verifyEmailUsecase,
+		registerUsecase:          registerUsecase,
+		loginUsecase:             loginUsecase,
+		logoutUsecase:            logoutUsecase,
+		getProfileUsecase:        getProfileUsecase,
+		verifyEmailUsecase:       verifyEmailUsecase,
+		resendVerifyEmailUsecase: resendVerifyEmailUsecase,
+		registerLimiter:          registerLimiter,
 	}
 }
 
 func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
-	r.POST("/register", h.register)
+	if h.registerLimiter != nil {
+		r.POST("/register", middleware.RegisterRateLimitMiddleware(h.registerLimiter), h.register)
+	} else {
+		r.POST("/register", h.register)
+	}
 	r.POST("/login", h.login)
 	r.POST("/logout", middleware.RequireAuthMiddleware(), h.logout)
 	r.GET("/profile", middleware.RequireAuthMiddleware(), h.getProfile)
 	r.GET("/verify-email", h.verifyEmail)
+	r.POST("/resend-verify-email", h.resendVerifyEmail)
 }
 
 // @Summary Account register
@@ -205,4 +217,34 @@ func (h *AuthHandler) verifyEmail(c *gin.Context) {
 	}
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", authUseCase.EmailVerifiedHTML)
+}
+
+// @Summary Resend verification email
+// @Description Resend the verification email to an applying account. Generates a new token each call.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param payload body ResendVerifyEmailRequest true "Email payload"
+// @Success 200 {object} ResendVerifyEmailResponse
+// @Failure 400 {object} response.ErrorResponse "Bad Request"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/auth/resend-verify-email [post]
+func (h *AuthHandler) resendVerifyEmail(c *gin.Context) {
+	var req ResendVerifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid resend verify email payload",
+		})
+		return
+	}
+
+	input := adapter.BuildInput(c, authUseCase.ResendVerifyEmailInput{Email: req.Email})
+	_, err := h.resendVerifyEmailUsecase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, ResendVerifyEmailResponse{})
 }

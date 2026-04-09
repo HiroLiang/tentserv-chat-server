@@ -27,18 +27,23 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	s := &steps{APITestContext: apiCtx, deps: deps}
 
 	ctx.Step(`^account registration state is clean$`, s.accountRegistrationStateIsClean)
+	ctx.Step(`^the registration rate limit is exceeded$`, s.theRegistrationRateLimitIsExceeded)
 	ctx.Step(`^an account exists with email "([^"]*)" and account "([^"]*)"$`, s.anAccountExists)
 	ctx.Step(`^I register an account with email "([^"]*)", account "([^"]*)", display name "([^"]*)", and password "([^"]*)"$`, s.iRegisterAnAccount)
 	ctx.Step(`^I verify the registered email$`, s.iVerifyTheRegisteredEmail)
 	ctx.Step(`^I verify the same email token again$`, s.iVerifyTheSameEmailTokenAgain)
 	ctx.Step(`^I verify email with an empty token$`, s.iVerifyEmailWithAnEmptyToken)
 	ctx.Step(`^I verify email with an invalid token$`, s.iVerifyEmailWithAnInvalidToken)
+	ctx.Step(`^the verification token expires$`, s.theVerificationTokenExpires)
+	ctx.Step(`^I resend the verification email to "([^"]*)"$`, s.iResendTheVerificationEmailTo)
 	ctx.Step(`^the verify email response should be an HTML success page$`, s.theVerifyEmailResponseShouldBeAnHTMLSuccessPage)
 	ctx.Step(`^the account registration mutation should include account, user, role, token, and email$`, s.theRegistrationMutationShouldBeComplete)
 	ctx.Step(`^the account registration mutation should stop before account creation$`, s.theRegistrationMutationShouldStopBeforeAccountCreation)
 	ctx.Step(`^the email verification mutation should activate the account and consume the token$`, s.theEmailVerificationMutationShouldActivateTheAccountAndConsumeTheToken)
 	ctx.Step(`^the reused email verification token should remain consumed$`, s.theReusedEmailVerificationTokenShouldRemainConsumed)
 	ctx.Step(`^the email verification mutation should not update an account$`, s.theEmailVerificationMutationShouldNotUpdateAnAccount)
+	ctx.Step(`^the expired token verification should not activate the account$`, s.theExpiredTokenVerificationShouldNotActivateAccount)
+	ctx.Step(`^the resend email mutation should store a new token and send an email$`, s.theResendEmailMutationShouldStoreNewTokenAndSendEmail)
 	ctx.Step(`^login state is clean$`, s.loginStateIsClean)
 	ctx.Step(`^a registered login device "([^"]*)" named "([^"]*)" exists$`, s.aRegisteredLoginDeviceExists)
 	ctx.Step(`^an? "([^"]*)" account exists for login with email "([^"]*)", account "([^"]*)", and password "([^"]*)"$`, s.anAccountExistsForLogin)
@@ -51,6 +56,18 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^login mutation should stop before session creation$`, s.loginMutationShouldStopBeforeSessionCreation)
 	ctx.Step(`^I request my auth profile using the login token and device "([^"]*)"$`, s.iRequestMyAuthProfileUsingTheLoginToken)
 	ctx.Step(`^auth profile response should describe the current login user$`, s.authProfileResponseShouldDescribeTheCurrentLoginUser)
+}
+
+func (a *steps) theRegistrationRateLimitIsExceeded() error {
+	a.start = time.Now()
+	fmt.Println("Given: registration rate limit is already exceeded for this IP")
+	fmt.Println("Input: register_limiter_exceeded=true")
+	fmt.Println("Action: set BDD rate limiter to exceeded state")
+	a.deps.SetRegisterLimitExceeded(true)
+	fmt.Println("Output: rate limiter will reject next registration attempt")
+	fmt.Println("Mutation: register_limiter_exceeded=true")
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
 }
 
 func (a *steps) accountRegistrationStateIsClean() error {
@@ -128,6 +145,88 @@ func (a *steps) iVerifyEmailWithAnEmptyToken() error {
 
 func (a *steps) iVerifyEmailWithAnInvalidToken() error {
 	return a.requestVerifyEmail("invalid", "invalid-token", true)
+}
+
+func (a *steps) theVerificationTokenExpires() error {
+	a.start = time.Now()
+	token := a.deps.store.lastStoredToken
+	fmt.Println("Given: a valid token was issued but its TTL has elapsed")
+	fmt.Printf("Input: token_present=%t\n", token != "")
+	fmt.Println("Action: expire token in verification store (simulates Redis TTL)")
+	a.deps.store.expireToken(token)
+	fmt.Printf("Output: tokens_remaining=%d\n", len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_expired=true delete_calls_unchanged=%d\n", a.deps.store.deleteCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iResendTheVerificationEmailTo(email string) error {
+	a.start = time.Now()
+	storeBefore := a.deps.store.storeCalls
+	emailBefore := a.deps.email.sendCalls
+	fmt.Println("Given: resend verification email HTTP endpoint is available")
+	fmt.Printf("Input: email=%s store_calls_before=%d email_calls_before=%d\n", email, storeBefore, emailBefore)
+	fmt.Println("Action: POST /api/auth/resend-verify-email")
+
+	payload := map[string]string{"email": email}
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/resend-verify-email", payload); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d tokens_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.tokens))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) theExpiredTokenVerificationShouldNotActivateAccount() error {
+	start := time.Now()
+	fmt.Println("Given: verification token was expired before the verify attempt")
+	fmt.Println("Input: expecting no account activation and no delete call from verify use case")
+	fmt.Println("Action: inspect account and verification store state after expired-token verify")
+
+	// After registration: updateCalls=1 (link user). Verify should NOT add another update.
+	// expireToken() did not increment deleteCalls, so deleteCalls should still be 0.
+	noVerifyDelete := a.deps.store.deleteCalls == 0
+	noActivation := len(a.deps.store.tokens) == 0
+
+	status, accountFound := a.firstAccountStatus()
+	notActive := !accountFound || status == domainaccount.Applying
+
+	fmt.Printf("Output: no_verify_delete=%t no_activation=%t account_status=%s\n", noVerifyDelete, noActivation, status)
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !noVerifyDelete {
+		return fmt.Errorf("expected no delete call from verify use case for expired token, got delete_calls=%d", a.deps.store.deleteCalls)
+	}
+	if !noActivation || !notActive {
+		return fmt.Errorf("expected account to remain unactivated, got tokens_remaining=%d account_status=%s", len(a.deps.store.tokens), status)
+	}
+	return nil
+}
+
+func (a *steps) theResendEmailMutationShouldStoreNewTokenAndSendEmail() error {
+	start := time.Now()
+	fmt.Println("Given: resend verification email should issue a new token and send an email")
+	fmt.Println("Input: expecting incremented store and email send calls")
+	fmt.Println("Action: inspect verification store and email service counters")
+
+	tokenStored := a.deps.store.storeCalls >= 2
+	emailSent := a.deps.email.sendCalls >= 2
+
+	fmt.Printf("Output: token_stored=%t email_sent=%t\n", tokenStored, emailSent)
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d tokens_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.tokens))
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !tokenStored || !emailSent {
+		return fmt.Errorf("expected resend to store a new token and send an email, got store_calls=%d email_calls=%d",
+			a.deps.store.storeCalls, a.deps.email.sendCalls)
+	}
+	return nil
 }
 
 func (a *steps) requestVerifyEmail(caseName, token string, includeToken bool) error {

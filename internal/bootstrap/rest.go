@@ -51,7 +51,9 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.LoginUseCase,
 		useCases.LogoutUseCase,
 		useCases.GetAccountProfileUseCase,
-		useCases.VerifyEmailUseCase)
+		useCases.VerifyEmailUseCase,
+		useCases.ResendVerifyEmailUseCase,
+		dependencies.RegisterRateLimiter)
 	authHandler.RegisterAuthRoutes(group.Group("/auth"))
 
 	// User Handler
