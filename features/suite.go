@@ -11,6 +11,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
 	accountHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/account"
+	chatHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/chat"
 	deviceHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/device"
 	e2eeHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/e2ee"
 	friendshipHandler "github.com/HiroLiang/tentserv-chat-server/internal/interface/http/handler/friendship"
@@ -54,6 +55,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		e2eeUseCases := e2eeBDD.RegisterUseCases()
 		createSKRUseCase := e2eeBDD.SKR.RegisterCreateSenderKeyRequestUseCase()
 		friendshipUseCases := friendshipBDD.RegisterUseCases(bddsupport.UOW{})
+		createChatRoomUseCase := friendshipBDD.RegisterChatUseCase(bddsupport.UOW{})
 
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
@@ -94,6 +96,20 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			nil,
 			createSKRUseCase,
 		).RegisterE2EERoutes(router.Group("/api/e2ee", middleware.RequireAuthMiddleware()))
+		chatHandler.NewChatRoomHandler(
+			createChatRoomUseCase,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+		).RegisterChatRoomRoutes(router.Group("/api/chat", middleware.RequireAuthMiddleware()))
 
 		testServer = httptest.NewServer(router)
 		baseURL = testServer.URL

@@ -7,6 +7,7 @@ import (
 	devicefeatures "github.com/HiroLiang/tentserv-chat-server/features/device"
 	e2eefeatures "github.com/HiroLiang/tentserv-chat-server/features/e2ee"
 	friendshipfeatures "github.com/HiroLiang/tentserv-chat-server/features/friendship"
+	integrationfeatures "github.com/HiroLiang/tentserv-chat-server/features/integration"
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
 	"github.com/cucumber/godog"
 )
@@ -28,4 +29,5 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	devicefeatures.RegisterSteps(ctx, apiCtx, deviceBDD)
 	e2eefeatures.RegisterSteps(ctx, apiCtx, e2eeBDD, accountBDD)
 	friendshipfeatures.RegisterSteps(ctx, apiCtx, friendshipBDD, accountBDD)
+	integrationfeatures.RegisterSteps(ctx, apiCtx, accountBDD, friendshipBDD)
 }

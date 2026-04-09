@@ -182,6 +182,96 @@ func TestCheckKeyStatusUseCase_ReturnsPublicMaterialAndOTPCountWithoutConsuming(
 	assert.Equal(t, 0, otpRepo.consumeCalls)
 }
 
+func TestCheckKeyStatusUseCase_ReturnsIdentityMaterialWhenSignedPreKeyIsMissing(t *testing.T) {
+	deviceIDText := "550e8400-e29b-41d4-a716-446655440000"
+	deviceID, err := shared.ParseDeviceID(deviceIDText)
+	require.NoError(t, err)
+
+	var identityPub useridentitykey.PublicKey
+	copy(identityPub[:], bytesOf(1, 32))
+	var identitySign useridentitykey.SignPublicKey
+	copy(identitySign[:], bytesOf(2, 32))
+
+	uc := newCheckKeyStatusUseCase(
+		&checkKeyStatusIdentityRepoStub{
+			findByUserAndDevice: func(context.Context, user.ID, device.ID) (*useridentitykey.UserIdentityKey, error) {
+				return &useridentitykey.UserIdentityKey{
+					DeviceID:      deviceID,
+					PublicKey:     identityPub,
+					SignPublicKey: identitySign,
+				}, nil
+			},
+		},
+		&checkKeyStatusSignedPreKeyRepoStub{},
+		&checkKeyStatusOTPPreKeyRepoStub{count: 0},
+	)
+
+	out, err := uc.Execute(context.Background(), checkKeyStatusInput(deviceIDText))
+
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.True(t, out.IdentityKeyExists)
+	assert.False(t, out.SignedPreKeyExists)
+	assert.Equal(t, deviceIDText, out.DeviceID)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(identityPub[:]), out.IdentityKey)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(identitySign[:]), out.IdentityKeySign)
+	assert.Empty(t, out.SignedPreKey)
+	assert.Empty(t, out.SPKSignature)
+	assert.Zero(t, out.SPKKeyID)
+	assert.Equal(t, 0, out.OTPPreKeyCount)
+}
+
+func TestCheckKeyStatusUseCase_ReturnsZeroOTPCountWhenOnlyIdentityAndSignedPreKeyExist(t *testing.T) {
+	deviceIDText := "550e8400-e29b-41d4-a716-446655440000"
+	deviceID, err := shared.ParseDeviceID(deviceIDText)
+	require.NoError(t, err)
+
+	var identityPub useridentitykey.PublicKey
+	copy(identityPub[:], bytesOf(1, 32))
+	var identitySign useridentitykey.SignPublicKey
+	copy(identitySign[:], bytesOf(2, 32))
+	var spkPub usersignedprekey.PublicKey
+	copy(spkPub[:], bytesOf(3, 32))
+	var spkSig usersignedprekey.Signature
+	copy(spkSig[:], bytesOf(4, 64))
+
+	uc := newCheckKeyStatusUseCase(
+		&checkKeyStatusIdentityRepoStub{
+			findByUserAndDevice: func(context.Context, user.ID, device.ID) (*useridentitykey.UserIdentityKey, error) {
+				return &useridentitykey.UserIdentityKey{
+					DeviceID:      deviceID,
+					PublicKey:     identityPub,
+					SignPublicKey: identitySign,
+				}, nil
+			},
+		},
+		&checkKeyStatusSignedPreKeyRepoStub{
+			findActive: func(context.Context, user.ID, device.ID) (*usersignedprekey.UserSignedPreKey, error) {
+				return &usersignedprekey.UserSignedPreKey{
+					DeviceID:  deviceID,
+					KeyID:     7,
+					PublicKey: spkPub,
+					Signature: spkSig,
+					IsActive:  true,
+				}, nil
+			},
+		},
+		&checkKeyStatusOTPPreKeyRepoStub{count: 0},
+	)
+
+	out, err := uc.Execute(context.Background(), checkKeyStatusInput(deviceIDText))
+
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.True(t, out.IdentityKeyExists)
+	assert.True(t, out.SignedPreKeyExists)
+	assert.Equal(t, deviceIDText, out.DeviceID)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(spkPub[:]), out.SignedPreKey)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(spkSig[:]), out.SPKSignature)
+	assert.Equal(t, uint32(7), out.SPKKeyID)
+	assert.Equal(t, 0, out.OTPPreKeyCount)
+}
+
 func TestCheckKeyStatusUseCase_PropagatesOTPCountError(t *testing.T) {
 	deviceID := "550e8400-e29b-41d4-a716-446655440000"
 	repoErr := errors.New("otp count unavailable")

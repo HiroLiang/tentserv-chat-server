@@ -148,6 +148,61 @@ func TestE2EEHandler_CheckKeyStatusReturnsPublicMaterial(t *testing.T) {
 	assert.Equal(t, 11, body.OTPPreKeyCount)
 }
 
+func TestE2EEHandler_CheckKeyStatusReturnsIdentityWithoutSignedPreKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deviceID, err := shared.ParseDeviceID("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
+
+	var identityPub useridentitykey.PublicKey
+	copy(identityPub[:], repeatedHandlerByte(1, 32))
+	var identitySign useridentitykey.SignPublicKey
+	copy(identitySign[:], repeatedHandlerByte(2, 32))
+
+	handler := NewE2EEHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		usecase.NewCheckKeyStatusUseCase(
+			handlerIdentityRepoStub{key: &useridentitykey.UserIdentityKey{
+				DeviceID:      deviceID,
+				PublicKey:     identityPub,
+				SignPublicKey: identitySign,
+			}},
+			handlerSignedPreKeyRepoStub{},
+			handlerOTPPreKeyRepoStub{count: 0},
+		),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	router := gin.New()
+	router.Use(middleware.ContextMiddleware())
+	handler.RegisterE2EERoutes(router.Group("/e2ee"))
+
+	req := httptest.NewRequest(http.MethodGet, "/e2ee/key-status/501?device_id=11111111-1111-1111-1111-111111111111", nil)
+	req.Header.Set("X-Device-ID", "11111111-1111-1111-1111-111111111111")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	var body CheckKeyStatusResponse
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	assert.True(t, body.IdentityKeyExists)
+	assert.False(t, body.SignedPreKeyExists)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", body.DeviceID)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(identityPub[:]), body.IdentityKey)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(identitySign[:]), body.IdentityKeySign)
+	assert.Empty(t, body.SignedPreKey)
+	assert.Empty(t, body.SPKSignature)
+	assert.Zero(t, body.SPKKeyID)
+	assert.Equal(t, 0, body.OTPPreKeyCount)
+}
+
 func TestE2EEHandler_GetKeyPolicyReturnsConfiguredDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	require.NoError(t, config.LoadConfig("../../../../../dev-doc/config"))

@@ -65,6 +65,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I upload E2EE signed pre-key "([^"]*)" with key id (\d+) for device "([^"]*)"$`, s.iUploadE2EESignedPreKeyWithKeyIDForDevice)
 	ctx.Step(`^I upload (\d+) E2EE one-time pre-keys starting at key id (\d+) for device "([^"]*)"$`, s.iUploadE2EEOneTimePreKeysStartingAtKeyIDForDevice)
 	ctx.Step(`^E2EE key status should expose identity "([^"]*)", signed pre-key "([^"]*)", key id (\d+), and (\d+) OTP keys for device "([^"]*)"$`, s.e2eeKeyStatusShouldExposeIdentitySignedPreKeyKeyIDAndOTPKeysForDevice)
+	ctx.Step(`^E2EE key status should expose identity "([^"]*)", no signed pre-key, and (\d+) OTP keys for device "([^"]*)"$`, s.e2eeKeyStatusShouldExposeIdentityWithoutSignedPreKeyForDevice)
 	ctx.Step(`^the E2EE identity key response fingerprint should equal SHA-256 of key "([^"]*)"$`, s.theE2EEIdentityKeyResponseFingerprintShouldEqualSHA256OfKey)
 	ctx.Step(`^the E2EE key status check should not consume OTP keys$`, s.theE2EEKeyStatusCheckShouldNotConsumeOTPKeys)
 	ctx.Step(`^I upload an invalid E2EE identity key for device "([^"]*)"$`, s.iUploadAnInvalidE2EEIdentityKeyForDevice)
@@ -320,6 +321,36 @@ func (s *steps) e2eeKeyStatusShouldExposeIdentitySignedPreKeyKeyIDAndOTPKeysForD
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	if !matches {
 		return fmt.Errorf("unexpected E2EE key status: %+v", status)
+	}
+	return nil
+}
+
+func (s *steps) e2eeKeyStatusShouldExposeIdentityWithoutSignedPreKeyForDevice(identityName string, otpCount int, deviceID string) error {
+	start := time.Now()
+	fmt.Println("Given: E2EE key status response should expose identity without signed pre-key")
+	fmt.Printf("Input: identity_name=%s expected_otp_count=%d device_id=%s\n", identityName, otpCount, deviceID)
+	fmt.Println("Action: decode key status response")
+
+	status, err := decodeKeyStatus(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	matches := status.IdentityKeyExists &&
+		!status.SignedPreKeyExists &&
+		status.DeviceID == deviceID &&
+		status.IdentityKey == namedKeyMaterial(identityName, 32) &&
+		status.IdentityKeySign == namedSignKeyMaterial(identityName, 32) &&
+		status.SignedPreKey == "" &&
+		status.SPKSignature == "" &&
+		status.SPKKeyID == 0 &&
+		status.OTPPreKeyCount == otpCount
+
+	fmt.Printf("Output: identity_exists=%t spk_exists=%t device_id=%s otp_count=%d partial_match=%t\n",
+		status.IdentityKeyExists, status.SignedPreKeyExists, status.DeviceID, status.OTPPreKeyCount, matches)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !matches {
+		return fmt.Errorf("unexpected identity-only E2EE key status: %+v", status)
 	}
 	return nil
 }

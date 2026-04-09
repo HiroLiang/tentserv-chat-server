@@ -56,6 +56,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I attempt login (\d+) times with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iAttemptLoginTimesWithIdentifierPasswordAndDevice)
 	ctx.Step(`^login response should include a bearer token$`, s.loginResponseShouldIncludeABearerToken)
 	ctx.Step(`^I remember the login token as "([^"]*)"$`, s.iRememberTheLoginTokenAs)
+	ctx.Step(`^the raw auth header "([^"]*)" is remembered as "([^"]*)"$`, s.theRawAuthHeaderIsRememberedAs)
 	ctx.Step(`^login mutation should include session, device link, participant, and login event$`, s.loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent)
 	ctx.Step(`^login mutation should reuse the existing participant$`, s.loginMutationShouldReuseTheExistingParticipant)
 	ctx.Step(`^login mutation should stop before session creation$`, s.loginMutationShouldStopBeforeSessionCreation)
@@ -597,6 +598,20 @@ func (a *steps) iRememberTheLoginTokenAs(label string) error {
 	return nil
 }
 
+func (a *steps) theRawAuthHeaderIsRememberedAs(rawHeader, label string) error {
+	start := time.Now()
+	fmt.Println("Given: a raw Authorization header should be reused for a later request")
+	fmt.Printf("Input: label=%s header_present=%t bearer_prefix=%t\n", label, rawHeader != "", strings.HasPrefix(rawHeader, "Bearer "))
+	fmt.Println("Action: store the raw Authorization header without validation")
+
+	a.rememberedTokens[label] = rawHeader
+
+	fmt.Printf("Output: token_saved=%t saved_tokens=%d\n", a.rememberedTokens[label] != "", len(a.rememberedTokens))
+	fmt.Println("Mutation: remembered_token_saved=true")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
 func (a *steps) loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent() error {
 	start := time.Now()
 	fmt.Println("Given: successful login should persist all login side effects")
@@ -685,13 +700,22 @@ func (a *steps) theLoginIdentifierShouldBeLocked(identifier string) error {
 
 func (a *steps) iRequestMyAuthProfileUsingTheLoginToken(deviceID string) error {
 	a.start = time.Now()
+	authHeader := ""
+	if a.Response != nil {
+		authHeader = a.Response.Header.Get("Authorization")
+	}
+	if authHeader == "" {
+		token := a.deps.LastAccessToken()
+		if token != "" {
+			authHeader = "Bearer " + string(token)
+		}
+	}
 	fmt.Println("Given: a login bearer token was returned")
-	fmt.Printf("Input: device_id=%s token_present=%t\n", deviceID, a.Response.Header.Get("Authorization") != "")
+	fmt.Printf("Input: device_id=%s token_present=%t\n", deviceID, authHeader != "")
 	fmt.Println("Action: GET /api/auth/profile")
 
-	authHeader := a.Response.Header.Get("Authorization")
 	if authHeader == "" {
-		return fmt.Errorf("no Authorization header from login response")
+		return fmt.Errorf("no bearer token available from login session")
 	}
 	if err := a.doAuthProfileRequest(authHeader, deviceID); err != nil {
 		return err

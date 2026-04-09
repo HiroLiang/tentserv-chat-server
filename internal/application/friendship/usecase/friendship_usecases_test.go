@@ -213,6 +213,98 @@ func (noopChatMemberRepo) Update(context.Context, *chatmember.ChatMember) error 
 func (noopChatMemberRepo) SoftDelete(context.Context, chatmember.ID) error           { return nil }
 func (noopChatMemberRepo) Remove(context.Context, chatroom.ID, participant.ID) error { return nil }
 
+type acceptParticipantRepoStub struct {
+	byUserID map[shared.UserID]*participant.Participant
+}
+
+func (s *acceptParticipantRepoStub) FindByID(context.Context, participant.ID) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (s *acceptParticipantRepoStub) FindByUserID(_ context.Context, userID shared.UserID) (*participant.Participant, error) {
+	p, ok := s.byUserID[userID]
+	if !ok {
+		return nil, participant.ErrNotFound
+	}
+	copied := *p
+	return &copied, nil
+}
+
+func (s *acceptParticipantRepoStub) FindByAgentID(context.Context, int64) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (s *acceptParticipantRepoStub) FindSystemByType(context.Context, string) (*participant.Participant, error) {
+	return nil, participant.ErrNotFound
+}
+
+func (s *acceptParticipantRepoStub) Create(context.Context, *participant.Participant) error {
+	return nil
+}
+
+type acceptChatRoomRepoStub struct {
+	existingRoom *chatroom.ChatRoom
+	createCalls  int
+	createdRooms []*chatroom.ChatRoom
+}
+
+func (s *acceptChatRoomRepoStub) FindByID(context.Context, chatroom.ID) (*chatroom.ChatRoom, error) {
+	return nil, chatroom.ErrNotFound
+}
+
+func (s *acceptChatRoomRepoStub) Create(_ context.Context, room *chatroom.ChatRoom) error {
+	s.createCalls++
+	if room.ID == 0 {
+		room.ID = chatroom.ID(700 + s.createCalls)
+	}
+	copied := *room
+	s.createdRooms = append(s.createdRooms, &copied)
+	return nil
+}
+
+func (s *acceptChatRoomRepoStub) FindDirectByParticipants(context.Context, participant.ID, participant.ID) (*chatroom.ChatRoom, error) {
+	if s.existingRoom == nil {
+		return nil, chatroom.ErrNotFound
+	}
+	copied := *s.existingRoom
+	return &copied, nil
+}
+
+func (s *acceptChatRoomRepoStub) Update(context.Context, *chatroom.ChatRoom) error { return nil }
+func (s *acceptChatRoomRepoStub) SoftDelete(context.Context, chatroom.ID) error    { return nil }
+
+type acceptChatMemberRepoStub struct {
+	addedMembers []*chatmember.ChatMember
+}
+
+func (s *acceptChatMemberRepoStub) FindByID(context.Context, chatmember.ID) (*chatmember.ChatMember, error) {
+	return nil, chatmember.ErrNotFound
+}
+
+func (s *acceptChatMemberRepoStub) FindByRoomAndParticipant(context.Context, chatroom.ID, participant.ID) (*chatmember.ChatMember, error) {
+	return nil, chatmember.ErrNotFound
+}
+
+func (s *acceptChatMemberRepoStub) FindByRoom(context.Context, chatroom.ID) ([]*chatmember.ChatMember, error) {
+	return nil, nil
+}
+
+func (s *acceptChatMemberRepoStub) FindByParticipant(context.Context, participant.ID) ([]*chatmember.ChatMember, error) {
+	return nil, nil
+}
+
+func (s *acceptChatMemberRepoStub) Add(_ context.Context, member *chatmember.ChatMember) error {
+	copied := *member
+	s.addedMembers = append(s.addedMembers, &copied)
+	return nil
+}
+
+func (s *acceptChatMemberRepoStub) Update(context.Context, *chatmember.ChatMember) error { return nil }
+func (s *acceptChatMemberRepoStub) SoftDelete(context.Context, chatmember.ID) error      { return nil }
+func (s *acceptChatMemberRepoStub) Remove(context.Context, chatroom.ID, participant.ID) error {
+	return nil
+}
+
 func authedInput[T any](userID shared.UserID, data T) appShared.UseCaseInput[T] {
 	return appShared.UseCaseInput[T]{
 		Base: appShared.BaseContext{Auth: &appShared.AuthContext{UserID: userID, Roles: []role.Code{role.User}}},
@@ -333,6 +425,76 @@ func TestAcceptFriendshipUseCase_CreatesMutualAcceptedRowsAndCommits(t *testing.
 	assert.Equal(t, 1, repo.createCalls)
 	assert.Equal(t, 2, repo.updateCalls)
 	assert.Equal(t, 1, uow.tx.commitCalls)
+}
+
+func TestAcceptFriendshipUseCase_CreatesDirectRoomAndOwnerMembersWhenMissing(t *testing.T) {
+	repo := &friendshipRepoStub{}
+	repo.findByID = func(context.Context, int64) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+	}
+	repo.findByUserIDAndFriendID = func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+		if userID == 501 && friendID == 601 {
+			return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusPending}, nil
+		}
+		return nil, friendship.ErrFriendshipNotFound
+	}
+
+	participantRepo := &acceptParticipantRepoStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			501: {ID: participant.ID(21), UserID: ptrUserID(501)},
+			601: {ID: participant.ID(22), UserID: ptrUserID(601)},
+		},
+	}
+	chatRoomRepo := &acceptChatRoomRepoStub{}
+	chatMemberRepo := &acceptChatMemberRepoStub{}
+
+	err := NewAcceptFriendshipUseCase(&friendshipUOWStub{}, repo, participantRepo, chatRoomRepo, chatMemberRepo).
+		Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+
+	require.NoError(t, err)
+	require.Len(t, chatRoomRepo.createdRooms, 1)
+	assert.Equal(t, chatroom.Direct, chatRoomRepo.createdRooms[0].Type)
+	assert.Equal(t, 2, chatRoomRepo.createdRooms[0].MaxMembers)
+	require.Len(t, chatMemberRepo.addedMembers, 2)
+	assert.Equal(t, chatRoomRepo.createdRooms[0].ID, chatMemberRepo.addedMembers[0].RoomID)
+	assert.Equal(t, chatRoomRepo.createdRooms[0].ID, chatMemberRepo.addedMembers[1].RoomID)
+	assert.Equal(t, participant.ID(21), chatMemberRepo.addedMembers[0].ParticipantID)
+	assert.Equal(t, participant.ID(22), chatMemberRepo.addedMembers[1].ParticipantID)
+	assert.Equal(t, chatmember.Owner, chatMemberRepo.addedMembers[0].Role)
+	assert.Equal(t, chatmember.Owner, chatMemberRepo.addedMembers[1].Role)
+}
+
+func TestAcceptFriendshipUseCase_SkipsDirectRoomCreationWhenOneAlreadyExists(t *testing.T) {
+	repo := &friendshipRepoStub{}
+	repo.findByID = func(context.Context, int64) (*friendship.Friendship, error) {
+		return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+	}
+	repo.findByUserIDAndFriendID = func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+		if userID == 501 && friendID == 601 {
+			return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusPending}, nil
+		}
+		return nil, friendship.ErrFriendshipNotFound
+	}
+
+	participantRepo := &acceptParticipantRepoStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			501: {ID: participant.ID(21), UserID: ptrUserID(501)},
+			601: {ID: participant.ID(22), UserID: ptrUserID(601)},
+		},
+	}
+	chatRoomRepo := &acceptChatRoomRepoStub{
+		existingRoom: &chatroom.ChatRoom{ID: chatroom.ID(88), Type: chatroom.Direct, MaxMembers: 2},
+	}
+	chatMemberRepo := &acceptChatMemberRepoStub{}
+
+	err := NewAcceptFriendshipUseCase(&friendshipUOWStub{}, repo, participantRepo, chatRoomRepo, chatMemberRepo).
+		Execute(context.Background(), authedInput(501, AcceptFriendshipInput{FriendshipID: 11}))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, chatRoomRepo.createCalls)
+	assert.Empty(t, chatMemberRepo.addedMembers)
+	assert.Equal(t, 1, repo.createCalls)
+	assert.Equal(t, 2, repo.updateCalls)
 }
 
 func TestAcceptFriendshipUseCase_MapsPendingForbiddenAndCommitErrors(t *testing.T) {
@@ -558,4 +720,8 @@ func TestUnblockUserUseCase_DeletesBlockedRelationshipsOnly(t *testing.T) {
 	})
 	err = uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
 	require.ErrorIs(t, err, friendship.ErrNotBlocked)
+}
+
+func ptrUserID(id shared.UserID) *shared.UserID {
+	return &id
 }

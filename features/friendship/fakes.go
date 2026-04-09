@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	chatUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
 	friendshipUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/friendship/usecase"
 	userUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/user/usecase"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatinvitation"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	domainfriendship "github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
@@ -26,6 +28,7 @@ type Deps struct {
 	participantRepo *bddParticipantRepo
 	chatRoomRepo    *bddChatRoomRepo
 	chatMemberRepo  *bddChatMemberRepo
+	invitationRepo  *bddChatInvitationRepo
 }
 
 type UseCases struct {
@@ -43,12 +46,14 @@ type UseCases struct {
 }
 
 func NewDeps() *Deps {
+	chatMemberRepo := newBDDChatMemberRepo()
 	deps := &Deps{
 		friendshipRepo:  newBDDFriendshipRepo(),
 		userRepo:        newBDDUserRepo(),
 		participantRepo: newBDDParticipantRepo(),
-		chatRoomRepo:    newBDDChatRoomRepo(),
-		chatMemberRepo:  newBDDChatMemberRepo(),
+		chatRoomRepo:    newBDDChatRoomRepo(chatMemberRepo),
+		chatMemberRepo:  chatMemberRepo,
+		invitationRepo:  newBDDChatInvitationRepo(),
 	}
 	deps.Reset()
 	return deps
@@ -60,6 +65,7 @@ func (d *Deps) Reset() {
 	d.participantRepo.reset()
 	d.chatRoomRepo.reset()
 	d.chatMemberRepo.reset()
+	d.invitationRepo.reset()
 }
 
 func (d *Deps) RegisterUseCases(uow transaction.UnitOfWork) UseCases {
@@ -76,6 +82,17 @@ func (d *Deps) RegisterUseCases(uow transaction.UnitOfWork) UseCases {
 		BlockUser:         friendshipUseCase.NewBlockUserUseCase(d.friendshipRepo),
 		UnblockUser:       friendshipUseCase.NewUnblockUserUseCase(d.friendshipRepo),
 	}
+}
+
+func (d *Deps) RegisterChatUseCase(uow transaction.UnitOfWork) *chatUseCase.CreateChatRoomUseCase {
+	return chatUseCase.NewCreateChatRoomUseCase(
+		uow,
+		d.chatRoomRepo,
+		d.chatMemberRepo,
+		d.participantRepo,
+		d.friendshipRepo,
+		d.invitationRepo,
+	)
 }
 
 func (d *Deps) SeedUser(userID shared.UserID, name, avatar, accountName, publicID string) {
@@ -104,6 +121,15 @@ func (d *Deps) FindDirectRoomBetweenUsers(userID1, userID2 shared.UserID) (*chat
 		return nil, false
 	}
 	return d.chatRoomRepo.findDirect(p1.ID, p2.ID)
+}
+
+func (d *Deps) DirectRoomCountBetweenUsers(userID1, userID2 shared.UserID) int {
+	p1 := d.participantRepo.findByUserID(userID1)
+	p2 := d.participantRepo.findByUserID(userID2)
+	if p1 == nil || p2 == nil {
+		return 0
+	}
+	return d.chatRoomRepo.countDirectRooms(p1.ID, p2.ID)
 }
 
 // FindMembersByRoom returns all members of a room.
@@ -568,13 +594,14 @@ func (r *bddParticipantRepo) Create(_ context.Context, p *participant.Participan
 // ─── ChatRoom repo ────────────────────────────────────────────────────────────
 
 type bddChatRoomRepo struct {
-	mu     sync.Mutex
-	nextID chatroom.ID
-	byID   map[chatroom.ID]*chatroom.ChatRoom
+	mu         sync.Mutex
+	nextID     chatroom.ID
+	byID       map[chatroom.ID]*chatroom.ChatRoom
+	chatMember *bddChatMemberRepo
 }
 
-func newBDDChatRoomRepo() *bddChatRoomRepo {
-	return &bddChatRoomRepo{}
+func newBDDChatRoomRepo(chatMember *bddChatMemberRepo) *bddChatRoomRepo {
+	return &bddChatRoomRepo{chatMember: chatMember}
 }
 
 func (r *bddChatRoomRepo) reset() {
@@ -607,10 +634,10 @@ func (r *bddChatRoomRepo) FindByID(_ context.Context, id chatroom.ID) (*chatroom
 	return &copied, nil
 }
 
-// FindDirectByParticipants is not supported in the friendship BDD fake; always reports no existing room.
 func (r *bddChatRoomRepo) FindDirectByParticipants(_ context.Context, p1, p2 participant.ID) (*chatroom.ChatRoom, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	if room, ok := r.findDirect(p1, p2); ok {
+		return room, nil
+	}
 	return nil, chatroom.ErrNotFound
 }
 
@@ -632,22 +659,57 @@ func (r *bddChatRoomRepo) SoftDelete(_ context.Context, id chatroom.ID) error {
 	return nil
 }
 
-// findDirect searches for a Direct room shared by both participants (via chatMemberRepo indirectly).
-// Since FindDirectByParticipants always returns ErrNotFound (to allow creation), we use the chatMemberRepo
-// after creation. This helper is used by the Deps.FindDirectRoomBetweenUsers test helper.
 func (r *bddChatRoomRepo) findDirect(p1, p2 participant.ID) (*chatroom.ChatRoom, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var selected *chatroom.ChatRoom
 	for _, room := range r.byID {
-		if room.Type == chatroom.Direct {
-			_ = p1
-			_ = p2
-			// Return the first direct room found — for BDD the scenario has exactly one.
+		if !r.isDirectRoomForParticipants(room, p1, p2) {
+			continue
+		}
+		if selected == nil || room.ID < selected.ID {
 			copied := *room
-			return &copied, true
+			selected = &copied
 		}
 	}
-	return nil, false
+	return selected, selected != nil
+}
+
+func (r *bddChatRoomRepo) countDirectRooms(p1, p2 participant.ID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	count := 0
+	for _, room := range r.byID {
+		if r.isDirectRoomForParticipants(room, p1, p2) {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *bddChatRoomRepo) isDirectRoomForParticipants(room *chatroom.ChatRoom, p1, p2 participant.ID) bool {
+	if room.Type != chatroom.Direct {
+		return false
+	}
+
+	members := r.chatMember.findByRoom(room.ID)
+	if len(members) != 2 {
+		return false
+	}
+
+	hasP1 := false
+	hasP2 := false
+	for _, member := range members {
+		if member.ParticipantID == p1 {
+			hasP1 = true
+		}
+		if member.ParticipantID == p2 {
+			hasP2 = true
+		}
+	}
+
+	return hasP1 && hasP2
 }
 
 // ─── ChatMember repo ──────────────────────────────────────────────────────────
@@ -774,10 +836,99 @@ func (r *bddChatMemberRepo) findByRoomLocked(roomID chatroom.ID) []*chatmember.C
 	return out
 }
 
+type bddChatInvitationRepo struct {
+	mu     sync.Mutex
+	nextID chatinvitation.ID
+	byID   map[chatinvitation.ID]*chatinvitation.ChatInvitation
+}
+
+func newBDDChatInvitationRepo() *bddChatInvitationRepo {
+	return &bddChatInvitationRepo{}
+}
+
+func (r *bddChatInvitationRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID = 1
+	r.byID = map[chatinvitation.ID]*chatinvitation.ChatInvitation{}
+}
+
+func (r *bddChatInvitationRepo) Create(_ context.Context, inv *chatinvitation.ChatInvitation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if inv.ID == 0 {
+		inv.ID = r.nextID
+		r.nextID++
+	}
+	copied := *inv
+	r.byID[inv.ID] = &copied
+	return nil
+}
+
+func (r *bddChatInvitationRepo) FindByID(_ context.Context, id chatinvitation.ID) (*chatinvitation.ChatInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	inv, ok := r.byID[id]
+	if !ok {
+		return nil, chatinvitation.ErrNotFound
+	}
+	copied := *inv
+	return &copied, nil
+}
+
+func (r *bddChatInvitationRepo) FindByRoomAndInvitee(_ context.Context, roomID chatroom.ID, inviteeID participant.ID) (*chatinvitation.ChatInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, inv := range r.byID {
+		if inv.RoomID == roomID && inv.InviteeID == inviteeID {
+			copied := *inv
+			return &copied, nil
+		}
+	}
+	return nil, chatinvitation.ErrNotFound
+}
+
+func (r *bddChatInvitationRepo) FindPendingByRoomAndInviter(_ context.Context, roomID chatroom.ID, inviterID participant.ID) (*chatinvitation.ChatInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, inv := range r.byID {
+		if inv.RoomID == roomID && inv.InviterID == inviterID && inv.Status == chatinvitation.Pending {
+			copied := *inv
+			return &copied, nil
+		}
+	}
+	return nil, chatinvitation.ErrNotFound
+}
+
+func (r *bddChatInvitationRepo) FindByRoom(_ context.Context, roomID chatroom.ID) ([]*chatinvitation.ChatInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*chatinvitation.ChatInvitation, 0)
+	for _, inv := range r.byID {
+		if inv.RoomID == roomID {
+			copied := *inv
+			out = append(out, &copied)
+		}
+	}
+	return out, nil
+}
+
+func (r *bddChatInvitationRepo) UpdateStatus(_ context.Context, id chatinvitation.ID, status chatinvitation.Status) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	inv, ok := r.byID[id]
+	if !ok {
+		return chatinvitation.ErrNotFound
+	}
+	inv.Status = status
+	return nil
+}
+
 var (
 	_ domainuser.Repository       = (*bddUserRepo)(nil)
 	_ domainfriendship.Repository = (*bddFriendshipRepo)(nil)
 	_ participant.Repository      = (*bddParticipantRepo)(nil)
 	_ chatroom.Repository         = (*bddChatRoomRepo)(nil)
 	_ chatmember.Repository       = (*bddChatMemberRepo)(nil)
+	_ chatinvitation.Repository   = (*bddChatInvitationRepo)(nil)
 )

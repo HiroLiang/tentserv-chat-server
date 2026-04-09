@@ -83,6 +83,18 @@ func (r *authTestUserRepo) FindByPublicID(context.Context, string, int, int) ([]
 	return nil, nil
 }
 
+func httpAuthTestRouter(sessionManager authPort.SessionManager) *gin.Engine {
+	engine := gin.New()
+	engine.GET("/api/auth/profile",
+		AuthMiddleware(sessionManager, &authTestUserRepo{}),
+		RequireAuthMiddleware(),
+		func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		},
+	)
+	return engine
+}
+
 func TestAuthMiddleware_WebSocketDeviceMatchCreatesAuthContext(t *testing.T) {
 	logger.InitTestEnv()
 	gin.SetMode(gin.TestMode)
@@ -143,6 +155,63 @@ func TestAuthMiddleware_WebSocketDeviceMismatchReturnsUnauthorized(t *testing.T)
 	resp := httptest.NewRecorder()
 
 	engine.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
+}
+
+func TestAuthMiddleware_HTTPMalformedAuthorizationHeaderReturnsUnauthorized(t *testing.T) {
+	logger.InitTestEnv()
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/profile", nil)
+	req.Header.Set("Authorization", "Token malformed")
+	req.Header.Set("X-Device-ID", "11111111-1111-1111-1111-111111111111")
+	resp := httptest.NewRecorder()
+
+	httpAuthTestRouter(&authTestSessionManager{}).ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
+}
+
+func TestAuthMiddleware_HTTPTamperedBearerTokenReturnsUnauthorized(t *testing.T) {
+	logger.InitTestEnv()
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/profile", nil)
+	req.Header.Set("Authorization", "Bearer tampered-token")
+	req.Header.Set("X-Device-ID", "11111111-1111-1111-1111-111111111111")
+	resp := httptest.NewRecorder()
+
+	httpAuthTestRouter(&authTestSessionManager{
+		findByToken: func(context.Context, auth.AccessToken) (*auth.Session, error) {
+			return nil, auth.ErrSessionNotFound
+		},
+	}).ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
+}
+
+func TestAuthMiddleware_HTTPDeviceMismatchReturnsUnauthorized(t *testing.T) {
+	logger.InitTestEnv()
+	gin.SetMode(gin.TestMode)
+
+	deviceID, err := sharedDomain.ParseDeviceID("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/profile", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("X-Device-ID", "22222222-2222-2222-2222-222222222222")
+	resp := httptest.NewRecorder()
+
+	httpAuthTestRouter(&authTestSessionManager{
+		findByToken: func(context.Context, auth.AccessToken) (*auth.Session, error) {
+			return &auth.Session{
+				AccountID: sharedDomain.AccountID(1),
+				UserID:    sharedDomain.UserID(123),
+				DeviceID:  deviceID,
+			}, nil
+		},
+	}).ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 }

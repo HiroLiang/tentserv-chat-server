@@ -113,6 +113,30 @@ Feature: Login session
     And the response error code should be "INVALID_REQUEST"
     And login mutation should stop before session creation
 
+  Scenario Outline: Reject invalid auth headers when requesting auth profile
+    Given login state is clean
+    And a registered login device "11111111-1111-1111-1111-111111111111" named "Hiro's Mac" exists
+    And an "active" account exists for login with email "login@example.com", account "login_account", and password "redacted-password"
+    And the raw auth header "<auth_header>" is remembered as "invalid-profile-auth"
+    When I request my auth profile using remembered login token "invalid-profile-auth" and device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 401
+
+    Examples:
+      | auth_header                 |
+      | Token malformed             |
+      | Bearer tampered-login-token |
+
+  Scenario: Reject mismatched device header when requesting auth profile
+    Given login state is clean
+    And a registered login device "11111111-1111-1111-1111-111111111111" named "Hiro's Mac" exists
+    And a registered login device "22222222-2222-2222-2222-222222222222" named "Hiro's iPhone" exists
+    And an "active" account exists for login with email "login@example.com", account "login_account", and password "redacted-password"
+    When I login with identifier "login@example.com", password "redacted-password", and device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 200
+    And I remember the login token as "profile-token"
+    When I request my auth profile using remembered login token "profile-token" and device "22222222-2222-2222-2222-222222222222"
+    Then the response status should be 401
+
   Scenario: Logout revokes the current session token
     Given login state is clean
     And a registered login device "11111111-1111-1111-1111-111111111111" named "Hiro's Mac" exists

@@ -79,6 +79,8 @@ Feature: Friendship search and requests
     When I accept the inbound friend request from user 607
     Then the response status should be 200
     And a direct chat room should exist between the logged in user and user 607
+    And the direct room should have type "direct"
+    And exactly 1 direct chat room should exist between the logged in user and user 607
     And both members should have role "owner" in that direct room
 
   Scenario: Reject removes an inbound pending friend request

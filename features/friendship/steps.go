@@ -2,6 +2,7 @@ package friendship
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,6 +92,8 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^friendship rows between the logged in user and user (\d+) should not exist$`, s.friendshipRowsBetweenTheLoggedInUserAndUserShouldNotExist)
 	ctx.Step(`^friendship row from user (\d+) to the logged in user should not exist$`, s.friendshipRowFromUserToTheLoggedInUserShouldNotExist)
 	ctx.Step(`^a direct chat room should exist between the logged in user and user (\d+)$`, s.aDirectChatRoomShouldExistBetweenLoggedInUserAndUser)
+	ctx.Step(`^the direct room should have type "([^"]*)"$`, s.theDirectRoomShouldHaveType)
+	ctx.Step(`^exactly (\d+) direct chat room should exist between the logged in user and user (\d+)$`, s.exactlyDirectChatRoomShouldExistBetweenTheLoggedInUserAndUser)
 	ctx.Step(`^both members should have role "([^"]*)" in that direct room$`, s.bothMembersShouldHaveRoleInThatDirectRoom)
 }
 
@@ -842,12 +845,18 @@ func (s *steps) authorizationHeader() (string, error) {
 	if s.authHeader != "" {
 		return s.authHeader, nil
 	}
-	if s.Response == nil {
-		return "", fmt.Errorf("no login response available")
+	header := ""
+	if s.Response != nil {
+		header = s.Response.Header.Get("Authorization")
 	}
-	header := s.Response.Header.Get("Authorization")
 	if header == "" {
-		return "", fmt.Errorf("no Authorization header from login response")
+		token := s.accountBDD.LastAccessToken()
+		if token != "" {
+			header = "Bearer " + string(token)
+		}
+	}
+	if header == "" {
+		return "", fmt.Errorf("no bearer token available from login session")
 	}
 	s.authHeader = header
 	return header, nil
@@ -928,6 +937,49 @@ func (s *steps) aDirectChatRoomShouldExistBetweenLoggedInUserAndUser(userID int6
 	fmt.Printf("Output: room_id=%d room_type=%s found=true\n", room.ID, room.Type)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (s *steps) theDirectRoomShouldHaveType(expectedType string) error {
+	start := time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room found in previous step; run 'a direct chat room should exist' first")
+	}
+	fmt.Println("Given: the direct room type should match the contract")
+	fmt.Printf("Input: room_id=%d expected_type=%s\n", s.lastDirectRoomID, expectedType)
+	fmt.Println("Action: inspect in-memory chat room repository")
+
+	room, err := s.deps.chatRoomRepo.FindByID(context.Background(), s.lastDirectRoomID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: actual_type=%s match=%t\n", room.Type, string(room.Type) == expectedType)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if string(room.Type) != expectedType {
+		return fmt.Errorf("expected direct room %d to have type %s, got %s", s.lastDirectRoomID, expectedType, room.Type)
+	}
+	return nil
+}
+
+func (s *steps) exactlyDirectChatRoomShouldExistBetweenTheLoggedInUserAndUser(expectedCount int, userID int64) error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	fmt.Println("Given: direct room creation should remain unique per friendship pair")
+	fmt.Printf("Input: current_user_id=%d friend_user_id=%d expected_count=%d\n", currentUserID, userID, expectedCount)
+	fmt.Println("Action: count matching direct chat rooms in-memory")
+
+	actualCount := s.deps.DirectRoomCountBetweenUsers(currentUserID, shared.UserID(userID))
+
+	fmt.Printf("Output: actual_count=%d match=%t\n", actualCount, actualCount == expectedCount)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if actualCount != expectedCount {
+		return fmt.Errorf("expected %d direct rooms between user %d and user %d, got %d", expectedCount, currentUserID, userID, actualCount)
+	}
 	return nil
 }
 

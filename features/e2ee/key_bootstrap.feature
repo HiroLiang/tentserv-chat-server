@@ -21,6 +21,24 @@ Feature: E2EE key bootstrap after login
     And E2EE key status should be empty for device "11111111-1111-1111-1111-111111111111"
     And the E2EE key status check should not consume OTP keys
 
+  Scenario: Identity-only remote key status remains visible without signed pre-key or OTP keys
+    When I upload E2EE identity key "alpha" for device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 200
+    When I request E2EE key status for the logged in user and device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 200
+    And E2EE key status should expose identity "alpha", no signed pre-key, and 0 OTP keys for device "11111111-1111-1111-1111-111111111111"
+    And the E2EE key status check should not consume OTP keys
+
+  Scenario: Identity and signed pre-key status remains visible before any OTP upload
+    When I upload E2EE identity key "alpha" for device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 200
+    When I upload E2EE signed pre-key "alpha" with key id 1 for device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 204
+    When I request E2EE key status for the logged in user and device "11111111-1111-1111-1111-111111111111"
+    Then the response status should be 200
+    And E2EE key status should expose identity "alpha", signed pre-key "alpha", key id 1, and 0 OTP keys for device "11111111-1111-1111-1111-111111111111"
+    And the E2EE key status check should not consume OTP keys
+
   Scenario: Uploaded identity, signed pre-key, and OTP keys can be read back by status
     When I upload E2EE identity key "alpha" for device "11111111-1111-1111-1111-111111111111"
     Then the response status should be 200
