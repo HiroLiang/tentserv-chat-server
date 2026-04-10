@@ -42,12 +42,13 @@ type ResolveInvitationResponse struct {
 }
 
 type ChatRoomSummaryResponse struct {
-	RoomID      int64   `json:"room_id"`
-	RoomType    string  `json:"room_type"`
-	DisplayName string  `json:"display_name"`
-	AvatarURL   *string `json:"avatar_url"`
-	LatestMsg   *string `json:"latest_message"`
-	UnreadCount int64   `json:"unread_count"`
+	RoomID            int64   `json:"room_id"`
+	RoomType          string  `json:"room_type"`
+	DisplayName       string  `json:"display_name"`
+	AvatarURL         *string `json:"avatar_url"`
+	LatestMsg         *string `json:"latest_message"`
+	LatestMsgSenderID *int64  `json:"latest_message_sender_id,omitempty"`
+	UnreadCount       int64   `json:"unread_count"`
 }
 
 type ChatRoomMemberInfoResponse struct {

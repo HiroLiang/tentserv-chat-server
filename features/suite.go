@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 
 	accountfeatures "github.com/HiroLiang/tentserv-chat-server/features/account"
+	chatfeatures "github.com/HiroLiang/tentserv-chat-server/features/chat"
 	devicefeatures "github.com/HiroLiang/tentserv-chat-server/features/device"
 	e2eefeatures "github.com/HiroLiang/tentserv-chat-server/features/e2ee"
 	friendshipfeatures "github.com/HiroLiang/tentserv-chat-server/features/friendship"
@@ -27,6 +28,7 @@ var (
 	testServer    *httptest.Server
 	baseURL       string
 	accountBDD    *accountfeatures.Deps
+	chatBDD       *chatfeatures.Deps
 	deviceBDD     *devicefeatures.Deps
 	e2eeBDD       *e2eefeatures.Deps
 	friendshipBDD *friendshipfeatures.Deps
@@ -41,6 +43,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		logger.Log = zap.NewNop()
 
 		accountBDD = accountfeatures.NewDeps()
+		chatBDD = chatfeatures.NewDeps()
 		deviceBDD = devicefeatures.NewDeps()
 		e2eeBDD = e2eefeatures.NewDeps()
 		friendshipBDD = friendshipfeatures.NewDeps()
@@ -60,6 +63,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		consumeSenderKeyDistributionUseCase := e2eeBDD.SKR.RegisterConsumeSenderKeyDistributionUseCase()
 		friendshipUseCases := friendshipBDD.RegisterUseCases(bddsupport.UOW{})
 		createChatRoomUseCase := friendshipBDD.RegisterChatUseCase(bddsupport.UOW{})
+		getUserChatRoomsUseCase := chatBDD.RegisterGetUserChatRoomsUseCase()
 
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
@@ -108,7 +112,7 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			nil,
 			nil,
 			nil,
-			nil,
+			getUserChatRoomsUseCase,
 			nil,
 			nil,
 			nil,

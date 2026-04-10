@@ -17,12 +17,13 @@ import (
 )
 
 type ChatRoomSummary struct {
-	RoomID      int64
-	RoomType    string
-	DisplayName string
-	AvatarURL   *string
-	LatestMsg   *string
-	UnreadCount int64
+	RoomID            int64
+	RoomType          string
+	DisplayName       string
+	AvatarURL         *string
+	LatestMsg         *string
+	LatestMsgSenderID *int64
+	UnreadCount       int64
 }
 
 type GetUserChatRoomsOutput struct {
@@ -96,8 +97,11 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		displayName, avatarURL := uc.resolveRoomDisplay(ctx, room, callerParticipant.ID)
 
 		var latestMsg *string
+		var latestMsgSenderID *int64
 		if msg, err := uc.chatMessageRepo.FindLatestByRoom(ctx, room.ID); err == nil {
 			latestMsg = &msg.Content
+			senderID := int64(msg.SenderID)
+			latestMsgSenderID = &senderID
 		}
 
 		since := member.JoinedAt
@@ -110,12 +114,13 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		}
 
 		summary := ChatRoomSummary{
-			RoomID:      int64(room.ID),
-			RoomType:    string(room.Type),
-			DisplayName: displayName,
-			AvatarURL:   avatarURL,
-			LatestMsg:   latestMsg,
-			UnreadCount: unreadCount,
+			RoomID:            int64(room.ID),
+			RoomType:          string(room.Type),
+			DisplayName:       displayName,
+			AvatarURL:         avatarURL,
+			LatestMsg:         latestMsg,
+			LatestMsgSenderID: latestMsgSenderID,
+			UnreadCount:       unreadCount,
 		}
 
 		switch room.Type {
