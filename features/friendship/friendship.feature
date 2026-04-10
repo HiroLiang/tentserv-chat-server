@@ -109,14 +109,21 @@ Feature: Friendship search and requests
     Then the response status should be 200
     And the sent requests response should not include user 609
 
-  Scenario: Unfriend removes both accepted friendship rows
+  Scenario: Unfriend removes both accepted friendship rows and soft-deletes the direct room
     Given a searchable user "Aki" exists with id 610, account "aki_account", public id "aki-public", and avatar "avatars/aki.png"
-    And I am accepted friends with user 610
+    And an inbound pending friend request exists from user 610
+    When I accept the inbound friend request from user 610
+    Then the response status should be 200
+    And a direct chat room should exist between the logged in user and user 610
     When I request my friends
     Then the response status should be 200
     And the friends response should include "Aki" with status "accepted"
     When I unfriend user 610
     Then the response status should be 200
+    And the remove friend response should include the deleted direct room
+    And the last direct room should be marked deleted
+    And both members should be marked deleted in that direct room
+    And exactly 0 direct chat room should exist between the logged in user and user 610
     And friendship rows between the logged in user and user 610 should not exist
     When I request my friends
     Then the response status should be 200

@@ -243,9 +243,10 @@ func (s *acceptParticipantRepoStub) Create(context.Context, *participant.Partici
 }
 
 type acceptChatRoomRepoStub struct {
-	existingRoom *chatroom.ChatRoom
-	createCalls  int
-	createdRooms []*chatroom.ChatRoom
+	existingRoom       *chatroom.ChatRoom
+	createCalls        int
+	createdRooms       []*chatroom.ChatRoom
+	softDeletedRoomIDs []chatroom.ID
 }
 
 func (s *acceptChatRoomRepoStub) FindByID(context.Context, chatroom.ID) (*chatroom.ChatRoom, error) {
@@ -271,10 +272,16 @@ func (s *acceptChatRoomRepoStub) FindDirectByParticipants(context.Context, parti
 }
 
 func (s *acceptChatRoomRepoStub) Update(context.Context, *chatroom.ChatRoom) error { return nil }
-func (s *acceptChatRoomRepoStub) SoftDelete(context.Context, chatroom.ID) error    { return nil }
+func (s *acceptChatRoomRepoStub) SoftDelete(_ context.Context, id chatroom.ID) error {
+	s.softDeletedRoomIDs = append(s.softDeletedRoomIDs, id)
+	return nil
+}
 
 type acceptChatMemberRepoStub struct {
-	addedMembers []*chatmember.ChatMember
+	addedMembers     []*chatmember.ChatMember
+	roomMembers      []*chatmember.ChatMember
+	softDeletedIDs   []chatmember.ID
+	softDeleteErrFor chatmember.ID
 }
 
 func (s *acceptChatMemberRepoStub) FindByID(context.Context, chatmember.ID) (*chatmember.ChatMember, error) {
@@ -286,7 +293,12 @@ func (s *acceptChatMemberRepoStub) FindByRoomAndParticipant(context.Context, cha
 }
 
 func (s *acceptChatMemberRepoStub) FindByRoom(context.Context, chatroom.ID) ([]*chatmember.ChatMember, error) {
-	return nil, nil
+	out := make([]*chatmember.ChatMember, 0, len(s.roomMembers))
+	for _, member := range s.roomMembers {
+		copied := *member
+		out = append(out, &copied)
+	}
+	return out, nil
 }
 
 func (s *acceptChatMemberRepoStub) FindByParticipant(context.Context, participant.ID) ([]*chatmember.ChatMember, error) {
@@ -300,7 +312,13 @@ func (s *acceptChatMemberRepoStub) Add(_ context.Context, member *chatmember.Cha
 }
 
 func (s *acceptChatMemberRepoStub) Update(context.Context, *chatmember.ChatMember) error { return nil }
-func (s *acceptChatMemberRepoStub) SoftDelete(context.Context, chatmember.ID) error      { return nil }
+func (s *acceptChatMemberRepoStub) SoftDelete(_ context.Context, id chatmember.ID) error {
+	if s.softDeleteErrFor == id {
+		return errors.New("soft delete failed")
+	}
+	s.softDeletedIDs = append(s.softDeletedIDs, id)
+	return nil
+}
 func (s *acceptChatMemberRepoStub) Remove(context.Context, chatroom.ID, participant.ID) error {
 	return nil
 }
@@ -561,26 +579,147 @@ func TestRemoveFriendshipUseCase_DeletesPrimaryAndReverseRows(t *testing.T) {
 		},
 	}
 
-	err := NewRemoveFriendshipUseCase(repo).Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	_, err := NewRemoveFriendshipUseCase(&friendshipUOWStub{}, repo, noopParticipantRepo{}, noopChatRoomRepo{}, noopChatMemberRepo{}).
+		Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{11, 12}, deletedIDs)
 }
 
+func TestRemoveFriendshipUseCase_SoftDeletesAcceptedDirectRoomAndMembers(t *testing.T) {
+	deletedFriendshipIDs := make([]int64, 0, 2)
+	repo := &friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusAccepted}, nil
+		},
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedFriendshipIDs = append(deletedFriendshipIDs, id)
+			return nil
+		},
+	}
+	participantRepo := &acceptParticipantRepoStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			501: {ID: participant.ID(21), UserID: ptrUserID(501)},
+			601: {ID: participant.ID(22), UserID: ptrUserID(601)},
+		},
+	}
+	chatRoomRepo := &acceptChatRoomRepoStub{
+		existingRoom: &chatroom.ChatRoom{ID: chatroom.ID(88), Type: chatroom.Direct},
+	}
+	chatMemberRepo := &acceptChatMemberRepoStub{
+		roomMembers: []*chatmember.ChatMember{
+			{ID: 301, RoomID: 88, ParticipantID: 21},
+			{ID: 302, RoomID: 88, ParticipantID: 22},
+		},
+	}
+
+	out, err := NewRemoveFriendshipUseCase(&friendshipUOWStub{}, repo, participantRepo, chatRoomRepo, chatMemberRepo).
+		Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.NotNil(t, out.DeletedDirectRoom)
+	assert.Equal(t, int64(88), out.DeletedDirectRoom.RoomID)
+	assert.Equal(t, []int64{301, 302}, out.DeletedDirectRoom.MemberIDs)
+	assert.Equal(t, []int64{11, 12}, deletedFriendshipIDs)
+	assert.Equal(t, []chatmember.ID{301, 302}, chatMemberRepo.softDeletedIDs)
+	assert.Equal(t, []chatroom.ID{88}, chatRoomRepo.softDeletedRoomIDs)
+}
+
+func TestRemoveFriendshipUseCase_PendingRejectDoesNotTouchDirectRoom(t *testing.T) {
+	repo := &friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusPending}, nil
+		},
+		findByUserIDAndFriendID: func(context.Context, shared.UserID, shared.UserID) (*friendship.Friendship, error) {
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	}
+	participantRepo := &acceptParticipantRepoStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			501: {ID: participant.ID(21), UserID: ptrUserID(501)},
+			601: {ID: participant.ID(22), UserID: ptrUserID(601)},
+		},
+	}
+	chatRoomRepo := &acceptChatRoomRepoStub{
+		existingRoom: &chatroom.ChatRoom{ID: chatroom.ID(88), Type: chatroom.Direct},
+	}
+	chatMemberRepo := &acceptChatMemberRepoStub{
+		roomMembers: []*chatmember.ChatMember{
+			{ID: 301, RoomID: 88, ParticipantID: 21},
+			{ID: 302, RoomID: 88, ParticipantID: 22},
+		},
+	}
+
+	out, err := NewRemoveFriendshipUseCase(&friendshipUOWStub{}, repo, participantRepo, chatRoomRepo, chatMemberRepo).
+		Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Nil(t, out.DeletedDirectRoom)
+	assert.Empty(t, chatMemberRepo.softDeletedIDs)
+	assert.Empty(t, chatRoomRepo.softDeletedRoomIDs)
+}
+
+func TestRemoveFriendshipUseCase_RollsBackWhenDirectRoomSoftDeleteFails(t *testing.T) {
+	repo := &friendshipRepoStub{
+		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
+			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 501, Status: friendship.StatusAccepted}, nil
+		},
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 12, UserID: 501, FriendID: 601, Status: friendship.StatusAccepted}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+	}
+	participantRepo := &acceptParticipantRepoStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			501: {ID: participant.ID(21), UserID: ptrUserID(501)},
+			601: {ID: participant.ID(22), UserID: ptrUserID(601)},
+		},
+	}
+	chatRoomRepo := &acceptChatRoomRepoStub{
+		existingRoom: &chatroom.ChatRoom{ID: chatroom.ID(88), Type: chatroom.Direct},
+	}
+	chatMemberRepo := &acceptChatMemberRepoStub{
+		roomMembers: []*chatmember.ChatMember{
+			{ID: 301, RoomID: 88, ParticipantID: 21},
+			{ID: 302, RoomID: 88, ParticipantID: 22},
+		},
+		softDeleteErrFor: 301,
+	}
+	uow := &friendshipUOWStub{}
+
+	_, err := NewRemoveFriendshipUseCase(uow, repo, participantRepo, chatRoomRepo, chatMemberRepo).
+		Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+
+	require.ErrorContains(t, err, "soft delete failed")
+	assert.Zero(t, uow.tx.commitCalls)
+	assert.Equal(t, 1, uow.tx.rollbackCalls)
+	assert.Empty(t, chatRoomRepo.softDeletedRoomIDs)
+}
+
 func TestRemoveFriendshipUseCase_MapsNotFoundAndForbidden(t *testing.T) {
-	uc := NewRemoveFriendshipUseCase(&friendshipRepoStub{
+	uc := NewRemoveFriendshipUseCase(&friendshipUOWStub{}, &friendshipRepoStub{
 		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
 			return nil, friendship.ErrFriendshipNotFound
 		},
-	})
-	err := uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	}, noopParticipantRepo{}, noopChatRoomRepo{}, noopChatMemberRepo{})
+	_, err := uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
 	require.ErrorIs(t, err, friendship.ErrFriendshipNotFound)
 
-	uc = NewRemoveFriendshipUseCase(&friendshipRepoStub{
+	uc = NewRemoveFriendshipUseCase(&friendshipUOWStub{}, &friendshipRepoStub{
 		findByID: func(context.Context, int64) (*friendship.Friendship, error) {
 			return &friendship.Friendship{ID: 11, UserID: 601, FriendID: 602, Status: friendship.StatusAccepted}, nil
 		},
-	})
-	err = uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
+	}, noopParticipantRepo{}, noopChatRoomRepo{}, noopChatMemberRepo{})
+	_, err = uc.Execute(context.Background(), authedInput(501, RemoveFriendshipInput{FriendshipID: 11}))
 	require.ErrorIs(t, err, friendship.ErrForbidden)
 }
 

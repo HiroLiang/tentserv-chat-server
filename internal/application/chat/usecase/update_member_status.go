@@ -27,15 +27,18 @@ type UpdateMemberStatusOutput struct {
 type UpdateMemberStatusUseCase struct {
 	participantRepo participant.Repository
 	chatMemberRepo  chatmember.Repository
+	chatRoomRepo    chatroom.Repository
 }
 
 func NewUpdateMemberStatusUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
+	chatRoomRepo chatroom.Repository,
 ) *UpdateMemberStatusUseCase {
 	return &UpdateMemberStatusUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
+		chatRoomRepo:    chatRoomRepo,
 	}
 }
 
@@ -52,6 +55,11 @@ func (uc *UpdateMemberStatusUseCase) Execute(
 	}
 
 	roomID := chatroom.ID(input.Data.RoomID)
+
+	room, err := uc.chatRoomRepo.FindByID(ctx, roomID)
+	if err != nil || room.IsDeleted {
+		return UpdateMemberStatusOutput{}, ErrChatRoomNotFound
+	}
 
 	callerMember, err := uc.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, callerParticipant.ID)
 	if err != nil || callerMember.IsDeleted {

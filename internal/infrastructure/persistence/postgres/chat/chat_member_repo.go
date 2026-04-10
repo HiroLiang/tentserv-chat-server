@@ -84,11 +84,11 @@ func (r *ChatMemberRepository) FindByRoomAndParticipant(
 }
 
 func (r *ChatMemberRepository) FindByRoom(ctx context.Context, roomID chatroom.ID) ([]*chatmember.ChatMember, error) {
-	return r.findAll(ctx, squirrel.Eq{"room_id": roomID})
+	return r.findAll(ctx, squirrel.Eq{"room_id": roomID, "is_deleted": false})
 }
 
 func (r *ChatMemberRepository) FindByParticipant(ctx context.Context, participantID participant.ID) ([]*chatmember.ChatMember, error) {
-	return r.findAll(ctx, squirrel.Eq{"participant_id": participantID})
+	return r.findAll(ctx, squirrel.Eq{"participant_id": participantID, "is_deleted": false})
 }
 
 // Add inserts a new member or restores a previously soft-deleted one (C-2: upsert on conflict).

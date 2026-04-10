@@ -50,20 +50,20 @@ type UseCases struct {
 	GetChatRoomMessagesUseCase *chatUseCase.GetChatRoomMessagesUseCase
 	UpdateMemberStatusUseCase  *chatUseCase.UpdateMemberStatusUseCase
 
-	UploadIdentityKeyUseCase              *e2eeUseCase.UploadIdentityKeyUseCase
-	UploadSignedPreKeyUseCase             *e2eeUseCase.UploadSignedPreKeyUseCase
-	UploadOTPPreKeysUseCase               *e2eeUseCase.UploadOTPPreKeysUseCase
-	CountOTPPreKeysUseCase                *e2eeUseCase.CountOTPPreKeysUseCase
-	GetKeyBundleUseCase                   *e2eeUseCase.GetKeyBundleUseCase
-	CheckKeyStatusUseCase                 *e2eeUseCase.CheckKeyStatusUseCase
-	GetKeyPolicyUseCase                   *e2eeUseCase.GetKeyPolicyUseCase
-	UploadSenderKeyUseCase                *e2eeUseCase.UploadSenderKeyUseCase
-	GetSenderKeysUseCase                  *e2eeUseCase.GetSenderKeysUseCase
-	GetSenderKeyDistributionStatusUseCase *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
+	UploadIdentityKeyUseCase                *e2eeUseCase.UploadIdentityKeyUseCase
+	UploadSignedPreKeyUseCase               *e2eeUseCase.UploadSignedPreKeyUseCase
+	UploadOTPPreKeysUseCase                 *e2eeUseCase.UploadOTPPreKeysUseCase
+	CountOTPPreKeysUseCase                  *e2eeUseCase.CountOTPPreKeysUseCase
+	GetKeyBundleUseCase                     *e2eeUseCase.GetKeyBundleUseCase
+	CheckKeyStatusUseCase                   *e2eeUseCase.CheckKeyStatusUseCase
+	GetKeyPolicyUseCase                     *e2eeUseCase.GetKeyPolicyUseCase
+	UploadSenderKeyUseCase                  *e2eeUseCase.UploadSenderKeyUseCase
+	GetSenderKeysUseCase                    *e2eeUseCase.GetSenderKeysUseCase
+	GetSenderKeyDistributionStatusUseCase   *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
 	GetPendingSenderKeyDistributionsUseCase *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase
 	ConsumeSenderKeyDistributionUseCase     *e2eeUseCase.ConsumeSenderKeyDistributionUseCase
-	CreateSenderKeyRequestUseCase         *e2eeUseCase.CreateSenderKeyRequestUseCase
-	NotifyPendingSenderKeyRequestsUseCase *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
+	CreateSenderKeyRequestUseCase           *e2eeUseCase.CreateSenderKeyRequestUseCase
+	NotifyPendingSenderKeyRequestsUseCase   *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
 
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
@@ -193,11 +193,13 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		GetChatRoomMessagesUseCase: chatUseCase.NewGetChatRoomMessagesUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
 			deps.ChatMessageRepo,
 		),
 		UpdateMemberStatusUseCase: chatUseCase.NewUpdateMemberStatusUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
 		),
 
 		UploadIdentityKeyUseCase: e2eeUseCase.NewUploadIdentityKeyUseCase(
@@ -279,12 +281,14 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		SendMessageUseCase: chatUseCase.NewSendMessageUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
 			deps.ChatMessageRepo,
 			deps.Hub,
 		),
 		UploadRoomMediaUseCase: chatUseCase.NewUploadRoomMediaUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.ChatRoomRepo,
 			deps.LocalFileStorage,
 		),
 
@@ -299,7 +303,13 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 		),
 		GetFriendRequestsUseCase: friendshipUseCase.NewGetFriendRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
-		RemoveFriendshipUseCase:  friendshipUseCase.NewRemoveFriendshipUseCase(deps.FriendshipRepo),
+		RemoveFriendshipUseCase: friendshipUseCase.NewRemoveFriendshipUseCase(
+			deps.Uow,
+			deps.FriendshipRepo,
+			deps.ParticipantRepository,
+			deps.ChatRoomRepo,
+			deps.ChatMemberRepo,
+		),
 		GetSentRequestsUseCase:   friendshipUseCase.NewGetSentRequestsUseCase(deps.FriendshipRepo, deps.UserRepo),
 		CancelSentRequestUseCase: friendshipUseCase.NewCancelSentRequestUseCase(deps.FriendshipRepo),
 		BlockUserUseCase:         friendshipUseCase.NewBlockUserUseCase(deps.FriendshipRepo),

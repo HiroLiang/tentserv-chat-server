@@ -217,11 +217,20 @@ func (h *FriendshipHandler) removeFriend(c *gin.Context) {
 		return
 	}
 	input := adapter.BuildInput(c, friendshipUseCase.RemoveFriendshipInput{FriendshipID: id})
-	if err := h.removeFriendshipUseCase.Execute(c.Request.Context(), input); err != nil {
+	out, err := h.removeFriendshipUseCase.Execute(c.Request.Context(), input)
+	if err != nil {
 		HandleFriendshipError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, nil)
+
+	resp := RemoveFriendResponse{}
+	if out != nil && out.DeletedDirectRoom != nil {
+		resp.DeletedDirectRoom = &RemovedDirectRoomResponse{
+			RoomID:    out.DeletedDirectRoom.RoomID,
+			MemberIDs: out.DeletedDirectRoom.MemberIDs,
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // @Summary Get sent friend requests

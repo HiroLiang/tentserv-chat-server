@@ -49,17 +49,20 @@ type UploadRoomMediaOutput struct {
 type UploadRoomMediaUseCase struct {
 	participantRepo participant.Repository
 	chatMemberRepo  chatmember.Repository
+	chatRoomRepo    chatroom.Repository
 	fileStorage     appPort.FileStorage
 }
 
 func NewUploadRoomMediaUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
+	chatRoomRepo chatroom.Repository,
 	fileStorage appPort.FileStorage,
 ) *UploadRoomMediaUseCase {
 	return &UploadRoomMediaUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
+		chatRoomRepo:    chatRoomRepo,
 		fileStorage:     fileStorage,
 	}
 }
@@ -77,6 +80,11 @@ func (uc *UploadRoomMediaUseCase) Execute(
 	}
 
 	roomID := chatroom.ID(input.Data.RoomID)
+
+	room, err := uc.chatRoomRepo.FindByID(ctx, roomID)
+	if err != nil || room.IsDeleted {
+		return UploadRoomMediaOutput{}, ErrChatRoomNotFound
+	}
 
 	callerMember, err := uc.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, callerParticipant.ID)
 	if err != nil || callerMember.IsDeleted {

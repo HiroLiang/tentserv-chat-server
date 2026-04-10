@@ -17,8 +17,9 @@ import (
 
 type steps struct {
 	*bddsupport.APITestContext
-	accountBDD    *accountfeatures.Deps
-	friendshipBDD *friendshipfeatures.Deps
+	accountBDD           *accountfeatures.Deps
+	friendshipBDD        *friendshipfeatures.Deps
+	previousDirectRoomID int64
 }
 
 type createRoomResponse struct {
@@ -32,6 +33,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 
 	ctx.Step(`^I create a direct chat room for user (\d+) named "([^"]*)" through the chat API$`, s.iCreateADirectChatRoomForUserNamedThroughTheChatAPI)
 	ctx.Step(`^the direct room create response should reuse the existing direct room between the logged in user and user (\d+)$`, s.theDirectRoomCreateResponseShouldReuseTheExistingDirectRoomBetweenTheLoggedInUserAndUser)
+	ctx.Step(`^the active direct room between the logged in user and user (\d+) should be different from the previously reused direct room$`, s.theActiveDirectRoomBetweenTheLoggedInUserAndUserShouldBeDifferentFromThePreviouslyReusedDirectRoom)
 }
 
 func (s *steps) iCreateADirectChatRoomForUserNamedThroughTheChatAPI(userID int64, name string) error {
@@ -92,6 +94,32 @@ func (s *steps) theDirectRoomCreateResponseShouldReuseTheExistingDirectRoomBetwe
 
 	if !matches {
 		return fmt.Errorf("expected reused direct room response with id=%d type=direct already_existed=true, got %+v", room.ID, body)
+	}
+	s.previousDirectRoomID = int64(room.ID)
+	return nil
+}
+
+func (s *steps) theActiveDirectRoomBetweenTheLoggedInUserAndUserShouldBeDifferentFromThePreviouslyReusedDirectRoom(userID int64) error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	fmt.Println("Given: a previously deleted direct room should not be reused after re-friending")
+	fmt.Printf("Input: current_user_id=%d friend_user_id=%d previous_room_id=%d\n", currentUserID, userID, s.previousDirectRoomID)
+	fmt.Println("Action: inspect the active direct room after accepting a new friendship")
+
+	if s.previousDirectRoomID == 0 {
+		return fmt.Errorf("no previous direct room id was captured")
+	}
+	room, ok := s.friendshipBDD.FindDirectRoomBetweenUsers(currentUserID, shared.UserID(userID))
+	if !ok {
+		return fmt.Errorf("no active direct room found between user %d and user %d", currentUserID, userID)
+	}
+	different := int64(room.ID) != s.previousDirectRoomID
+	fmt.Printf("Output: active_room_id=%d previous_room_id=%d different=%t\n", room.ID, s.previousDirectRoomID, different)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !different {
+		return fmt.Errorf("expected new active direct room not to reuse deleted room %d", s.previousDirectRoomID)
 	}
 	return nil
 }

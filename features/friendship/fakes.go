@@ -76,7 +76,7 @@ func (d *Deps) RegisterUseCases(uow transaction.UnitOfWork) UseCases {
 		ApplyFriendship:   friendshipUseCase.NewApplyFriendshipUseCase(d.friendshipRepo),
 		AcceptFriendship:  friendshipUseCase.NewAcceptFriendshipUseCase(uow, d.friendshipRepo, d.participantRepo, d.chatRoomRepo, d.chatMemberRepo),
 		GetFriendRequests: friendshipUseCase.NewGetFriendRequestsUseCase(d.friendshipRepo, d.userRepo),
-		RemoveFriendship:  friendshipUseCase.NewRemoveFriendshipUseCase(d.friendshipRepo),
+		RemoveFriendship:  friendshipUseCase.NewRemoveFriendshipUseCase(uow, d.friendshipRepo, d.participantRepo, d.chatRoomRepo, d.chatMemberRepo),
 		GetSentRequests:   friendshipUseCase.NewGetSentRequestsUseCase(d.friendshipRepo, d.userRepo),
 		CancelSentRequest: friendshipUseCase.NewCancelSentRequestUseCase(d.friendshipRepo),
 		BlockUser:         friendshipUseCase.NewBlockUserUseCase(d.friendshipRepo),
@@ -132,9 +132,29 @@ func (d *Deps) DirectRoomCountBetweenUsers(userID1, userID2 shared.UserID) int {
 	return d.chatRoomRepo.countDirectRooms(p1.ID, p2.ID)
 }
 
+func (d *Deps) ActiveDirectRoomIDBetweenUsers(userID1, userID2 shared.UserID) (chatroom.ID, bool) {
+	room, ok := d.FindDirectRoomBetweenUsers(userID1, userID2)
+	if !ok {
+		return 0, false
+	}
+	return room.ID, true
+}
+
 // FindMembersByRoom returns all members of a room.
 func (d *Deps) FindMembersByRoom(roomID chatroom.ID) []*chatmember.ChatMember {
 	return d.chatMemberRepo.findByRoom(roomID)
+}
+
+func (d *Deps) FindAllMembersByRoom(roomID chatroom.ID) []*chatmember.ChatMember {
+	return d.chatMemberRepo.findAllByRoom(roomID)
+}
+
+func (d *Deps) FindRoomByID(roomID chatroom.ID) (*chatroom.ChatRoom, bool) {
+	room, err := d.chatRoomRepo.FindByID(context.Background(), roomID)
+	if err != nil {
+		return nil, false
+	}
+	return room, true
 }
 
 // ─── User repo ───────────────────────────────────────────────────────────────
@@ -655,7 +675,11 @@ func (r *bddChatRoomRepo) Update(_ context.Context, room *chatroom.ChatRoom) err
 func (r *bddChatRoomRepo) SoftDelete(_ context.Context, id chatroom.ID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.byID, id)
+	room, ok := r.byID[id]
+	if !ok {
+		return chatroom.ErrNotFound
+	}
+	room.IsDeleted = true
 	return nil
 }
 
@@ -689,7 +713,7 @@ func (r *bddChatRoomRepo) countDirectRooms(p1, p2 participant.ID) int {
 }
 
 func (r *bddChatRoomRepo) isDirectRoomForParticipants(room *chatroom.ChatRoom, p1, p2 participant.ID) bool {
-	if room.Type != chatroom.Direct {
+	if room.Type != chatroom.Direct || room.IsDeleted {
 		return false
 	}
 
@@ -823,6 +847,19 @@ func (r *bddChatMemberRepo) findByRoom(roomID chatroom.ID) []*chatmember.ChatMem
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.findByRoomLocked(roomID)
+}
+
+func (r *bddChatMemberRepo) findAllByRoom(roomID chatroom.ID) []*chatmember.ChatMember {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*chatmember.ChatMember, 0)
+	for _, m := range r.byID {
+		if m.RoomID == roomID {
+			copied := *m
+			out = append(out, &copied)
+		}
+	}
+	return out
 }
 
 func (r *bddChatMemberRepo) findByRoomLocked(roomID chatroom.ID) []*chatmember.ChatMember {

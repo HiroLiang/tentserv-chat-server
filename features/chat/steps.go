@@ -46,8 +46,13 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^a direct chat peer "([^"]*)" exists with id (\d+) and avatar "([^"]*)"$`, s.aDirectChatPeerExistsWithIDAndAvatar)
 	ctx.Step(`^I have a direct chat room with user (\d+)$`, s.iHaveADirectChatRoomWithUser)
 	ctx.Step(`^the direct chat room has latest message "([^"]*)" from user (\d+)$`, s.theDirectChatRoomHasLatestMessageFromUser)
+	ctx.Step(`^the direct chat room is deleted$`, s.theDirectChatRoomIsDeleted)
 	ctx.Step(`^I request my chat rooms$`, s.iRequestMyChatRooms)
+	ctx.Step(`^I request chat room detail for the last direct room$`, s.iRequestChatRoomDetailForTheLastDirectRoom)
+	ctx.Step(`^I request chat room messages for the last direct room$`, s.iRequestChatRoomMessagesForTheLastDirectRoom)
+	ctx.Step(`^I send a text message "([^"]*)" to the last direct room$`, s.iSendATextMessageToTheLastDirectRoom)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", and latest message sender member id from user (\d+)$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
+	ctx.Step(`^the direct chat rooms response should not include "([^"]*)"$`, s.theDirectChatRoomsResponseShouldNotInclude)
 }
 
 func (s *steps) chatRoomSummaryStateIsClean() error {
@@ -128,6 +133,21 @@ func (s *steps) theDirectChatRoomHasLatestMessageFromUser(content string, userID
 	return nil
 }
 
+func (s *steps) theDirectChatRoomIsDeleted() error {
+	s.start = time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room available")
+	}
+	fmt.Println("Given: the direct chat room should be soft-deleted")
+	fmt.Printf("Input: room_id=%d\n", s.lastDirectRoomID)
+	fmt.Println("Action: mark direct room and its members deleted in the chat repository")
+	s.deps.MarkRoomDeleted(s.lastDirectRoomID)
+	fmt.Printf("Output: room_deleted=true room_id=%d\n", s.lastDirectRoomID)
+	fmt.Println("Mutation: direct room and room members soft-deleted")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
 func (s *steps) iRequestMyChatRooms() error {
 	s.start = time.Now()
 	token := s.accountBDD.LastAccessToken()
@@ -147,6 +167,88 @@ func (s *steps) iRequestMyChatRooms() error {
 	}
 	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
 	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iRequestChatRoomDetailForTheLastDirectRoom() error {
+	s.start = time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room available")
+	}
+	token := s.accountBDD.LastAccessToken()
+	deviceID := s.accountBDD.LastSessionDeviceID().String()
+	if token == "" {
+		return fmt.Errorf("no login access token available")
+	}
+	fmt.Println("Given: an authenticated user requests deleted chat room detail")
+	fmt.Printf("Input: token_present=%t device_id=%s room_id=%d\n", token != "", deviceID, s.lastDirectRoomID)
+	fmt.Println("Action: GET /api/chat/room/{room_id}")
+	err := s.DoRequestWithHeaders(http.MethodGet, fmt.Sprintf("/api/chat/room/%d", s.lastDirectRoomID), map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+		"X-Device-ID":   deviceID,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iRequestChatRoomMessagesForTheLastDirectRoom() error {
+	s.start = time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room available")
+	}
+	token := s.accountBDD.LastAccessToken()
+	deviceID := s.accountBDD.LastSessionDeviceID().String()
+	if token == "" {
+		return fmt.Errorf("no login access token available")
+	}
+	fmt.Println("Given: an authenticated user requests deleted chat room messages")
+	fmt.Printf("Input: token_present=%t device_id=%s room_id=%d\n", token != "", deviceID, s.lastDirectRoomID)
+	fmt.Println("Action: GET /api/chat/room/{room_id}/messages")
+	err := s.DoRequestWithHeaders(http.MethodGet, fmt.Sprintf("/api/chat/room/%d/messages", s.lastDirectRoomID), map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+		"X-Device-ID":   deviceID,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iSendATextMessageToTheLastDirectRoom(content string) error {
+	s.start = time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room available")
+	}
+	token := s.accountBDD.LastAccessToken()
+	deviceID := s.accountBDD.LastSessionDeviceID().String()
+	if token == "" {
+		return fmt.Errorf("no login access token available")
+	}
+	fmt.Println("Given: an authenticated user sends a text message to a deleted chat room")
+	fmt.Printf("Input: token_present=%t device_id=%s room_id=%d content_present=%t\n",
+		token != "", deviceID, s.lastDirectRoomID, content != "")
+	fmt.Println("Action: POST /api/chat/room/{room_id}/messages")
+	err := s.DoJSONRequestWithHeaders(http.MethodPost, fmt.Sprintf("/api/chat/room/%d/messages", s.lastDirectRoomID), map[string]string{
+		"content": content,
+		"type":    "text",
+	}, map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+		"X-Device-ID":   deviceID,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: no message created for deleted room")
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
 	return nil
 }
@@ -180,4 +282,26 @@ func (s *steps) theDirectChatRoomsResponseShouldIncludeLatestMessageSender(name,
 	}
 
 	return fmt.Errorf("expected direct room response to include %s with avatar %s; body=%s", name, avatar, string(s.ResponseBody))
+}
+
+func (s *steps) theDirectChatRoomsResponseShouldNotInclude(name string) error {
+	start := time.Now()
+	fmt.Println("Given: chat room response should hide deleted direct rooms")
+	fmt.Printf("Input: hidden_display_name=%s\n", name)
+	fmt.Println("Action: decode chat rooms response")
+
+	var body getUserRoomsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, room := range body.Direct {
+		if room.DisplayName == name {
+			return fmt.Errorf("expected direct rooms response not to include %s; body=%s", name, string(s.ResponseBody))
+		}
+	}
+
+	fmt.Printf("Output: direct_count=%d hidden=true\n", len(body.Direct))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
 }

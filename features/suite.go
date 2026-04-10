@@ -64,6 +64,10 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		friendshipUseCases := friendshipBDD.RegisterUseCases(bddsupport.UOW{})
 		createChatRoomUseCase := friendshipBDD.RegisterChatUseCase(bddsupport.UOW{})
 		getUserChatRoomsUseCase := chatBDD.RegisterGetUserChatRoomsUseCase()
+		getChatRoomDetailUseCase := chatBDD.RegisterGetChatRoomDetailUseCase()
+		getChatRoomMessagesUseCase := chatBDD.RegisterGetChatRoomMessagesUseCase()
+		updateMemberStatusUseCase := chatBDD.RegisterUpdateMemberStatusUseCase()
+		sendMessageUseCase := chatBDD.RegisterSendMessageUseCase()
 
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
@@ -113,12 +117,12 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			nil,
 			nil,
 			getUserChatRoomsUseCase,
+			getChatRoomDetailUseCase,
+			getChatRoomMessagesUseCase,
+			updateMemberStatusUseCase,
+			sendMessageUseCase,
 			nil,
-			nil,
-			nil,
-			nil,
-			nil,
-			nil,
+			chatBDD.FileStorage(),
 		).RegisterChatRoomRoutes(router.Group("/api/chat", middleware.RequireAuthMiddleware()))
 
 		testServer = httptest.NewServer(router)

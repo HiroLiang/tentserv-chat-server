@@ -1,7 +1,7 @@
 Feature: Cross-feature backend integration
-  Backend HTTP flows should remain consistent when registration, login, E2EE bootstrap, friendship accept, and direct room reuse are chained together.
+  Backend HTTP flows should remain consistent when registration, login, E2EE bootstrap, friendship accept, unfriend, and direct room recreation are chained together.
 
-  Scenario: Register verify login bootstrap E2EE accept friend and reuse the existing direct room
+  Scenario: Register verify login bootstrap E2EE accept friend unfriend and recreate a new direct room
     Given account registration state is clean
     And E2EE key bootstrap state is clean
     And a registered login device "11111111-1111-1111-1111-111111111111" named "Cross Test Device" exists
@@ -42,4 +42,16 @@ Feature: Cross-feature backend integration
     When I create a direct chat room for user 701 named "Luna" through the chat API
     Then the response status should be 200
     And the direct room create response should reuse the existing direct room between the logged in user and user 701
+    And exactly 1 direct chat room should exist between the logged in user and user 701
+    When I unfriend user 701
+    Then the response status should be 200
+    And the remove friend response should include the deleted direct room
+    And the last direct room should be marked deleted
+    And both members should be marked deleted in that direct room
+    And exactly 0 direct chat room should exist between the logged in user and user 701
+    Given an inbound pending friend request exists from user 701
+    When I accept the inbound friend request from user 701
+    Then the response status should be 200
+    And a direct chat room should exist between the logged in user and user 701
+    And the active direct room between the logged in user and user 701 should be different from the previously reused direct room
     And exactly 1 direct chat room should exist between the logged in user and user 701

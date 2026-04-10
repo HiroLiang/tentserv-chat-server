@@ -57,7 +57,7 @@ func (u *GetSenderKeysUseCase) Execute(
 	}
 
 	callerMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, chatroom.ID(input.Data.RoomID), callerParticipant.ID)
-	if err != nil {
+	if err != nil || callerMember.IsDeleted {
 		return nil, ErrNotRoomMember
 	}
 

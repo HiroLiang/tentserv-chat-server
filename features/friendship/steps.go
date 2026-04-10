@@ -52,6 +52,15 @@ type requestResponse struct {
 	Avatar       string `json:"avatar"`
 }
 
+type removedDirectRoomResponse struct {
+	RoomID    int64   `json:"room_id"`
+	MemberIDs []int64 `json:"member_ids"`
+}
+
+type removeFriendResponse struct {
+	DeletedDirectRoom *removedDirectRoomResponse `json:"deleted_direct_room,omitempty"`
+}
+
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, accountBDD *accountfeatures.Deps) {
 	s := &steps{APITestContext: apiCtx, deps: deps, accountBDD: accountBDD}
 
@@ -95,6 +104,9 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the direct room should have type "([^"]*)"$`, s.theDirectRoomShouldHaveType)
 	ctx.Step(`^exactly (\d+) direct chat room should exist between the logged in user and user (\d+)$`, s.exactlyDirectChatRoomShouldExistBetweenTheLoggedInUserAndUser)
 	ctx.Step(`^both members should have role "([^"]*)" in that direct room$`, s.bothMembersShouldHaveRoleInThatDirectRoom)
+	ctx.Step(`^the remove friend response should include the deleted direct room$`, s.theRemoveFriendResponseShouldIncludeTheDeletedDirectRoom)
+	ctx.Step(`^the last direct room should be marked deleted$`, s.theLastDirectRoomShouldBeMarkedDeleted)
+	ctx.Step(`^both members should be marked deleted in that direct room$`, s.bothMembersShouldBeMarkedDeletedInThatDirectRoom)
 }
 
 func (s *steps) friendshipStateIsClean() error {
@@ -1004,5 +1016,84 @@ func (s *steps) bothMembersShouldHaveRoleInThatDirectRoom(expectedRole string) e
 	fmt.Printf("Output: member_count=%d all_have_role=%s\n", len(members), chatmember.Role(expectedRole))
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
+func (s *steps) theRemoveFriendResponseShouldIncludeTheDeletedDirectRoom() error {
+	start := time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room found in previous step; run 'a direct chat room should exist' first")
+	}
+	fmt.Println("Given: unfriend response should expose deleted direct room metadata")
+	fmt.Printf("Input: expected_room_id=%d\n", s.lastDirectRoomID)
+	fmt.Println("Action: decode remove friend response")
+
+	var body removeFriendResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	if body.DeletedDirectRoom == nil {
+		return fmt.Errorf("expected deleted_direct_room in response; body=%s", string(s.ResponseBody))
+	}
+	memberCount := len(body.DeletedDirectRoom.MemberIDs)
+	match := body.DeletedDirectRoom.RoomID == int64(s.lastDirectRoomID) && memberCount == 2
+	fmt.Printf("Output: response_room_id=%d member_count=%d match=%t\n",
+		body.DeletedDirectRoom.RoomID, memberCount, match)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !match {
+		return fmt.Errorf("expected deleted room %d with 2 member ids, got %+v", s.lastDirectRoomID, body.DeletedDirectRoom)
+	}
+	return nil
+}
+
+func (s *steps) theLastDirectRoomShouldBeMarkedDeleted() error {
+	start := time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room found in previous step; run 'a direct chat room should exist' first")
+	}
+	fmt.Println("Given: unfriend should soft-delete the accepted direct room")
+	fmt.Printf("Input: room_id=%d\n", s.lastDirectRoomID)
+	fmt.Println("Action: inspect stored room including deleted rows")
+
+	room, ok := s.deps.FindRoomByID(s.lastDirectRoomID)
+	if !ok {
+		return fmt.Errorf("expected room %d to remain as a soft-deleted row", s.lastDirectRoomID)
+	}
+	fmt.Printf("Output: room_deleted=%t\n", room.IsDeleted)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !room.IsDeleted {
+		return fmt.Errorf("expected direct room %d to be marked deleted", s.lastDirectRoomID)
+	}
+	return nil
+}
+
+func (s *steps) bothMembersShouldBeMarkedDeletedInThatDirectRoom() error {
+	start := time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room found in previous step; run 'a direct chat room should exist' first")
+	}
+	fmt.Println("Given: unfriend should soft-delete both direct-room members")
+	fmt.Printf("Input: room_id=%d\n", s.lastDirectRoomID)
+	fmt.Println("Action: inspect stored members including deleted rows")
+
+	members := s.deps.FindAllMembersByRoom(s.lastDirectRoomID)
+	if len(members) != 2 {
+		return fmt.Errorf("expected 2 members in direct room %d, got %d", s.lastDirectRoomID, len(members))
+	}
+	allDeleted := true
+	for _, m := range members {
+		if !m.IsDeleted {
+			allDeleted = false
+			break
+		}
+	}
+	fmt.Printf("Output: member_count=%d all_deleted=%t\n", len(members), allDeleted)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !allDeleted {
+		return fmt.Errorf("expected both members in direct room %d to be marked deleted", s.lastDirectRoomID)
+	}
 	return nil
 }

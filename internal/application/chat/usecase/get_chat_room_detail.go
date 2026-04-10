@@ -91,14 +91,14 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 
 	roomID := chatroom.ID(input.Data.RoomID)
 
+	room, err := uc.chatRoomRepo.FindByID(ctx, roomID)
+	if err != nil || room.IsDeleted {
+		return GetChatRoomDetailOutput{}, ErrChatRoomNotFound
+	}
+
 	callerMember, err := uc.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, callerParticipant.ID)
 	if err != nil || callerMember.IsDeleted {
 		return GetChatRoomDetailOutput{}, ErrNotRoomMember
-	}
-
-	room, err := uc.chatRoomRepo.FindByID(ctx, roomID)
-	if err != nil {
-		return GetChatRoomDetailOutput{}, ErrChatRoomNotFound
 	}
 
 	allMembers, err := uc.chatMemberRepo.FindByRoom(ctx, roomID)

@@ -2,10 +2,12 @@ package chat
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 
 	chatusecase "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
+	appPort "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
@@ -57,6 +59,48 @@ func (d *Deps) RegisterGetUserChatRoomsUseCase() *chatusecase.GetUserChatRoomsUs
 	)
 }
 
+func (d *Deps) RegisterGetChatRoomDetailUseCase() *chatusecase.GetChatRoomDetailUseCase {
+	return chatusecase.NewGetChatRoomDetailUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.chatRoomRepo,
+		d.chatMessageRepo,
+		d.userRepo,
+		d.agentRepo,
+	)
+}
+
+func (d *Deps) RegisterGetChatRoomMessagesUseCase() *chatusecase.GetChatRoomMessagesUseCase {
+	return chatusecase.NewGetChatRoomMessagesUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.chatRoomRepo,
+		d.chatMessageRepo,
+	)
+}
+
+func (d *Deps) RegisterUpdateMemberStatusUseCase() *chatusecase.UpdateMemberStatusUseCase {
+	return chatusecase.NewUpdateMemberStatusUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.chatRoomRepo,
+	)
+}
+
+func (d *Deps) RegisterSendMessageUseCase() *chatusecase.SendMessageUseCase {
+	return chatusecase.NewSendMessageUseCase(
+		d.participantRepo,
+		d.chatMemberRepo,
+		d.chatRoomRepo,
+		d.chatMessageRepo,
+		bddBroadcaster{},
+	)
+}
+
+func (d *Deps) FileStorage() appPort.FileStorage {
+	return bddFileStorage{}
+}
+
 func (d *Deps) SeedUser(userID shared.UserID, name, avatar string) {
 	d.userRepo.seed(userID, name, avatar)
 	d.participantRepo.seedForUser(userID)
@@ -89,6 +133,11 @@ func (d *Deps) CreateDirectRoomBetweenUsers(userID1, userID2 shared.UserID) chat
 		JoinedAt:      time.Now(),
 	})
 	return room.ID
+}
+
+func (d *Deps) MarkRoomDeleted(roomID chatroom.ID) {
+	_ = d.chatMemberRepo.SoftDeleteByRoom(context.Background(), roomID)
+	_ = d.chatRoomRepo.SoftDelete(context.Background(), roomID)
 }
 
 func (d *Deps) SeedLatestMessage(roomID chatroom.ID, senderUserID shared.UserID, content string) chatmember.ID {
@@ -286,7 +335,7 @@ func (r *bddChatRoomRepo) FindByID(_ context.Context, id chatroom.ID) (*chatroom
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	room, ok := r.byID[id]
-	if !ok {
+	if !ok || room.IsDeleted {
 		return nil, chatroom.ErrNotFound
 	}
 	copied := *room
@@ -313,7 +362,15 @@ func (r *bddChatRoomRepo) Update(context.Context, *chatroom.ChatRoom) error {
 	return nil
 }
 
-func (r *bddChatRoomRepo) SoftDelete(context.Context, chatroom.ID) error {
+func (r *bddChatRoomRepo) SoftDelete(_ context.Context, id chatroom.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	room, ok := r.byID[id]
+	if !ok {
+		return chatroom.ErrNotFound
+	}
+	room.IsDeleted = true
+	room.UpdatedAt = time.Now()
 	return nil
 }
 
@@ -411,7 +468,31 @@ func (r *bddChatMemberRepo) Update(context.Context, *chatmember.ChatMember) erro
 	return nil
 }
 
-func (r *bddChatMemberRepo) SoftDelete(context.Context, chatmember.ID) error {
+func (r *bddChatMemberRepo) SoftDelete(_ context.Context, id chatmember.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	member, ok := r.byID[id]
+	if !ok {
+		return chatmember.ErrNotFound
+	}
+	now := time.Now()
+	member.IsDeleted = true
+	member.DeletedAt = &now
+	member.UpdatedAt = now
+	return nil
+}
+
+func (r *bddChatMemberRepo) SoftDeleteByRoom(_ context.Context, roomID chatroom.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	for _, member := range r.byID {
+		if member.RoomID == roomID {
+			member.IsDeleted = true
+			member.DeletedAt = &now
+			member.UpdatedAt = now
+		}
+	}
 	return nil
 }
 
@@ -440,8 +521,23 @@ func (r *bddChatMessageRepo) FindByID(context.Context, chatmessage.ID) (*chatmes
 	return nil, chatmessage.ErrNotFound
 }
 
-func (r *bddChatMessageRepo) FindByRoom(context.Context, chatroom.ID, uint64, uint64) ([]*chatmessage.ChatMessage, error) {
-	return nil, nil
+func (r *bddChatMessageRepo) FindByRoom(_ context.Context, roomID chatroom.ID, limit, offset uint64) ([]*chatmessage.ChatMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	messages := r.byRoom[roomID]
+	if offset >= uint64(len(messages)) {
+		return nil, nil
+	}
+	end := uint64(len(messages))
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	out := make([]*chatmessage.ChatMessage, 0, end-offset)
+	for _, msg := range messages[offset:end] {
+		copied := *msg
+		out = append(out, &copied)
+	}
+	return out, nil
 }
 
 func (r *bddChatMessageRepo) FindByRoomBefore(context.Context, chatroom.ID, chatmessage.ID, uint64) ([]*chatmessage.ChatMessage, error) {
@@ -515,6 +611,28 @@ func (r *bddAgentRepo) FindAllByStatus(context.Context, agent.Status) ([]*agent.
 
 func (r *bddAgentRepo) Create(context.Context, *agent.Agent) error {
 	return nil
+}
+
+type bddBroadcaster struct{}
+
+func (bddBroadcaster) SendToUser(string, []byte) {}
+
+type bddFileStorage struct{}
+
+func (bddFileStorage) Save(context.Context, shared.File, string) (appPort.SaveResult, error) {
+	return appPort.SaveResult{}, nil
+}
+
+func (bddFileStorage) SaveStream(context.Context, io.Reader, appPort.FileMeta, string) (appPort.SaveResult, error) {
+	return appPort.SaveResult{}, nil
+}
+
+func (bddFileStorage) Delete(context.Context, string) error {
+	return nil
+}
+
+func (bddFileStorage) URL(path string) string {
+	return path
 }
 
 var (

@@ -25,17 +25,20 @@ type GetChatRoomMessagesOutput struct {
 type GetChatRoomMessagesUseCase struct {
 	participantRepo participant.Repository
 	chatMemberRepo  chatmember.Repository
+	chatRoomRepo    chatroom.Repository
 	chatMessageRepo chatmessage.Repository
 }
 
 func NewGetChatRoomMessagesUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
+	chatRoomRepo chatroom.Repository,
 	chatMessageRepo chatmessage.Repository,
 ) *GetChatRoomMessagesUseCase {
 	return &GetChatRoomMessagesUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
+		chatRoomRepo:    chatRoomRepo,
 		chatMessageRepo: chatMessageRepo,
 	}
 }
@@ -53,6 +56,11 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 	}
 
 	roomID := chatroom.ID(input.Data.RoomID)
+
+	room, err := uc.chatRoomRepo.FindByID(ctx, roomID)
+	if err != nil || room.IsDeleted {
+		return GetChatRoomMessagesOutput{}, ErrChatRoomNotFound
+	}
 
 	callerMember, err := uc.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, callerParticipant.ID)
 	if err != nil || callerMember.IsDeleted {
