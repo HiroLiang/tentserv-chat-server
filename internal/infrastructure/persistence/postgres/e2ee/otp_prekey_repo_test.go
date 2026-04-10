@@ -23,7 +23,7 @@ func TestOTPPreKeyRepository_ConsumeOneDeletesWithSkipLocked(t *testing.T) {
 	deviceID := mustOTPRepoDeviceID(t)
 	publicKey := otpRepoBytesOf(9, 32)
 
-	mock.ExpectQuery(`(?s)WITH victim AS .*FOR UPDATE SKIP LOCKED.*DELETE FROM public\.user_one_time_pre_keys.*RETURNING id, user_id, device_id, key_id, public_key, uploaded_at`).
+	mock.ExpectQuery(`(?s)WITH victim AS .*FOR UPDATE SKIP LOCKED.*DELETE FROM public\.user_one_time_pre_keys.*RETURNING public\.user_one_time_pre_keys\.id,\s+public\.user_one_time_pre_keys\.user_id,\s+public\.user_one_time_pre_keys\.device_id,\s+public\.user_one_time_pre_keys\.key_id,\s+public\.user_one_time_pre_keys\.public_key,\s+public\.user_one_time_pre_keys\.uploaded_at`).
 		WithArgs(shared.UserID(42), deviceID.String()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "device_id", "key_id", "public_key", "uploaded_at"}).
 			AddRow(1, 42, deviceID.String(), 7, publicKey, time.Now()))
@@ -42,7 +42,7 @@ func TestOTPPreKeyRepository_ConsumeOneEmptyPoolMapsDomainError(t *testing.T) {
 	repo := NewOTPPreKeyRepository(sqlx.NewDb(db, "postgres"))
 	deviceID := mustOTPRepoDeviceID(t)
 
-	mock.ExpectQuery(`(?s)WITH victim AS .*FOR UPDATE SKIP LOCKED.*DELETE FROM public\.user_one_time_pre_keys.*RETURNING id, user_id, device_id, key_id, public_key, uploaded_at`).
+	mock.ExpectQuery(`(?s)WITH victim AS .*FOR UPDATE SKIP LOCKED.*DELETE FROM public\.user_one_time_pre_keys.*RETURNING public\.user_one_time_pre_keys\.id,\s+public\.user_one_time_pre_keys\.user_id,\s+public\.user_one_time_pre_keys\.device_id,\s+public\.user_one_time_pre_keys\.key_id,\s+public\.user_one_time_pre_keys\.public_key,\s+public\.user_one_time_pre_keys\.uploaded_at`).
 		WithArgs(shared.UserID(42), deviceID.String()).
 		WillReturnError(sql.ErrNoRows)
 

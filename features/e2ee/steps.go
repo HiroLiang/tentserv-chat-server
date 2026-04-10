@@ -59,6 +59,7 @@ type senderKeyDistributionStatusResponse struct {
 	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
 	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
 	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
+	AvailableToMemberIDs   []int64 `json:"available_to_member_ids"`
 	PendingReceivers       []int64 `json:"pending_receivers"`
 	PendingFromMembers     []int64 `json:"pending_from_members"`
 }
@@ -118,6 +119,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request sender key distribution status for room (\d+)$`, s.iRequestSenderKeyDistributionStatus)
 	ctx.Step(`^sender key distribution status should show own key exists as (true|false)$`, s.senderKeyDistributionStatusShouldShowOwnKeyExists)
 	ctx.Step(`^sender key distribution status should list available sender member (\d+)$`, s.senderKeyDistributionStatusShouldListAvailableSenderMember)
+	ctx.Step(`^sender key distribution status should list available receiver member (\d+)$`, s.senderKeyDistributionStatusShouldListAvailableReceiverMember)
 	ctx.Step(`^sender key distribution status should list pending receiver member (\d+)$`, s.senderKeyDistributionStatusShouldListPendingReceiverMember)
 	ctx.Step(`^I list pending sender key distributions for room (\d+)$`, s.iListPendingSenderKeyDistributions)
 	ctx.Step(`^pending sender key distributions should include sender member (\d+), receiver member (\d+), and version (\d+)$`, s.pendingSenderKeyDistributionsShouldInclude)
@@ -1118,6 +1120,22 @@ func (s *steps) senderKeyDistributionStatusShouldListAvailableSenderMember(membe
 		}
 	}
 	return fmt.Errorf("expected available_from_member_ids to include %d, got %v", memberID, body.AvailableFromMemberIDs)
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListAvailableReceiverMember(memberID int64) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, id := range body.AvailableToMemberIDs {
+		if id == memberID {
+			fmt.Printf("Output: available_to_member_ids=%v\n", body.AvailableToMemberIDs)
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected available_to_member_ids to include %d, got %v", memberID, body.AvailableToMemberIDs)
 }
 
 func (s *steps) senderKeyDistributionStatusShouldListPendingReceiverMember(memberID int64) error {

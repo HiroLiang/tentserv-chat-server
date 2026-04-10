@@ -357,9 +357,12 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 }
 
 // @Summary Get sender key distribution status for a room
-// @Description Returns whether my sender key exists plus two lists: members who have not yet fetched my latest key (pending_receivers),
+// @Description Returns whether my sender key exists plus room sender-key reconciliation lists:
 //
-//	and members whose latest key I have not yet fetched (pending_from_members).
+//	requestable_member_ids and pending_from_members for peers whose latest key I still need,
+//	available_from_member_ids for peers who already uploaded a consumable distribution to me,
+//	available_to_member_ids for members who already have my latest available distribution,
+//	and pending_receivers for members who still need a fresh upload from me.
 //
 // @Tags E2EE
 // @Produce json
@@ -389,6 +392,7 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 		OwnSenderKeyExists:     out.OwnSenderKeyExists,
 		RequestableMemberIDs:   normalizeMemberIDs(out.RequestableMemberIDs),
 		AvailableFromMemberIDs: normalizeMemberIDs(out.AvailableFromMemberIDs),
+		AvailableToMemberIDs:   normalizeMemberIDs(out.AvailableToMemberIDs),
 		PendingReceivers:       normalizeMemberIDs(out.PendingReceivers),
 		PendingFromMembers:     normalizeMemberIDs(out.PendingFromMembers),
 	})

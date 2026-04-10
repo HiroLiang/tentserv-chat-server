@@ -74,7 +74,7 @@ func (s *uploadSenderKeyDistributionRepoStub) UpsertBatch(context.Context, []*se
 	return nil
 }
 
-func (s *uploadSenderKeyDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int) ([]chatmember.ID, error) {
+func (s *uploadSenderKeyDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
 	return nil, nil
 }
 
@@ -167,12 +167,14 @@ func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) 
 	require.Len(t, memberSenderKeyRepo.upserted, 1)
 	assert.Equal(t, providerMemberID, memberSenderKeyRepo.upserted[0].ChatMemberID)
 	assert.Equal(t, senderKeyVersion, memberSenderKeyRepo.upserted[0].SenderKeyVersion)
+	assert.Equal(t, membersenderkey.ChainID(senderKeyVersion), memberSenderKeyRepo.upserted[0].ChainID)
 
 	require.Len(t, distributionRepo.upserted, 1)
 	assert.Equal(t, providerMemberID, distributionRepo.upserted[0].SenderMemberID)
 	assert.Equal(t, requesterMemberID, distributionRepo.upserted[0].ReceiverMemberID)
 	assert.Equal(t, int64(roomID), distributionRepo.upserted[0].RoomID)
 	assert.Equal(t, senderKeyVersion, distributionRepo.upserted[0].SenderKeyVersion)
+	assert.Equal(t, senderKeyVersion, distributionRepo.upserted[0].ChainID)
 	assert.Equal(t, distBytes, distributionRepo.upserted[0].DistributionMessage)
 	assert.Equal(t, senderkeydistribution.StatusAvailable, distributionRepo.upserted[0].Status)
 

@@ -21,6 +21,7 @@ type GetSenderKeyDistributionStatusOutput struct {
 	OwnSenderKeyExists     bool
 	RequestableMemberIDs   []int64
 	AvailableFromMemberIDs []int64
+	AvailableToMemberIDs   []int64
 	PendingReceivers       []int64
 	// Legacy compatibility for still-migrating callers.
 	PendingFromMembers []int64
@@ -70,6 +71,7 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 	out := &GetSenderKeyDistributionStatusOutput{
 		RequestableMemberIDs:   []int64{},
 		AvailableFromMemberIDs: []int64{},
+		AvailableToMemberIDs:   []int64{},
 		PendingReceivers:       []int64{},
 		PendingFromMembers:     []int64{},
 	}
@@ -112,8 +114,10 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 				out.PendingReceivers = append(out.PendingReceivers, int64(member.ID))
 			} else if distErr != nil {
 				return nil, fmt.Errorf("find latest distribution from caller %d to member %d: %w", callerMember.ID, member.ID, distErr)
-			} else if dist.SenderKeyVersion < ownLatest.SenderKeyVersion || dist.Status != senderkeydistribution.StatusConsumed {
+			} else if dist.SenderKeyVersion < ownLatest.SenderKeyVersion || dist.Status == senderkeydistribution.StatusFailed {
 				out.PendingReceivers = append(out.PendingReceivers, int64(member.ID))
+			} else if dist.Status == senderkeydistribution.StatusAvailable {
+				out.AvailableToMemberIDs = append(out.AvailableToMemberIDs, int64(member.ID))
 			}
 		}
 	}

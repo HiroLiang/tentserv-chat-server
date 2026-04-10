@@ -20,6 +20,7 @@ var distributionTable = postgres.Table{
 		"sender_member_id",
 		"receiver_member_id",
 		"sender_key_version",
+		"chain_id",
 		"distribution_message",
 		"status",
 		"distributed_at",
@@ -47,9 +48,10 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 	}
 
 	q := distributionTable.Insert().
-		Columns("sender_member_id", "receiver_member_id", "sender_key_version", "distribution_message", "status").
+		Columns("sender_member_id", "receiver_member_id", "sender_key_version", "chain_id", "distribution_message", "status").
 		Suffix(`ON CONFLICT (sender_member_id, receiver_member_id)
 			DO UPDATE SET sender_key_version = GREATEST(EXCLUDED.sender_key_version, sender_key_distributions.sender_key_version),
+			              chain_id = GREATEST(EXCLUDED.chain_id, sender_key_distributions.chain_id),
 			              status = CASE
 			                  WHEN EXCLUDED.sender_key_version >= sender_key_distributions.sender_key_version THEN EXCLUDED.status
 			                  ELSE sender_key_distributions.status
@@ -69,11 +71,20 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 		if version == 0 {
 			version = int64(d.ChainID)
 		}
+		chainID := d.ChainID
+		if chainID == 0 {
+			chainID = version
+		}
+		message := d.DistributionMessage
+		if message == nil {
+			message = []byte{}
+		}
 		q = q.Values(
 			int64(d.SenderMemberID),
 			int64(d.ReceiverMemberID),
 			version,
-			d.DistributionMessage,
+			chainID,
+			message,
 			senderkeydistribution.StatusConsumed,
 		)
 	}
@@ -89,7 +100,7 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 func (r *SenderKeyDistributionRepository) FindPendingReceivers(
 	ctx context.Context,
 	senderMemberID chatmember.ID,
-	latestChainID int,
+	latestChainID int64,
 ) ([]chatmember.ID, error) {
 	const query = `
 SELECT cm.id
@@ -122,12 +133,17 @@ func (r *SenderKeyDistributionRepository) UpsertAvailable(
 	ctx context.Context,
 	dist *senderkeydistribution.SenderKeyDistribution,
 ) error {
+	if dist.ChainID == 0 {
+		dist.ChainID = dist.SenderKeyVersion
+	}
+
 	query := `
 INSERT INTO public.sender_key_distributions
-    (sender_member_id, receiver_member_id, sender_key_version, distribution_message, status, distributed_at, consumed_at, failed_at)
-VALUES ($1, $2, $3, $4, $5, now(), NULL, NULL)
+    (sender_member_id, receiver_member_id, sender_key_version, chain_id, distribution_message, status, distributed_at, consumed_at, failed_at)
+VALUES ($1, $2, $3, $4, $5, $6, now(), NULL, NULL)
 ON CONFLICT (sender_member_id, receiver_member_id)
 DO UPDATE SET sender_key_version = EXCLUDED.sender_key_version,
+              chain_id = EXCLUDED.chain_id,
               distribution_message = EXCLUDED.distribution_message,
               status = EXCLUDED.status,
               distributed_at = now(),
@@ -142,6 +158,7 @@ RETURNING id, distributed_at`
 		int64(dist.SenderMemberID),
 		int64(dist.ReceiverMemberID),
 		dist.SenderKeyVersion,
+		dist.ChainID,
 		dist.DistributionMessage,
 		senderkeydistribution.StatusAvailable,
 	)
@@ -186,6 +203,7 @@ SELECT skd.id,
        skd.sender_member_id,
        skd.receiver_member_id,
        skd.sender_key_version,
+       skd.chain_id,
        skd.distribution_message,
        skd.status,
        skd.distributed_at,

@@ -8,14 +8,14 @@ Feature: E2EE sender key distribution lifecycle
     And login response should include a bearer token
     Given E2EE keys are bootstrapped for the logged in user
 
-  Scenario: Provider uploads a latest sender key distribution for one receiver
+  Scenario: Provider uploads a latest sender key distribution for one receiver with a millisecond sender key version
     Given a sender key provider setup exists with room id 11, provider member id 301, and receiver member id 302 in the same room
-    When I provide a sender key distribution for room 11 to receiver member 302 with sender key version 9001
+    When I provide a sender key distribution for room 11 to receiver member 302 with sender key version 1775758701055
     Then the response status should be 204
     When I request sender key distribution status for room 11
     Then the response status should be 200
     And sender key distribution status should show own key exists as true
-    And sender key distribution status should list pending receiver member 302
+    And sender key distribution status should list available receiver member 302
 
   Scenario: Receiver sees an available sender key distribution in room summary and pending list
     Given a sender key receiver setup exists with room id 12, sender member id 304, and receiver member id 303 with available distribution version 77

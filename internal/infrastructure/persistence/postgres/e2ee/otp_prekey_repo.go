@@ -47,7 +47,12 @@ WITH victim AS (
 DELETE FROM public.user_one_time_pre_keys
 USING victim
 WHERE public.user_one_time_pre_keys.id = victim.id
-RETURNING id, user_id, device_id, key_id, public_key, uploaded_at`
+RETURNING public.user_one_time_pre_keys.id,
+          public.user_one_time_pre_keys.user_id,
+          public.user_one_time_pre_keys.device_id,
+          public.user_one_time_pre_keys.key_id,
+          public.user_one_time_pre_keys.public_key,
+          public.user_one_time_pre_keys.uploaded_at`
 
 	db := r.GetDB(ctx)
 	rec, err := postgres.ScanOne[OTPPreKeyRecord](ctx, db, query, userID, deviceID.String())

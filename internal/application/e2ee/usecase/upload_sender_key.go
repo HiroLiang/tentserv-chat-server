@@ -102,6 +102,7 @@ func (u *UploadSenderKeyUseCase) Execute(
 		ReceiverMemberID:    receiverMember.ID,
 		RoomID:              int64(roomID),
 		SenderKeyVersion:    input.Data.SenderKeyVersion,
+		ChainID:             input.Data.SenderKeyVersion,
 		DistributionMessage: distBytes,
 		Status:              senderkeydistribution.StatusAvailable,
 	}

@@ -84,7 +84,7 @@ func (u *GetSenderKeysUseCase) Execute(
 		})
 	}
 
-	// Record ACK: caller has fetched each sender's key at its current chain_id.
+	// Record ACK: caller has fetched each sender's key at its current sender-key version.
 	// Fire best-effort; do not fail the response if this write fails.
 	go u.recordDistributions(context.Background(), callerMember.ID, senderKeys)
 
@@ -106,9 +106,11 @@ func (u *GetSenderKeysUseCase) recordDistributions(
 			continue // do not record self-fetching own key
 		}
 		dists = append(dists, &senderkeydistribution.SenderKeyDistribution{
-			SenderMemberID:   sk.ChatMemberID,
-			ReceiverMemberID: receiverMemberID,
-			ChainID:          int(sk.ChainID),
+			SenderMemberID:      sk.ChatMemberID,
+			ReceiverMemberID:    receiverMemberID,
+			SenderKeyVersion:    sk.SenderKeyVersion,
+			ChainID:             int64(sk.ChainID),
+			DistributionMessage: []byte{},
 		})
 	}
 

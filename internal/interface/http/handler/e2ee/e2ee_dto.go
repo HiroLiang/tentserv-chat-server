@@ -96,6 +96,7 @@ type GetSenderKeyDistributionStatusResponse struct {
 	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
 	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
 	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
+	AvailableToMemberIDs   []int64 `json:"available_to_member_ids"`
 	PendingReceivers       []int64 `json:"pending_receivers"`
 	PendingFromMembers     []int64 `json:"pending_from_members"`
 }

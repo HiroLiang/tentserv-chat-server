@@ -90,6 +90,9 @@ func (r *SenderKeyRepository) FindAllByMembers(
 
 func (r *SenderKeyRepository) Add(ctx context.Context, sk *membersenderkey.MemberSenderKey) error {
 	rec := toSenderKeyRecord(sk)
+	if rec.ChainID == 0 {
+		rec.ChainID = membersenderkey.ChainID(rec.SenderKeyVersion)
+	}
 	if rec.SenderKeyVersion == 0 {
 		rec.SenderKeyVersion = int64(rec.ChainID)
 	}

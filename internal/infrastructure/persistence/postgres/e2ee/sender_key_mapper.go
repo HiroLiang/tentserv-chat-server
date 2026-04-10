@@ -5,12 +5,17 @@ import (
 )
 
 func toSenderKeyDomain(rec *SenderKeyRecord) (*membersenderkey.MemberSenderKey, error) {
+	chainID := rec.ChainID
+	if int64(chainID) < rec.SenderKeyVersion {
+		chainID = membersenderkey.ChainID(rec.SenderKeyVersion)
+	}
+
 	return &membersenderkey.MemberSenderKey{
 		ID:               rec.ID,
 		ChatMemberID:     rec.ChatMemberID,
 		SenderKeyVersion: rec.SenderKeyVersion,
 		KeyFingerprint:   rec.KeyFingerprint,
-		ChainID:          rec.ChainID,
+		ChainID:          chainID,
 		CreatedAt:        rec.CreatedAt,
 	}, nil
 }

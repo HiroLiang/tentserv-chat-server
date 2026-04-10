@@ -540,7 +540,7 @@ func (r *skrSenderKeyDistributionRepo) seed(roomID int64, senderMemberID, receiv
 		ReceiverMemberID: receiverMemberID,
 		SenderKeyVersion: version,
 		Status:           status,
-		ChainID:          int(version),
+		ChainID:          version,
 		DistributedAt:    time.Now(),
 	}
 	r.byPair[r.key(senderMemberID, receiverMemberID)] = dist
@@ -576,7 +576,7 @@ func (r *skrSenderKeyDistributionRepo) UpsertBatch(_ context.Context, dists []*s
 		existing, ok := r.byPair[k]
 		if ok {
 			existing.ChainID = dist.ChainID
-			existing.SenderKeyVersion = int64(dist.ChainID)
+			existing.SenderKeyVersion = dist.ChainID
 			existing.Status = senderkeydistribution.StatusConsumed
 			now := time.Now()
 			existing.ConsumedAt = &now
@@ -586,7 +586,7 @@ func (r *skrSenderKeyDistributionRepo) UpsertBatch(_ context.Context, dists []*s
 		copied := *dist
 		copied.ID = r.nextID
 		copied.Status = senderkeydistribution.StatusConsumed
-		copied.SenderKeyVersion = int64(dist.ChainID)
+		copied.SenderKeyVersion = dist.ChainID
 		now := time.Now()
 		copied.ConsumedAt = &now
 		r.byPair[k] = &copied
@@ -595,7 +595,7 @@ func (r *skrSenderKeyDistributionRepo) UpsertBatch(_ context.Context, dists []*s
 	return nil
 }
 
-func (r *skrSenderKeyDistributionRepo) FindPendingReceivers(_ context.Context, senderMemberID chatmember.ID, latestChainID int) ([]chatmember.ID, error) {
+func (r *skrSenderKeyDistributionRepo) FindPendingReceivers(_ context.Context, senderMemberID chatmember.ID, latestChainID int64) ([]chatmember.ID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]chatmember.ID, 0)
@@ -603,7 +603,7 @@ func (r *skrSenderKeyDistributionRepo) FindPendingReceivers(_ context.Context, s
 		if dist.SenderMemberID != senderMemberID {
 			continue
 		}
-		if dist.Status != senderkeydistribution.StatusConsumed || dist.SenderKeyVersion < int64(latestChainID) {
+		if dist.Status != senderkeydistribution.StatusConsumed || dist.SenderKeyVersion < latestChainID {
 			out = append(out, dist.ReceiverMemberID)
 		}
 	}
@@ -617,6 +617,7 @@ func (r *skrSenderKeyDistributionRepo) UpsertAvailable(_ context.Context, dist *
 	if existing, ok := r.byPair[k]; ok {
 		existing.RoomID = dist.RoomID
 		existing.SenderKeyVersion = dist.SenderKeyVersion
+		existing.ChainID = dist.ChainID
 		existing.DistributionMessage = append([]byte(nil), dist.DistributionMessage...)
 		existing.Status = senderkeydistribution.StatusAvailable
 		existing.DistributedAt = time.Now()

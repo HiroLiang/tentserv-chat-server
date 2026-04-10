@@ -171,7 +171,7 @@ func (s *senderKeyReqDistributionRepoStub) UpsertBatch(context.Context, []*sende
 	return nil
 }
 
-func (s *senderKeyReqDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int) ([]chatmember.ID, error) {
+func (s *senderKeyReqDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
 	return nil, nil
 }
 
