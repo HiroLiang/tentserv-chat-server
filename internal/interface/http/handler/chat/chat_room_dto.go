@@ -49,6 +49,7 @@ type ChatRoomSummaryResponse struct {
 	LatestMsg         *string `json:"latest_message"`
 	LatestMsgSenderID *int64  `json:"latest_message_sender_id,omitempty"`
 	UnreadCount       int64   `json:"unread_count"`
+	BlockedByPeer     bool    `json:"blocked_by_peer,omitempty"`
 }
 
 type ChatRoomMemberInfoResponse struct {
@@ -73,13 +74,14 @@ type ChatMessageInfoResponse struct {
 }
 
 type GetChatRoomDetailResponse struct {
-	RoomID      int64                        `json:"room_id"`
-	RoomType    string                       `json:"room_type"`
-	Name        string                       `json:"name"`
-	Description *string                      `json:"description,omitempty"`
-	AvatarURL   *string                      `json:"avatar_url"`
-	Members     []ChatRoomMemberInfoResponse `json:"members"`
-	Messages    []ChatMessageInfoResponse    `json:"messages"`
+	RoomID        int64                        `json:"room_id"`
+	RoomType      string                       `json:"room_type"`
+	Name          string                       `json:"name"`
+	Description   *string                      `json:"description,omitempty"`
+	AvatarURL     *string                      `json:"avatar_url"`
+	Members       []ChatRoomMemberInfoResponse `json:"members"`
+	Messages      []ChatMessageInfoResponse    `json:"messages"`
+	BlockedByPeer bool                         `json:"blocked_by_peer,omitempty"`
 }
 
 type GetChatRoomMessagesRequest struct {

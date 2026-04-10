@@ -248,7 +248,7 @@ func (s *respondBlockFriendshipRepoStub) Delete(ctx context.Context, id int64) e
 	return nil
 }
 
-func TestRespondToInvitationUseCase_BlockCreatesForwardAndDeletesReverse(t *testing.T) {
+func TestRespondToInvitationUseCase_BlockCreatesForwardAndKeepsReverse(t *testing.T) {
 	callerUserID := shared.UserID(100)
 	inviterUserID := shared.UserID(200)
 	callerParticipantID := participant.ID(10)
@@ -289,12 +289,12 @@ func TestRespondToInvitationUseCase_BlockCreatesForwardAndDeletesReverse(t *test
 	require.NoError(t, err)
 	assert.Equal(t, string(chatinvitation.Blocked), out.Status)
 	assert.Equal(t, [][2]shared.UserID{{callerUserID, inviterUserID}}, friendshipRepo.createdPairs)
-	assert.Equal(t, []int64{33}, friendshipRepo.deletedIDs)
+	assert.Empty(t, friendshipRepo.deletedIDs)
 	require.NotNil(t, uow.tx)
 	assert.True(t, uow.tx.committed)
 }
 
-func TestRespondToInvitationUseCase_BlockKeepsOnlyForwardBlockedWhenBothDirectionsExist(t *testing.T) {
+func TestRespondToInvitationUseCase_BlockKeepsReverseAcceptedWhenBothDirectionsExist(t *testing.T) {
 	callerUserID := shared.UserID(100)
 	inviterUserID := shared.UserID(200)
 	callerParticipantID := participant.ID(10)
@@ -337,14 +337,15 @@ func TestRespondToInvitationUseCase_BlockKeepsOnlyForwardBlockedWhenBothDirectio
 	assert.Equal(t, string(chatinvitation.Blocked), out.Status)
 	assert.Empty(t, friendshipRepo.createdPairs)
 	assert.Equal(t, []int64{11}, friendshipRepo.updatedIDs)
-	assert.Equal(t, []int64{12}, friendshipRepo.deletedIDs)
+	assert.Empty(t, friendshipRepo.deletedIDs)
 
 	forward, ok := friendshipRepo.records[[2]shared.UserID{callerUserID, inviterUserID}]
 	require.True(t, ok)
 	assert.Equal(t, friendship.StatusBlocked, forward.Status)
 
-	_, reverseExists := friendshipRepo.records[[2]shared.UserID{inviterUserID, callerUserID}]
-	assert.False(t, reverseExists)
+	reverse, reverseExists := friendshipRepo.records[[2]shared.UserID{inviterUserID, callerUserID}]
+	require.True(t, reverseExists)
+	assert.Equal(t, friendship.StatusAccepted, reverse.Status)
 }
 
 func TestRespondToInvitationUseCase_BlockReturnsErrorWhenFriendshipSyncFails(t *testing.T) {

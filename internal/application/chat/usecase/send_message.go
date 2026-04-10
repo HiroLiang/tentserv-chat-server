@@ -19,6 +19,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 )
 
@@ -45,6 +46,7 @@ type SendMessageUseCase struct {
 	chatRoomRepo    chatroom.Repository
 	chatMessageRepo chatmessage.Repository
 	broadcaster     port.Broadcaster
+	friendshipRepo  friendship.Repository
 }
 
 func NewSendMessageUseCase(
@@ -53,13 +55,19 @@ func NewSendMessageUseCase(
 	chatRoomRepo chatroom.Repository,
 	chatMessageRepo chatmessage.Repository,
 	broadcaster port.Broadcaster,
+	friendshipRepo ...friendship.Repository,
 ) *SendMessageUseCase {
+	var fsRepo friendship.Repository
+	if len(friendshipRepo) > 0 {
+		fsRepo = friendshipRepo[0]
+	}
 	return &SendMessageUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
 		chatRoomRepo:    chatRoomRepo,
 		chatMessageRepo: chatMessageRepo,
 		broadcaster:     broadcaster,
+		friendshipRepo:  fsRepo,
 	}
 }
 
@@ -102,6 +110,26 @@ func (uc *SendMessageUseCase) Execute(
 
 	if !chatmember.CanSendMessage(callerMember.Role) {
 		return SendMessageOutput{}, ErrNotAllowed
+	}
+	if room.Type == chatroom.Direct {
+		allMembers, err := uc.chatMemberRepo.FindByRoom(ctx, roomID)
+		if err != nil {
+			return SendMessageOutput{}, err
+		}
+		blockedSenders, _, err := blockedMembersForCaller(
+			ctx,
+			uc.friendshipRepo,
+			uc.participantRepo,
+			input.Base.Auth.UserID,
+			callerParticipant.ID,
+			allMembers,
+		)
+		if err != nil {
+			return SendMessageOutput{}, err
+		}
+		if len(blockedSenders) > 0 {
+			return SendMessageOutput{}, ErrUserBlocked
+		}
 	}
 
 	msgType := chatmessage.MessageType(input.Data.Type)

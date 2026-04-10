@@ -74,6 +74,7 @@ func (h *FriendshipHandler) getBlockedUsers(c *gin.Context) {
 			Name:         f.Name,
 			Avatar:       f.Avatar,
 			Status:       f.Status,
+			BlockedBy:    f.BlockedBy,
 			CreatedAt:    f.CreatedAt,
 		})
 	}
@@ -105,6 +106,7 @@ func (h *FriendshipHandler) getFriends(c *gin.Context) {
 			Name:         f.Name,
 			Avatar:       f.Avatar,
 			Status:       f.Status,
+			BlockedBy:    f.BlockedBy,
 			CreatedAt:    f.CreatedAt,
 		})
 	}

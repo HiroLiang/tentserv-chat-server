@@ -181,6 +181,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMessageRepo,
 			deps.UserRepo,
 			deps.AgentRepo,
+			deps.FriendshipRepo,
 		),
 		GetChatRoomDetailUseCase: chatUseCase.NewGetChatRoomDetailUseCase(
 			deps.ParticipantRepository,
@@ -189,12 +190,14 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMessageRepo,
 			deps.UserRepo,
 			deps.AgentRepo,
+			deps.FriendshipRepo,
 		),
 		GetChatRoomMessagesUseCase: chatUseCase.NewGetChatRoomMessagesUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.ChatRoomRepo,
 			deps.ChatMessageRepo,
+			deps.FriendshipRepo,
 		),
 		UpdateMemberStatusUseCase: chatUseCase.NewUpdateMemberStatusUseCase(
 			deps.ParticipantRepository,
@@ -284,6 +287,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatRoomRepo,
 			deps.ChatMessageRepo,
 			deps.Hub,
+			deps.FriendshipRepo,
 		),
 		UploadRoomMediaUseCase: chatUseCase.NewUploadRoomMediaUseCase(
 			deps.ParticipantRepository,

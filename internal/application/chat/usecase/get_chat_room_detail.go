@@ -10,6 +10,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 )
@@ -41,13 +42,14 @@ type ChatMessageInfo struct {
 }
 
 type GetChatRoomDetailOutput struct {
-	RoomID      int64
-	RoomType    string
-	Name        string
-	Description *string
-	AvatarURL   *string
-	Members     []ChatRoomMemberInfo
-	Messages    []ChatMessageInfo
+	RoomID        int64
+	RoomType      string
+	Name          string
+	Description   *string
+	AvatarURL     *string
+	Members       []ChatRoomMemberInfo
+	Messages      []ChatMessageInfo
+	BlockedByPeer bool
 }
 
 type GetChatRoomDetailUseCase struct {
@@ -57,6 +59,7 @@ type GetChatRoomDetailUseCase struct {
 	chatMessageRepo chatmessage.Repository
 	userRepo        user.Repository
 	agentRepo       agent.Repository
+	friendshipRepo  friendship.Repository
 }
 
 func NewGetChatRoomDetailUseCase(
@@ -66,7 +69,12 @@ func NewGetChatRoomDetailUseCase(
 	chatMessageRepo chatmessage.Repository,
 	userRepo user.Repository,
 	agentRepo agent.Repository,
+	friendshipRepo ...friendship.Repository,
 ) *GetChatRoomDetailUseCase {
+	var fsRepo friendship.Repository
+	if len(friendshipRepo) > 0 {
+		fsRepo = friendshipRepo[0]
+	}
 	return &GetChatRoomDetailUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
@@ -74,6 +82,7 @@ func NewGetChatRoomDetailUseCase(
 		chatMessageRepo: chatMessageRepo,
 		userRepo:        userRepo,
 		agentRepo:       agentRepo,
+		friendshipRepo:  fsRepo,
 	}
 }
 
@@ -105,6 +114,17 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 	if err != nil {
 		return GetChatRoomDetailOutput{}, err
 	}
+	blockedSenders, blockedByPeer, err := blockedMembersForCaller(
+		ctx,
+		uc.friendshipRepo,
+		uc.participantRepo,
+		input.Base.Auth.UserID,
+		callerParticipant.ID,
+		allMembers,
+	)
+	if err != nil {
+		return GetChatRoomDetailOutput{}, err
+	}
 
 	// Build member ID → participant ID map for message sender resolution (H-2).
 	memberParticipantMap := make(map[chatmember.ID]participant.ID, len(allMembers))
@@ -121,7 +141,7 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 		members = append(members, info)
 	}
 
-	msgs, err := uc.chatMessageRepo.FindByRoom(ctx, roomID, 20, 0)
+	msgs, err := findByRoomExcludingSenders(ctx, uc.chatMessageRepo, roomID, blockedSenders, 20, 0)
 	if err != nil {
 		return GetChatRoomDetailOutput{}, err
 	}
@@ -158,13 +178,14 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 	avatarURL := uc.resolveRoomAvatarURL(ctx, room, callerParticipant.ID, allMembers)
 
 	return GetChatRoomDetailOutput{
-		RoomID:      int64(room.ID),
-		RoomType:    string(room.Type),
-		Name:        room.Name,
-		Description: description,
-		AvatarURL:   avatarURL,
-		Members:     members,
-		Messages:    messages,
+		RoomID:        int64(room.ID),
+		RoomType:      string(room.Type),
+		Name:          room.Name,
+		Description:   description,
+		AvatarURL:     avatarURL,
+		Members:       members,
+		Messages:      messages,
+		BlockedByPeer: room.Type == chatroom.Direct && blockedByPeer,
 	}, nil
 }
 

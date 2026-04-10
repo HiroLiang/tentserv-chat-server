@@ -134,7 +134,8 @@ Feature: Friendship search and requests
     And I am accepted friends with user 611
     When I block user 611
     Then the response status should be 200
-    And friendship row from user 611 to the logged in user should not exist
+    And friendship rows should contain "blocked" from the logged in user to user 611
+    And friendship row from user 611 to the logged in user should be "accepted"
     When I request blocked users
     Then the response status should be 200
     And the blocked response should include "Sora" with status "blocked"
@@ -143,9 +144,40 @@ Feature: Friendship search and requests
     And search results should include "Sora" with public id "sora-public", avatar "avatars/sora.png", and friendship status "blocked"
     When I unblock user 611
     Then the response status should be 200
+    And mutual friendship rows between the logged in user and user 611 should both be "accepted"
     When I request blocked users
     Then the response status should be 200
     And the blocked response should not include user 611
+
+  Scenario: Unblock restores an inbound pending friend request
+    Given a searchable user "Pax" exists with id 613, account "pax_account", public id "pax-public", and avatar "avatars/pax.png"
+    And an inbound pending friend request exists from user 613
+    When I block user 613
+    Then the response status should be 200
+    When I request incoming friend requests
+    Then the response status should be 200
+    And the incoming requests response should not include user 613
+    When I unblock user 613
+    Then the response status should be 200
+    When I request incoming friend requests
+    Then the response status should be 200
+    And the incoming requests response should include "Pax"
+
+  Scenario: Users who blocked me are hidden from search and readonly in friends
+    Given a searchable user "Vega" exists with id 614, account "vega_account", public id "vega-public", and avatar "avatars/vega.png"
+    And user 614 has blocked the logged in user
+    When I search friends by name "Vega"
+    Then the response status should be 200
+    And search results should not include user 614
+    Given a searchable user "Nori" exists with id 615, account "nori_account", public id "nori-public", and avatar "avatars/nori.png"
+    And I am accepted friends with user 615
+    And user 615 has blocked the logged in user
+    When I request my friends
+    Then the response status should be 200
+    And the friends response should include user 615 with status "blocked" and blocked by "them"
+    When I request blocked users
+    Then the response status should be 200
+    And the blocked response should not include user 615
 
   Scenario: Accept returns not found for an unknown friendship id
     When I accept friendship id 9999

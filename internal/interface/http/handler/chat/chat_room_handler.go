@@ -197,6 +197,7 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 				LatestMsg:         s.LatestMsg,
 				LatestMsgSenderID: s.LatestMsgSenderID,
 				UnreadCount:       s.UnreadCount,
+				BlockedByPeer:     s.BlockedByPeer,
 			})
 		}
 		return result
@@ -264,13 +265,14 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetChatRoomDetailResponse{
-		RoomID:      out.RoomID,
-		RoomType:    out.RoomType,
-		Name:        out.Name,
-		Description: out.Description,
-		AvatarURL:   out.AvatarURL,
-		Members:     members,
-		Messages:    messages,
+		RoomID:        out.RoomID,
+		RoomType:      out.RoomType,
+		Name:          out.Name,
+		Description:   out.Description,
+		AvatarURL:     out.AvatarURL,
+		Members:       members,
+		Messages:      messages,
+		BlockedByPeer: out.BlockedByPeer,
 	})
 }
 

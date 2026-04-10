@@ -787,7 +787,7 @@ func TestBlockUserUseCase_CreatesOrUpdatesBlockedRelationships(t *testing.T) {
 	err := uc.Execute(context.Background(), authedInput(501, BlockUserInput{TargetUserID: 601}))
 	require.NoError(t, err)
 	assert.Equal(t, [][2]shared.UserID{{501, 601}}, createBlockedCalls)
-	assert.Equal(t, []int64{22}, deletedIDs)
+	assert.Empty(t, deletedIDs)
 
 	updateCalls := make([]int64, 0, 1)
 	uc = NewBlockUserUseCase(&friendshipRepoStub{
@@ -814,7 +814,7 @@ func TestBlockUserUseCase_CreatesOrUpdatesBlockedRelationships(t *testing.T) {
 	err = uc.Execute(context.Background(), authedInput(501, BlockUserInput{TargetUserID: 601}))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{11}, updateCalls)
-	assert.Contains(t, deletedIDs, int64(12))
+	assert.NotContains(t, deletedIDs, int64(12))
 
 	uc = NewBlockUserUseCase(&friendshipRepoStub{
 		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
@@ -832,7 +832,10 @@ func TestUnblockUserUseCase_DeletesBlockedRelationshipsOnly(t *testing.T) {
 	deletedIDs := make([]int64, 0, 1)
 	uc := NewUnblockUserUseCase(&friendshipRepoStub{
 		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
-			return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusBlocked}, nil
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusBlocked}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
 		},
 		delete: func(_ context.Context, id int64) error {
 			deletedIDs = append(deletedIDs, id)
@@ -843,6 +846,51 @@ func TestUnblockUserUseCase_DeletesBlockedRelationshipsOnly(t *testing.T) {
 	err := uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{11}, deletedIDs)
+
+	deletedIDs = make([]int64, 0, 1)
+	uc = NewUnblockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusBlocked}, nil
+			}
+			if userID == 601 && friendID == 501 {
+				return &friendship.Friendship{ID: 12, UserID: userID, FriendID: friendID, Status: friendship.StatusPending}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		delete: func(_ context.Context, id int64) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+		updateStatus: func(context.Context, int64, friendship.Status) error {
+			t.Fatal("reverse pending should not restore accepted status")
+			return nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11}, deletedIDs)
+
+	updatedIDs := make([]int64, 0, 1)
+	uc = NewUnblockUserUseCase(&friendshipRepoStub{
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {
+			if userID == 501 && friendID == 601 {
+				return &friendship.Friendship{ID: 11, UserID: userID, FriendID: friendID, Status: friendship.StatusBlocked}, nil
+			}
+			if userID == 601 && friendID == 501 {
+				return &friendship.Friendship{ID: 12, UserID: userID, FriendID: friendID, Status: friendship.StatusAccepted}, nil
+			}
+			return nil, friendship.ErrFriendshipNotFound
+		},
+		updateStatus: func(_ context.Context, id int64, status friendship.Status) error {
+			updatedIDs = append(updatedIDs, id)
+			assert.Equal(t, friendship.StatusAccepted, status)
+			return nil
+		},
+	})
+	err = uc.Execute(context.Background(), authedInput(501, UnblockUserInput{TargetUserID: 601}))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{11}, updatedIDs)
 
 	uc = NewUnblockUserUseCase(&friendshipRepoStub{
 		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*friendship.Friendship, error) {

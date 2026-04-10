@@ -53,10 +53,5 @@ func (uc *BlockUserUseCase) Execute(
 		}
 	}
 
-	// Remove any reverse relationship (target→blocker) so the target sees no friendship
-	if reverse, reverseErr := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, targetID, currentUserID); reverseErr == nil {
-		_ = uc.friendshipRepo.Delete(ctx, reverse.ID)
-	}
-
 	return nil
 }

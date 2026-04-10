@@ -258,6 +258,7 @@ func (h *UserHandler) searchUsers(c *gin.Context) {
 			PublicID:         u.PublicID,
 			Account:          u.AccountName,
 			FriendshipStatus: u.FriendshipStatus,
+			BlockedBy:        u.BlockedBy,
 		})
 	}
 

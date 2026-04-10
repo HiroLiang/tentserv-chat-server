@@ -105,6 +105,10 @@ func (d *Deps) SeedFriendship(userID, friendID shared.UserID, status domainfrien
 	return d.friendshipRepo.seed(userID, friendID, status)
 }
 
+func (d *Deps) SetFriendshipStatus(userID, friendID shared.UserID, status domainfriendship.Status) {
+	d.friendshipRepo.setStatus(userID, friendID, status)
+}
+
 func (d *Deps) FindFriendship(userID, friendID shared.UserID) (*domainfriendship.Friendship, bool) {
 	return d.friendshipRepo.findPair(userID, friendID)
 }
@@ -318,6 +322,11 @@ func (r *bddFriendshipRepo) reset() {
 func (r *bddFriendshipRepo) seed(userID, friendID shared.UserID, status domainfriendship.Status) *domainfriendship.Friendship {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if row, ok := r.findPairLocked(userID, friendID); ok {
+		row.Status = status
+		row.UpdatedAt = time.Now()
+		return cloneBDDFriendship(row)
+	}
 	r.nextID++
 	row := &domainfriendship.Friendship{
 		ID:        r.nextID,
@@ -329,6 +338,25 @@ func (r *bddFriendshipRepo) seed(userID, friendID shared.UserID, status domainfr
 	}
 	r.records[row.ID] = cloneBDDFriendship(row)
 	return cloneBDDFriendship(row)
+}
+
+func (r *bddFriendshipRepo) setStatus(userID, friendID shared.UserID, status domainfriendship.Status) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if row, ok := r.findPairLocked(userID, friendID); ok {
+		row.Status = status
+		row.UpdatedAt = time.Now()
+		return
+	}
+	r.nextID++
+	r.records[r.nextID] = &domainfriendship.Friendship{
+		ID:        r.nextID,
+		UserID:    userID,
+		FriendID:  friendID,
+		Status:    status,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
 }
 
 func (r *bddFriendshipRepo) FindByUserID(_ context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error) {

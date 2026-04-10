@@ -43,6 +43,7 @@ type friendResponse struct {
 	Name         string `json:"name"`
 	Avatar       string `json:"avatar"`
 	Status       string `json:"status"`
+	BlockedBy    string `json:"blocked_by"`
 }
 
 type requestResponse struct {
@@ -69,17 +70,20 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^a searchable user "([^"]*)" exists with id (\d+), account "([^"]*)", public id "([^"]*)", and avatar "([^"]*)"$`, s.aSearchableUserExists)
 	ctx.Step(`^I have sent a pending friend request to user (\d+)$`, s.iHaveSentAPendingFriendRequestToUser)
 	ctx.Step(`^an inbound pending friend request exists from user (\d+)$`, s.anInboundPendingFriendRequestExistsFromUser)
+	ctx.Step(`^user (\d+) has blocked the logged in user$`, s.userHasBlockedTheLoggedInUser)
 	ctx.Step(`^I am accepted friends with user (\d+)$`, s.iAmAcceptedFriendsWithUser)
 	ctx.Step(`^I search friends by name "([^"]*)"$`, s.iSearchFriendsByName)
 	ctx.Step(`^search results should include "([^"]*)" with public id "([^"]*)", avatar "([^"]*)", and friendship status "([^"]*)"$`, s.searchResultsShouldIncludeWithPublicIDAvatarAndFriendshipStatus)
 	ctx.Step(`^search results should include "([^"]*)" with public id "([^"]*)", avatar "([^"]*)", and no friendship status$`, s.searchResultsShouldIncludeWithPublicIDAvatarAndNoFriendshipStatus)
 	ctx.Step(`^search results should not include the logged in user$`, s.searchResultsShouldNotIncludeTheLoggedInUser)
+	ctx.Step(`^search results should not include user (\d+)$`, s.searchResultsShouldNotIncludeUser)
 	ctx.Step(`^I apply to user (\d+)$`, s.iApplyToUser)
 	ctx.Step(`^I apply with an invalid friend payload$`, s.iApplyWithAnInvalidFriendPayload)
 	ctx.Step(`^I apply to the logged in user$`, s.iApplyToTheLoggedInUser)
 	ctx.Step(`^friendship rows should contain "([^"]*)" from the logged in user to user (\d+)$`, s.friendshipRowsShouldContainFromTheLoggedInUserToUser)
 	ctx.Step(`^I request my friends$`, s.iRequestMyFriends)
 	ctx.Step(`^the friends response should include "([^"]*)" with status "([^"]*)"$`, s.theFriendsResponseShouldIncludeWithStatus)
+	ctx.Step(`^the friends response should include user (\d+) with status "([^"]*)" and blocked by "([^"]*)"$`, s.theFriendsResponseShouldIncludeUserWithStatusAndBlockedBy)
 	ctx.Step(`^the friends response should not include user (\d+)$`, s.theFriendsResponseShouldNotIncludeUser)
 	ctx.Step(`^I request sent friend requests$`, s.iRequestSentFriendRequests)
 	ctx.Step(`^the sent requests response should include "([^"]*)"$`, s.theSentRequestsResponseShouldInclude)
@@ -98,6 +102,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I block user (\d+)$`, s.iBlockUser)
 	ctx.Step(`^I unblock user (\d+)$`, s.iUnblockUser)
 	ctx.Step(`^mutual friendship rows between the logged in user and user (\d+) should both be "([^"]*)"$`, s.mutualFriendshipRowsBetweenTheLoggedInUserAndUserShouldBothBe)
+	ctx.Step(`^friendship row from user (\d+) to the logged in user should be "([^"]*)"$`, s.friendshipRowFromUserToTheLoggedInUserShouldBe)
 	ctx.Step(`^friendship rows between the logged in user and user (\d+) should not exist$`, s.friendshipRowsBetweenTheLoggedInUserAndUserShouldNotExist)
 	ctx.Step(`^friendship row from user (\d+) to the logged in user should not exist$`, s.friendshipRowFromUserToTheLoggedInUserShouldNotExist)
 	ctx.Step(`^a direct chat room should exist between the logged in user and user (\d+)$`, s.aDirectChatRoomShouldExistBetweenLoggedInUserAndUser)
@@ -160,6 +165,10 @@ func (s *steps) iHaveSentAPendingFriendRequestToUser(userID int64) error {
 
 func (s *steps) anInboundPendingFriendRequestExistsFromUser(userID int64) error {
 	return s.seedReverseFriendship(shared.UserID(userID), domainfriendship.StatusPending, "inbound pending request")
+}
+
+func (s *steps) userHasBlockedTheLoggedInUser(userID int64) error {
+	return s.seedReverseFriendship(shared.UserID(userID), domainfriendship.StatusBlocked, "inbound blocked relationship")
 }
 
 func (s *steps) iAmAcceptedFriendsWithUser(userID int64) error {
@@ -305,6 +314,27 @@ func (s *steps) searchResultsShouldNotIncludeTheLoggedInUser() error {
 	return nil
 }
 
+func (s *steps) searchResultsShouldNotIncludeUser(userID int64) error {
+	start := time.Now()
+	fmt.Println("Given: search results should hide a blocked user")
+	fmt.Printf("Input: hidden_user_id=%d\n", userID)
+	fmt.Println("Action: decode search response")
+
+	results, err := decodeSearchResults(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range results {
+		if item.UserID == userID {
+			return fmt.Errorf("expected search response not to include user %d", userID)
+		}
+	}
+	fmt.Println("Output: user_hidden=true")
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	return nil
+}
+
 func (s *steps) iApplyToUser(userID int64) error {
 	s.start = time.Now()
 	authHeader, err := s.authorizationHeader()
@@ -410,6 +440,27 @@ func (s *steps) theFriendsResponseShouldIncludeWithStatus(name, status string) e
 		}
 	}
 	return fmt.Errorf("expected friends response to include %s with status %s; body=%s", name, status, string(s.ResponseBody))
+}
+
+func (s *steps) theFriendsResponseShouldIncludeUserWithStatusAndBlockedBy(userID int64, status, blockedBy string) error {
+	start := time.Now()
+	fmt.Println("Given: friends tab data should include a blocked readonly friendship row")
+	fmt.Printf("Input: user_id=%d expected_status=%s expected_blocked_by=%s\n", userID, status, blockedBy)
+	fmt.Println("Action: decode friends response")
+
+	items, err := decodeFriendsResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.UserID == userID && item.Status == status && item.BlockedBy == blockedBy {
+			fmt.Printf("Output: friendship_id=%d matched=true\n", item.FriendshipID)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected friends response to include user %d with status %s blocked_by %s; body=%s", userID, status, blockedBy, string(s.ResponseBody))
 }
 
 func (s *steps) theFriendsResponseShouldNotIncludeUser(userID int64) error {
@@ -814,6 +865,26 @@ func (s *steps) mutualFriendshipRowsBetweenTheLoggedInUserAndUserShouldBothBe(us
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	if !match {
 		return fmt.Errorf("expected both rows to be %s, got forward=%s reverse=%s", status, forward.Status, reverse.Status)
+	}
+	return nil
+}
+
+func (s *steps) friendshipRowFromUserToTheLoggedInUserShouldBe(userID int64, status string) error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	fmt.Println("Given: a reverse friendship row should remain in its current state")
+	fmt.Printf("Input: from_user_id=%d to_user_id=%d expected_status=%s\n", userID, currentUserID, status)
+	fmt.Println("Action: inspect reverse friendship direction")
+
+	row, ok := s.deps.FindFriendship(shared.UserID(userID), currentUserID)
+	if !ok {
+		return fmt.Errorf("expected friendship row from %d to %d", userID, currentUserID)
+	}
+	fmt.Printf("Output: friendship_id=%d actual_status=%s match=%t\n", row.ID, row.Status, string(row.Status) == status)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if string(row.Status) != status {
+		return fmt.Errorf("expected reverse row to be %s, got %s", status, row.Status)
 	}
 	return nil
 }

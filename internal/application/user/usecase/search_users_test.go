@@ -115,6 +115,8 @@ func TestSearchUsersUseCase_FiltersCurrentUserAndMapsFriendshipStatus(t *testing
 				{ID: 501, Name: "Hiro", AccountName: "hiro_account", PublicID: "hiro-public"},
 				{ID: 601, Name: "Mina", AccountName: "mina_account", PublicID: "mina-public"},
 				{ID: 602, Name: "Luna", AccountName: "luna_account", PublicID: "luna-public"},
+				{ID: 603, Name: "Blocked Me", AccountName: "blocked_account", PublicID: "blocked-public"},
+				{ID: 604, Name: "I Blocked", AccountName: "i_blocked_account", PublicID: "i-blocked-public"},
 			}, nil
 		},
 	}
@@ -123,6 +125,8 @@ func TestSearchUsersUseCase_FiltersCurrentUserAndMapsFriendshipStatus(t *testing
 			return []*friendship.Friendship{
 				{UserID: 501, FriendID: 601, Status: friendship.StatusPending},
 				{UserID: 602, FriendID: 501, Status: friendship.StatusAccepted},
+				{UserID: 603, FriendID: 501, Status: friendship.StatusBlocked},
+				{UserID: 501, FriendID: 604, Status: friendship.StatusBlocked},
 			}, nil
 		},
 	}
@@ -134,11 +138,15 @@ func TestSearchUsersUseCase_FiltersCurrentUserAndMapsFriendshipStatus(t *testing
 	})
 
 	require.NoError(t, err)
-	require.Len(t, out.Users, 2)
+	require.Len(t, out.Users, 3)
 	assert.Equal(t, shared.UserID(601), out.Users[0].ID)
 	assert.Equal(t, "pending", *out.Users[0].FriendshipStatus)
 	assert.Equal(t, shared.UserID(602), out.Users[1].ID)
 	assert.Equal(t, "accepted", *out.Users[1].FriendshipStatus)
+	assert.Equal(t, shared.UserID(604), out.Users[2].ID)
+	assert.Equal(t, "blocked", *out.Users[2].FriendshipStatus)
+	require.NotNil(t, out.Users[2].BlockedBy)
+	assert.Equal(t, "me", *out.Users[2].BlockedBy)
 }
 
 func TestSearchUsersUseCase_UsesDefaultLimitAndOffsetFallback(t *testing.T) {

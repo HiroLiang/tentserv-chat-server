@@ -8,6 +8,7 @@ type FriendResponse struct {
 	Name         string    `json:"name"`
 	Avatar       string    `json:"avatar"`
 	Status       string    `json:"status"`
+	BlockedBy    *string   `json:"blocked_by,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

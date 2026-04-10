@@ -92,6 +92,32 @@ func (r *ChatMessageRepository) FindByRoom(
 	return messages, nil
 }
 
+func (r *ChatMessageRepository) FindByRoomExcludingSenders(
+	ctx context.Context,
+	roomID chatroom.ID,
+	excludedSenderIDs []chatmember.ID,
+	limit, offset uint64,
+) ([]*chatmessage.ChatMessage, error) {
+	if len(excludedSenderIDs) == 0 {
+		return r.FindByRoom(ctx, roomID, limit, offset)
+	}
+
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
+		Where(squirrel.And{
+			squirrel.Eq{"room_id": roomID},
+			squirrel.NotEq{"sender_id": chatMemberIDsAsArgs(excludedSenderIDs)},
+		}).
+		OrderBy("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build chat messages excluding senders query: %w", err)
+	}
+
+	return r.scanMessages(ctx, query, args...)
+}
+
 func (r *ChatMessageRepository) FindByRoomBefore(
 	ctx context.Context,
 	roomID chatroom.ID,
@@ -133,6 +159,43 @@ func (r *ChatMessageRepository) FindByRoomBefore(
 	return messages, nil
 }
 
+func (r *ChatMessageRepository) FindByRoomBeforeExcludingSenders(
+	ctx context.Context,
+	roomID chatroom.ID,
+	beforeID chatmessage.ID,
+	excludedSenderIDs []chatmember.ID,
+	limit uint64,
+) ([]*chatmessage.ChatMessage, error) {
+	if len(excludedSenderIDs) == 0 {
+		return r.FindByRoomBefore(ctx, roomID, beforeID, limit)
+	}
+
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
+		Where(squirrel.And{
+			squirrel.Eq{"room_id": roomID},
+			squirrel.Eq{"is_deleted": false},
+			squirrel.Lt{"id": beforeID},
+			squirrel.NotEq{"sender_id": chatMemberIDsAsArgs(excludedSenderIDs)},
+		}).
+		OrderBy("id DESC").
+		Limit(limit).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build chat messages before excluding senders query: %w", err)
+	}
+
+	messages, err := r.scanMessages(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
+}
+
 func (r *ChatMessageRepository) FindLatestByRoom(
 	ctx context.Context,
 	roomID chatroom.ID,
@@ -152,6 +215,38 @@ func (r *ChatMessageRepository) FindLatestByRoom(
 			return nil, chatmessage.ErrNotFound
 		}
 		return nil, fmt.Errorf("find latest message: %w", err)
+	}
+
+	return toChatMessageDomain(rec)
+}
+
+func (r *ChatMessageRepository) FindLatestByRoomExcludingSenders(
+	ctx context.Context,
+	roomID chatroom.ID,
+	excludedSenderIDs []chatmember.ID,
+) (*chatmessage.ChatMessage, error) {
+	if len(excludedSenderIDs) == 0 {
+		return r.FindLatestByRoom(ctx, roomID)
+	}
+
+	query, args, err := ChatMessageTable.Select(ChatMessageTable.Columns...).
+		Where(squirrel.And{
+			squirrel.Eq{"room_id": roomID, "is_deleted": false},
+			squirrel.NotEq{"sender_id": chatMemberIDsAsArgs(excludedSenderIDs)},
+		}).
+		OrderBy("id DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest message excluding senders query: %w", err)
+	}
+
+	rec, err := postgres.ScanOne[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, chatmessage.ErrNotFound
+		}
+		return nil, fmt.Errorf("find latest message excluding senders: %w", err)
 	}
 
 	return toChatMessageDomain(rec)
@@ -177,6 +272,37 @@ func (r *ChatMessageRepository) CountByRoomAfter(
 	var count int64
 	if err := r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count messages after: %w", err)
+	}
+
+	return count, nil
+}
+
+func (r *ChatMessageRepository) CountByRoomAfterExcludingSenders(
+	ctx context.Context,
+	roomID chatroom.ID,
+	since time.Time,
+	excludedSenderIDs []chatmember.ID,
+) (int64, error) {
+	if len(excludedSenderIDs) == 0 {
+		return r.CountByRoomAfter(ctx, roomID, since)
+	}
+
+	query, args, err := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("COUNT(*)").
+		From(ChatMessageTable.Name).
+		Where(squirrel.And{
+			squirrel.Eq{"room_id": roomID, "is_deleted": false},
+			squirrel.Gt{"created_at": since},
+			squirrel.NotEq{"sender_id": chatMemberIDsAsArgs(excludedSenderIDs)},
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count excluding senders query: %w", err)
+	}
+
+	var count int64
+	if err := r.GetDB(ctx).QueryRowxContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count messages after excluding senders: %w", err)
 	}
 
 	return count, nil
@@ -240,6 +366,32 @@ func (r *ChatMessageRepository) Update(ctx context.Context, msg *chatmessage.Cha
 	}
 
 	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+func (r *ChatMessageRepository) scanMessages(ctx context.Context, query string, args ...interface{}) ([]*chatmessage.ChatMessage, error) {
+	records, err := postgres.ScanAll[ChatMessageRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan chat messages: %w", err)
+	}
+
+	messages := make([]*chatmessage.ChatMessage, 0, len(records))
+	for _, rec := range records {
+		msg, err := toChatMessageDomain(&rec)
+		if err != nil {
+			return nil, fmt.Errorf("convert chat message: %w", err)
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+func chatMemberIDsAsArgs(ids []chatmember.ID) []int64 {
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, int64(id))
+	}
+	return out
 }
 
 func (r *ChatMessageRepository) SoftDelete(ctx context.Context, id chatmessage.ID) error {

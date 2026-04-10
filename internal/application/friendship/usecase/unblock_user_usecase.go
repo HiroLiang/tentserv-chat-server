@@ -40,5 +40,13 @@ func (uc *UnblockUserUseCase) Execute(
 		return friendship.ErrNotBlocked
 	}
 
+	reverse, reverseErr := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, targetID, currentUserID)
+	if reverseErr != nil && !errors.Is(reverseErr, friendship.ErrFriendshipNotFound) {
+		return reverseErr
+	}
+	if reverseErr == nil && reverse.Status == friendship.StatusAccepted {
+		return uc.friendshipRepo.UpdateStatus(ctx, existing.ID, friendship.StatusAccepted)
+	}
+
 	return uc.friendshipRepo.Delete(ctx, existing.ID)
 }

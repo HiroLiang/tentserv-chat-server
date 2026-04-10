@@ -25,6 +25,7 @@ type SearchUsersInput struct {
 type UserSearchResultWithStatus struct {
 	*user.UserSearchResult
 	FriendshipStatus *string
+	BlockedBy        *string
 }
 
 type SearchUsersOutput struct {
@@ -87,7 +88,7 @@ func (uc *SearchUsersUseCase) Execute(
 
 	var currentUserID = input.Base.Auth.UserID
 
-	// Fetch all friendships for current user in one query to avoid N+1
+	// Fetch all friendships for current user in one query to avoid N+1.
 	friendshipMap := uc.buildFriendshipMap(ctx, currentUserID)
 
 	out := make([]*UserSearchResultWithStatus, 0, len(results))
@@ -96,9 +97,24 @@ func (uc *SearchUsersUseCase) Execute(
 			continue
 		}
 		item := &UserSearchResultWithStatus{UserSearchResult: r}
-		if status, ok := friendshipMap[r.ID]; ok {
-			s := string(status)
+		if view, ok := friendshipMap[r.ID]; ok {
+			if view.OtherToCurrent != nil && *view.OtherToCurrent == friendship.StatusBlocked {
+				continue
+			}
+			status := view.CurrentToOther
+			if status == nil {
+				status = view.OtherToCurrent
+			}
+			if status == nil {
+				out = append(out, item)
+				continue
+			}
+			s := string(*status)
 			item.FriendshipStatus = &s
+			if *status == friendship.StatusBlocked && view.CurrentToOther != nil && *view.CurrentToOther == friendship.StatusBlocked {
+				blockedBy := "me"
+				item.BlockedBy = &blockedBy
+			}
 		}
 		out = append(out, item)
 	}
@@ -106,20 +122,33 @@ func (uc *SearchUsersUseCase) Execute(
 	return &SearchUsersOutput{Users: out}, nil
 }
 
-// buildFriendshipMap returns a map of otherUserID → friendship.Status for all friendships
-// involving the current user. Errors are silently ignored (friendship status is best-effort).
-func (uc *SearchUsersUseCase) buildFriendshipMap(ctx context.Context, userID shared.UserID) map[shared.UserID]friendship.Status {
-	result := make(map[shared.UserID]friendship.Status)
+type searchFriendshipView struct {
+	CurrentToOther *friendship.Status
+	OtherToCurrent *friendship.Status
+}
+
+// buildFriendshipMap returns a map of otherUserID → directed statuses for all
+// friendships involving the current user. Errors are silently ignored because
+// friendship status is best-effort for search.
+func (uc *SearchUsersUseCase) buildFriendshipMap(ctx context.Context, userID shared.UserID) map[shared.UserID]searchFriendshipView {
+	result := make(map[shared.UserID]searchFriendshipView)
 	friendships, err := uc.friendshipRepo.FindAllByUserID(ctx, userID)
 	if err != nil {
 		return result
 	}
 	for _, f := range friendships {
-		other := f.FriendID
-		if f.UserID != userID {
-			other = f.UserID
+		status := f.Status
+		if f.UserID == userID {
+			view := result[f.FriendID]
+			view.CurrentToOther = &status
+			result[f.FriendID] = view
+			continue
 		}
-		result[other] = f.Status
+		if f.FriendID == userID {
+			view := result[f.UserID]
+			view.OtherToCurrent = &status
+			result[f.UserID] = view
+		}
 	}
 	return result
 }

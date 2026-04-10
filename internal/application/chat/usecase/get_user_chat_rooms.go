@@ -11,6 +11,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
@@ -24,6 +25,7 @@ type ChatRoomSummary struct {
 	LatestMsg         *string
 	LatestMsgSenderID *int64
 	UnreadCount       int64
+	BlockedByPeer     bool
 }
 
 type GetUserChatRoomsOutput struct {
@@ -40,6 +42,7 @@ type GetUserChatRoomsUseCase struct {
 	chatMessageRepo chatmessage.Repository
 	userRepo        user.Repository
 	agentRepo       agent.Repository
+	friendshipRepo  friendship.Repository
 }
 
 func NewGetUserChatRoomsUseCase(
@@ -49,7 +52,12 @@ func NewGetUserChatRoomsUseCase(
 	chatMessageRepo chatmessage.Repository,
 	userRepo user.Repository,
 	agentRepo agent.Repository,
+	friendshipRepo ...friendship.Repository,
 ) *GetUserChatRoomsUseCase {
+	var fsRepo friendship.Repository
+	if len(friendshipRepo) > 0 {
+		fsRepo = friendshipRepo[0]
+	}
 	return &GetUserChatRoomsUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
@@ -57,6 +65,7 @@ func NewGetUserChatRoomsUseCase(
 		chatMessageRepo: chatMessageRepo,
 		userRepo:        userRepo,
 		agentRepo:       agentRepo,
+		friendshipRepo:  fsRepo,
 	}
 }
 
@@ -95,10 +104,25 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		}
 
 		displayName, avatarURL := uc.resolveRoomDisplay(ctx, room, callerParticipant.ID)
+		allMembers, err := uc.chatMemberRepo.FindByRoom(ctx, room.ID)
+		if err != nil {
+			return GetUserChatRoomsOutput{}, err
+		}
+		blockedSenders, blockedByPeer, err := blockedMembersForCaller(
+			ctx,
+			uc.friendshipRepo,
+			uc.participantRepo,
+			input.Base.Auth.UserID,
+			callerParticipant.ID,
+			allMembers,
+		)
+		if err != nil {
+			return GetUserChatRoomsOutput{}, err
+		}
 
 		var latestMsg *string
 		var latestMsgSenderID *int64
-		if msg, err := uc.chatMessageRepo.FindLatestByRoom(ctx, room.ID); err == nil {
+		if msg, err := findLatestByRoomExcludingSenders(ctx, uc.chatMessageRepo, room.ID, blockedSenders); err == nil {
 			latestMsg = &msg.Content
 			senderID := int64(msg.SenderID)
 			latestMsgSenderID = &senderID
@@ -108,7 +132,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		if member.LastReadAt != nil {
 			since = *member.LastReadAt
 		}
-		unreadCount, err := uc.chatMessageRepo.CountByRoomAfter(ctx, room.ID, since)
+		unreadCount, err := countByRoomAfterExcludingSenders(ctx, uc.chatMessageRepo, room.ID, since, blockedSenders)
 		if err != nil {
 			logger.Log.Warn("CountByRoomAfter failed", zap.Int64("room_id", int64(room.ID)), zap.Error(err))
 		}
@@ -121,6 +145,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			LatestMsg:         latestMsg,
 			LatestMsgSenderID: latestMsgSenderID,
 			UnreadCount:       unreadCount,
+			BlockedByPeer:     room.Type == chatroom.Direct && blockedByPeer,
 		}
 
 		switch room.Type {

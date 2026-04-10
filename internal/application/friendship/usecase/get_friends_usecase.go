@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -15,6 +16,7 @@ type FriendItem struct {
 	Name         string
 	Avatar       string
 	Status       string
+	BlockedBy    *string
 	CreatedAt    time.Time
 }
 
@@ -45,6 +47,17 @@ func (uc *GetFriendsUseCase) Execute(
 		if f.Status != friendship.StatusAccepted && f.Status != friendship.StatusPending {
 			continue
 		}
+		status := string(f.Status)
+		var blockedBy *string
+		reverse, reverseErr := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, f.FriendID, f.UserID)
+		if reverseErr != nil && !errors.Is(reverseErr, friendship.ErrFriendshipNotFound) {
+			return nil, reverseErr
+		}
+		if reverseErr == nil && reverse.Status == friendship.StatusBlocked {
+			status = string(friendship.StatusBlocked)
+			v := BlockedByThem
+			blockedBy = &v
+		}
 		u, err := uc.userRepo.FindByID(ctx, f.FriendID)
 		if err != nil {
 			continue
@@ -54,7 +67,8 @@ func (uc *GetFriendsUseCase) Execute(
 			UserID:       int64(f.FriendID),
 			Name:         u.Name,
 			Avatar:       u.Avatar,
-			Status:       string(f.Status),
+			Status:       status,
+			BlockedBy:    blockedBy,
 			CreatedAt:    f.CreatedAt,
 		})
 	}

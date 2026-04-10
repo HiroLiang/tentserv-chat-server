@@ -8,6 +8,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 )
 
@@ -27,6 +28,7 @@ type GetChatRoomMessagesUseCase struct {
 	chatMemberRepo  chatmember.Repository
 	chatRoomRepo    chatroom.Repository
 	chatMessageRepo chatmessage.Repository
+	friendshipRepo  friendship.Repository
 }
 
 func NewGetChatRoomMessagesUseCase(
@@ -34,12 +36,18 @@ func NewGetChatRoomMessagesUseCase(
 	chatMemberRepo chatmember.Repository,
 	chatRoomRepo chatroom.Repository,
 	chatMessageRepo chatmessage.Repository,
+	friendshipRepo ...friendship.Repository,
 ) *GetChatRoomMessagesUseCase {
+	var fsRepo friendship.Repository
+	if len(friendshipRepo) > 0 {
+		fsRepo = friendshipRepo[0]
+	}
 	return &GetChatRoomMessagesUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
 		chatRoomRepo:    chatRoomRepo,
 		chatMessageRepo: chatMessageRepo,
+		friendshipRepo:  fsRepo,
 	}
 }
 
@@ -84,18 +92,29 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 	for _, m := range allMembers {
 		memberParticipantMap[m.ID] = m.ParticipantID
 	}
+	blockedSenders, _, err := blockedMembersForCaller(
+		ctx,
+		uc.friendshipRepo,
+		uc.participantRepo,
+		input.Base.Auth.UserID,
+		callerParticipant.ID,
+		allMembers,
+	)
+	if err != nil {
+		return GetChatRoomMessagesOutput{}, err
+	}
 
 	var msgs []*chatmessage.ChatMessage
 	if input.Data.BeforeID == 0 {
 		// Initial load: fetch latest messages, then reverse to ascending order.
-		msgs, err = uc.chatMessageRepo.FindByRoom(ctx, roomID, limit, 0)
+		msgs, err = findByRoomExcludingSenders(ctx, uc.chatMessageRepo, roomID, blockedSenders, limit, 0)
 		if err == nil {
 			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 				msgs[i], msgs[j] = msgs[j], msgs[i]
 			}
 		}
 	} else {
-		msgs, err = uc.chatMessageRepo.FindByRoomBefore(ctx, roomID, chatmessage.ID(input.Data.BeforeID), limit)
+		msgs, err = findByRoomBeforeExcludingSenders(ctx, uc.chatMessageRepo, roomID, chatmessage.ID(input.Data.BeforeID), blockedSenders, limit)
 	}
 	if err != nil {
 		return GetChatRoomMessagesOutput{}, err

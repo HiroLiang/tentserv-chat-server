@@ -12,6 +12,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmessage"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	domainfriendship "github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
@@ -23,6 +24,7 @@ type Deps struct {
 	chatMemberRepo  *bddChatMemberRepo
 	chatRoomRepo    *bddChatRoomRepo
 	chatMessageRepo *bddChatMessageRepo
+	friendshipRepo  *bddFriendshipRepo
 	userRepo        *bddUserRepo
 	agentRepo       *bddAgentRepo
 }
@@ -33,6 +35,7 @@ func NewDeps() *Deps {
 		chatMemberRepo:  newBDDChatMemberRepo(),
 		chatRoomRepo:    newBDDChatRoomRepo(),
 		chatMessageRepo: newBDDChatMessageRepo(),
+		friendshipRepo:  newBDDFriendshipRepo(),
 		userRepo:        newBDDUserRepo(),
 		agentRepo:       &bddAgentRepo{},
 	}
@@ -45,6 +48,7 @@ func (d *Deps) Reset() {
 	d.chatMemberRepo.reset()
 	d.chatRoomRepo.reset()
 	d.chatMessageRepo.reset()
+	d.friendshipRepo.reset()
 	d.userRepo.reset()
 }
 
@@ -56,6 +60,7 @@ func (d *Deps) RegisterGetUserChatRoomsUseCase() *chatusecase.GetUserChatRoomsUs
 		d.chatMessageRepo,
 		d.userRepo,
 		d.agentRepo,
+		d.friendshipRepo,
 	)
 }
 
@@ -67,6 +72,7 @@ func (d *Deps) RegisterGetChatRoomDetailUseCase() *chatusecase.GetChatRoomDetail
 		d.chatMessageRepo,
 		d.userRepo,
 		d.agentRepo,
+		d.friendshipRepo,
 	)
 }
 
@@ -76,6 +82,7 @@ func (d *Deps) RegisterGetChatRoomMessagesUseCase() *chatusecase.GetChatRoomMess
 		d.chatMemberRepo,
 		d.chatRoomRepo,
 		d.chatMessageRepo,
+		d.friendshipRepo,
 	)
 }
 
@@ -94,6 +101,7 @@ func (d *Deps) RegisterSendMessageUseCase() *chatusecase.SendMessageUseCase {
 		d.chatRoomRepo,
 		d.chatMessageRepo,
 		bddBroadcaster{},
+		d.friendshipRepo,
 	)
 }
 
@@ -135,6 +143,29 @@ func (d *Deps) CreateDirectRoomBetweenUsers(userID1, userID2 shared.UserID) chat
 	return room.ID
 }
 
+func (d *Deps) CreateGroupRoomWithUsers(name string, userIDs ...shared.UserID) chatroom.ID {
+	room := &chatroom.ChatRoom{
+		Name:       name,
+		Type:       chatroom.Group,
+		MaxMembers: len(userIDs),
+		CreatedAt:  time.Now(),
+	}
+	_ = d.chatRoomRepo.Create(context.Background(), room)
+	for _, userID := range userIDs {
+		p := d.participantRepo.findByUserID(userID)
+		if p == nil {
+			continue
+		}
+		_ = d.chatMemberRepo.Add(context.Background(), &chatmember.ChatMember{
+			RoomID:        room.ID,
+			ParticipantID: p.ID,
+			Role:          chatmember.Member,
+			JoinedAt:      time.Now(),
+		})
+	}
+	return room.ID
+}
+
 func (d *Deps) MarkRoomDeleted(roomID chatroom.ID) {
 	_ = d.chatMemberRepo.SoftDeleteByRoom(context.Background(), roomID)
 	_ = d.chatRoomRepo.SoftDelete(context.Background(), roomID)
@@ -159,6 +190,10 @@ func (d *Deps) SeedLatestMessage(roomID chatroom.ID, senderUserID shared.UserID,
 	return member.ID
 }
 
+func (d *Deps) SeedBlockedFriendship(blockerID, blockedID shared.UserID) {
+	d.friendshipRepo.seed(blockerID, blockedID, domainfriendship.StatusBlocked)
+}
+
 func (d *Deps) MemberIDForUser(roomID chatroom.ID, userID shared.UserID) chatmember.ID {
 	p := d.participantRepo.findByUserID(userID)
 	if p == nil {
@@ -169,6 +204,94 @@ func (d *Deps) MemberIDForUser(roomID chatroom.ID, userID shared.UserID) chatmem
 		return 0
 	}
 	return member.ID
+}
+
+type bddFriendshipRepo struct {
+	mu      sync.Mutex
+	nextID  int64
+	records map[int64]*domainfriendship.Friendship
+}
+
+func newBDDFriendshipRepo() *bddFriendshipRepo {
+	return &bddFriendshipRepo{}
+}
+
+func (r *bddFriendshipRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID = 1
+	r.records = map[int64]*domainfriendship.Friendship{}
+}
+
+func (r *bddFriendshipRepo) seed(userID, friendID shared.UserID, status domainfriendship.Status) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID++
+	r.records[r.nextID] = &domainfriendship.Friendship{
+		ID:        r.nextID,
+		UserID:    userID,
+		FriendID:  friendID,
+		Status:    status,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
+func (r *bddFriendshipRepo) FindByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+	return nil, nil
+}
+
+func (r *bddFriendshipRepo) FindAllByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+	return nil, nil
+}
+
+func (r *bddFriendshipRepo) FindPendingByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+	return nil, nil
+}
+
+func (r *bddFriendshipRepo) Create(context.Context, shared.UserID, shared.UserID) error {
+	return nil
+}
+
+func (r *bddFriendshipRepo) CreateBlocked(ctx context.Context, userID, friendID shared.UserID) error {
+	r.seed(userID, friendID, domainfriendship.StatusBlocked)
+	return nil
+}
+
+func (r *bddFriendshipRepo) FindByID(context.Context, int64) (*domainfriendship.Friendship, error) {
+	return nil, domainfriendship.ErrFriendshipNotFound
+}
+
+func (r *bddFriendshipRepo) FindByUserIDAndFriendID(context.Context, shared.UserID, shared.UserID) (*domainfriendship.Friendship, error) {
+	return nil, domainfriendship.ErrFriendshipNotFound
+}
+
+func (r *bddFriendshipRepo) FindBetweenUsers(_ context.Context, userID1, userID2 shared.UserID) ([]*domainfriendship.Friendship, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*domainfriendship.Friendship, 0)
+	for _, row := range r.records {
+		if (row.UserID == userID1 && row.FriendID == userID2) || (row.UserID == userID2 && row.FriendID == userID1) {
+			copied := *row
+			out = append(out, &copied)
+		}
+	}
+	if len(out) == 0 {
+		return nil, domainfriendship.ErrFriendshipNotFound
+	}
+	return out, nil
+}
+
+func (r *bddFriendshipRepo) FindPendingByFriendID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+	return nil, nil
+}
+
+func (r *bddFriendshipRepo) UpdateStatus(context.Context, int64, domainfriendship.Status) error {
+	return nil
+}
+
+func (r *bddFriendshipRepo) Delete(context.Context, int64) error {
+	return nil
 }
 
 type bddUserRepo struct {
@@ -540,8 +663,22 @@ func (r *bddChatMessageRepo) FindByRoom(_ context.Context, roomID chatroom.ID, l
 	return out, nil
 }
 
-func (r *bddChatMessageRepo) FindByRoomBefore(context.Context, chatroom.ID, chatmessage.ID, uint64) ([]*chatmessage.ChatMessage, error) {
-	return nil, nil
+func (r *bddChatMessageRepo) FindByRoomExcludingSenders(_ context.Context, roomID chatroom.ID, excludedSenderIDs []chatmember.ID, limit, offset uint64) ([]*chatmessage.ChatMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return filterBDDMessages(r.byRoom[roomID], excludedSenderIDs, limit, offset, 0), nil
+}
+
+func (r *bddChatMessageRepo) FindByRoomBefore(_ context.Context, roomID chatroom.ID, beforeID chatmessage.ID, limit uint64) ([]*chatmessage.ChatMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return filterBDDMessages(r.byRoom[roomID], nil, limit, 0, beforeID), nil
+}
+
+func (r *bddChatMessageRepo) FindByRoomBeforeExcludingSenders(_ context.Context, roomID chatroom.ID, beforeID chatmessage.ID, excludedSenderIDs []chatmember.ID, limit uint64) ([]*chatmessage.ChatMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return filterBDDMessages(r.byRoom[roomID], excludedSenderIDs, limit, 0, beforeID), nil
 }
 
 func (r *bddChatMessageRepo) FindLatestByRoom(_ context.Context, roomID chatroom.ID) (*chatmessage.ChatMessage, error) {
@@ -556,6 +693,24 @@ func (r *bddChatMessageRepo) FindLatestByRoom(_ context.Context, roomID chatroom
 	return &copied, nil
 }
 
+func (r *bddChatMessageRepo) FindLatestByRoomExcludingSenders(_ context.Context, roomID chatroom.ID, excludedSenderIDs []chatmember.ID) (*chatmessage.ChatMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	excluded := bddExcludedSenderSet(excludedSenderIDs)
+	messages := r.byRoom[roomID]
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].IsDeleted {
+			continue
+		}
+		if _, skip := excluded[messages[i].SenderID]; skip {
+			continue
+		}
+		copied := *messages[i]
+		return &copied, nil
+	}
+	return nil, chatmessage.ErrNotFound
+}
+
 func (r *bddChatMessageRepo) CountByRoomAfter(_ context.Context, roomID chatroom.ID, since time.Time) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -564,6 +719,23 @@ func (r *bddChatMessageRepo) CountByRoomAfter(_ context.Context, roomID chatroom
 		if !msg.IsDeleted && msg.CreatedAt.After(since) {
 			count++
 		}
+	}
+	return count, nil
+}
+
+func (r *bddChatMessageRepo) CountByRoomAfterExcludingSenders(_ context.Context, roomID chatroom.ID, since time.Time, excludedSenderIDs []chatmember.ID) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	excluded := bddExcludedSenderSet(excludedSenderIDs)
+	var count int64
+	for _, msg := range r.byRoom[roomID] {
+		if msg.IsDeleted || !msg.CreatedAt.After(since) {
+			continue
+		}
+		if _, skip := excluded[msg.SenderID]; skip {
+			continue
+		}
+		count++
 	}
 	return count, nil
 }
@@ -593,6 +765,37 @@ func (r *bddChatMessageRepo) Update(context.Context, *chatmessage.ChatMessage) e
 
 func (r *bddChatMessageRepo) SoftDelete(context.Context, chatmessage.ID) error {
 	return nil
+}
+
+func filterBDDMessages(messages []*chatmessage.ChatMessage, excludedSenderIDs []chatmember.ID, limit, offset uint64, beforeID chatmessage.ID) []*chatmessage.ChatMessage {
+	excluded := bddExcludedSenderSet(excludedSenderIDs)
+	filtered := make([]*chatmessage.ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		if beforeID != 0 && msg.ID >= beforeID {
+			continue
+		}
+		if _, skip := excluded[msg.SenderID]; skip {
+			continue
+		}
+		copied := *msg
+		filtered = append(filtered, &copied)
+	}
+	if offset >= uint64(len(filtered)) {
+		return nil
+	}
+	end := uint64(len(filtered))
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return filtered[offset:end]
+}
+
+func bddExcludedSenderSet(excludedSenderIDs []chatmember.ID) map[chatmember.ID]struct{} {
+	excluded := make(map[chatmember.ID]struct{}, len(excludedSenderIDs))
+	for _, id := range excludedSenderIDs {
+		excluded[id] = struct{}{}
+	}
+	return excluded
 }
 
 type bddAgentRepo struct{}
@@ -636,10 +839,11 @@ func (bddFileStorage) URL(path string) string {
 }
 
 var (
-	_ domainuser.Repository  = (*bddUserRepo)(nil)
-	_ participant.Repository = (*bddParticipantRepo)(nil)
-	_ chatroom.Repository    = (*bddChatRoomRepo)(nil)
-	_ chatmember.Repository  = (*bddChatMemberRepo)(nil)
-	_ chatmessage.Repository = (*bddChatMessageRepo)(nil)
-	_ agent.Repository       = (*bddAgentRepo)(nil)
+	_ domainuser.Repository       = (*bddUserRepo)(nil)
+	_ domainfriendship.Repository = (*bddFriendshipRepo)(nil)
+	_ participant.Repository      = (*bddParticipantRepo)(nil)
+	_ chatroom.Repository         = (*bddChatRoomRepo)(nil)
+	_ chatmember.Repository       = (*bddChatMemberRepo)(nil)
+	_ chatmessage.Repository      = (*bddChatMessageRepo)(nil)
+	_ agent.Repository            = (*bddAgentRepo)(nil)
 )

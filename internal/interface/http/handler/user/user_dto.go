@@ -40,4 +40,5 @@ type UserSearchResponse struct {
 	PublicID         string  `json:"public_id"`
 	Account          string  `json:"account"`
 	FriendshipStatus *string `json:"friendship_status,omitempty"`
+	BlockedBy        *string `json:"blocked_by,omitempty"`
 }

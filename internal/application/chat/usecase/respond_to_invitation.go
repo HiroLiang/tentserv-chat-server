@@ -198,7 +198,7 @@ func (uc *RespondToInvitationUseCase) notifyMemberJoined(
 		return
 	}
 	payload, err := json.Marshal(struct {
-		Type    string               `json:"type"`
+		Type    string                `json:"type"`
 		Payload wsMemberJoinedPayload `json:"payload"`
 	}{
 		Type: "chat.member_joined",
@@ -254,15 +254,5 @@ func (uc *RespondToInvitationUseCase) syncBlockedFriendship(
 		return err
 	}
 
-	reverse, err := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, targetID, blockerID)
-	if err == nil {
-		if err := uc.friendshipRepo.Delete(ctx, reverse.ID); err != nil {
-			return err
-		}
-		return nil
-	}
-	if errors.Is(err, friendship.ErrFriendshipNotFound) {
-		return nil
-	}
-	return err
+	return nil
 }

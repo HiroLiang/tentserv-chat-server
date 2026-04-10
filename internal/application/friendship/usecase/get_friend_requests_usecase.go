@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -41,6 +42,13 @@ func (uc *GetFriendRequestsUseCase) Execute(
 
 	items := make([]FriendRequestItem, 0, len(pendingList))
 	for _, f := range pendingList {
+		currentRow, rowErr := uc.friendshipRepo.FindByUserIDAndFriendID(ctx, input.Base.Auth.UserID, f.UserID)
+		if rowErr != nil && !errors.Is(rowErr, friendship.ErrFriendshipNotFound) {
+			return nil, rowErr
+		}
+		if rowErr == nil && currentRow.Status == friendship.StatusBlocked {
+			continue
+		}
 		u, err := uc.userRepo.FindByID(ctx, f.UserID)
 		if err != nil {
 			continue
