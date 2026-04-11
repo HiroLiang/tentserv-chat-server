@@ -63,6 +63,40 @@ func TestResendVerifyEmailUseCase_SuccessHasStructuredLog(t *testing.T) {
 	}
 }
 
+func TestResendVerifyEmailUseCase_ExpiredTokenStillRetainedCanResendHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	store := newAuthVerificationStoreStub()
+	seedExpiredVerificationSession(store, "expired-token", 101)
+	accountRepo := newAuthAccountRepoStub()
+	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("applying@example.com"), "applying_account", account.Applying)
+	emailService := &authEmailServiceStub{}
+	uc := newResendVerifyEmailUseCase(store, accountRepo, emailService)
+	input := resendVerifyEmailInput("expired-token")
+
+	t.Log("Given: verification token is expired by expires_at_ms but still retained in the verification store")
+	t.Log("Input: token_present=true token_expired=true account_status=Applying")
+	t.Log("Action: execute resend verify email retained-expired-token path")
+
+	out, err := uc.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Output: unexpected error=%v; Duration=%s", err, time.Since(start))
+	}
+
+	t.Logf("Output: out=%+v", out)
+	t.Logf("Mutation: store_calls=%d delete_calls=%d email_send_calls=%d", store.storeCalls, store.deleteCalls, emailService.sendCalls)
+	t.Logf("Duration: %s", time.Since(start))
+
+	if out.VerificationToken == "" || out.VerificationToken == "expired-token" {
+		t.Fatalf("expected a fresh verification token, got %+v", out)
+	}
+	if store.deleteCalls != 1 {
+		t.Fatalf("expected delete_calls=1 to remove the expired token before storing a new one, got %d", store.deleteCalls)
+	}
+	if store.storeCalls != 1 || emailService.sendCalls != 1 {
+		t.Fatalf("expected one new store and one email send, got store=%d email=%d", store.storeCalls, emailService.sendCalls)
+	}
+}
+
 func TestResendVerifyEmailUseCase_AccountNotFoundHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()

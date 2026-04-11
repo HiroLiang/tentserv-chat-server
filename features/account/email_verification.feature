@@ -76,11 +76,12 @@ Feature: Email verification
     Then the response status should be 400
     And the response error code should be "TOKEN_INVALID"
 
-  Scenario: Reject resend for an expired registered token
+  Scenario: Resend verification email after the previous code expired but is still retained
     Given account registration state is clean
     When I register an account with email "new@example.com", account "new_account", display name "New Display", and password "redacted-password"
     Then the response status should be 201
     When the verification token expires
     And I resend verification email with the expired registered token
-    Then the response status should be 400
-    And the response error code should be "TOKEN_INVALID"
+    Then the response status should be 200
+    And the resend response should include a new verification token and expiry timestamp
+    And the resend email mutation should store a new token and send an email

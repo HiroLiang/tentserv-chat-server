@@ -30,6 +30,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const verificationExpiryTolerance = 5 * time.Second
+
 func TestMain(m *testing.M) {
 	if err := config.LoadConfig("../../../../../dev-doc/config"); err != nil {
 		panic(err)
@@ -438,6 +440,27 @@ func newAccountHandlerVerifyEmailRouter(
 	return router
 }
 
+func newAccountHandlerResendVerifyEmailRouter(
+	store *accountHandlerVerifyEmailStoreStub,
+	accountRepo *accountHandlerVerifyEmailAccountRepoStub,
+) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	resendVerifyEmailUseCase := authUseCase.NewResendVerifyEmailUseCase(
+		store,
+		accountRepo,
+		accountHandlerEmailServiceStub{},
+		func(string, string, string) appEmail.EmailBuilder {
+			return accountHandlerEmailBuilderStub{}
+		},
+	)
+
+	router := gin.New()
+	router.Use(middleware.ContextMiddleware())
+	handler := NewAuthHandler(nil, nil, nil, nil, nil, resendVerifyEmailUseCase, nil)
+	handler.RegisterAuthRoutes(router.Group("/api/auth"))
+	return router
+}
+
 func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
 	gin.SetMode(gin.TestMode)
 	uow := &accountHandlerUOWStub{}
@@ -502,6 +525,14 @@ func performAccountVerifyEmailRequest(router *gin.Engine, body string) *httptest
 	return resp
 }
 
+func performAccountResendVerifyEmailRequest(router *gin.Engine, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/resend-verify-email", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
 func decodeAccountHandlerError(t *testing.T, body *bytes.Buffer) response.ErrorResponse {
 	t.Helper()
 	var errResp response.ErrorResponse
@@ -509,6 +540,28 @@ func decodeAccountHandlerError(t *testing.T, body *bytes.Buffer) response.ErrorR
 		t.Fatalf("decode error response: %v; body=%s", err, body.String())
 	}
 	return errResp
+}
+
+func assertVerificationExpiryContract(t *testing.T, expiresAtMS int64, startedAt, completedAt time.Time) {
+	t.Helper()
+
+	if expiresAtMS <= completedAt.UnixMilli() {
+		t.Fatalf("expected future verification expiry in epoch milliseconds, got expires_at_ms=%d now_ms=%d", expiresAtMS, completedAt.UnixMilli())
+	}
+
+	ttl := config.App().Email.VerifyTTL
+	minExpected := startedAt.Add(ttl - verificationExpiryTolerance).UnixMilli()
+	maxExpected := completedAt.Add(ttl + verificationExpiryTolerance).UnixMilli()
+	if expiresAtMS < minExpected || expiresAtMS > maxExpected {
+		t.Fatalf(
+			"expected verification expiry to match configured ttl=%s within tolerance=%s, got expires_at_ms=%d expected_range=[%d,%d]",
+			ttl,
+			verificationExpiryTolerance,
+			expiresAtMS,
+			minExpected,
+			maxExpected,
+		)
+	}
 }
 
 func TestAuthHandler_RegisterSuccessHasStructuredLog(t *testing.T) {
@@ -536,9 +589,106 @@ func TestAuthHandler_RegisterSuccessHasStructuredLog(t *testing.T) {
 	if out.VerificationToken == "" {
 		t.Fatalf("expected verification token, got %+v", out)
 	}
-	if out.VerificationExpiresAtMS <= time.Now().UnixMilli() {
-		t.Fatalf("expected future verification expiry, got %+v", out)
+	assertVerificationExpiryContract(t, out.VerificationExpiresAtMS, start, time.Now())
+}
+
+func TestAuthHandler_ResendVerifyEmailSuccessHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	store := newAccountHandlerVerifyEmailStoreStub()
+	store.sessions["active-token"] = authPort.VerificationSession{
+		AccountID:         101,
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(3 * time.Minute).UnixMilli(),
+		RemainingAttempts: 3,
 	}
+	store.accountTokens[101] = "active-token"
+	accountRepo := newAccountHandlerVerifyEmailAccountRepoStub()
+	accountRepo.accountsByID[101] = &domainaccount.Account{
+		ID:          101,
+		Email:       shared.EmailAddress("applying@example.com"),
+		AccountName: "applying_account",
+		Status:      domainaccount.Applying,
+	}
+	router := newAccountHandlerResendVerifyEmailRouter(store, accountRepo)
+
+	t.Log("Given: resend verify email token maps to an applying account")
+	t.Log("Input: token_present=true account_status=Applying")
+	t.Log("Action: POST /api/auth/resend-verify-email")
+
+	resp := performAccountResendVerifyEmailRequest(router, `{"token":"active-token"}`)
+	body := resp.Body.String()
+
+	t.Logf("Output: status=%d body=%s", resp.Code, body)
+	t.Logf("Mutation: get_calls=%d delete_calls=%d sessions_in_store=%d", store.getCalls, store.deleteCalls, len(store.sessions))
+	t.Logf("Duration: %s", time.Since(start))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.Code, body)
+	}
+
+	var out ResendVerifyEmailResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode resend verify email response: %v body=%s", err, resp.Body.String())
+	}
+	if out.VerificationToken == "" || out.VerificationToken == "active-token" {
+		t.Fatalf("expected a fresh verification token, got %+v", out)
+	}
+	assertVerificationExpiryContract(t, out.VerificationExpiresAtMS, start, time.Now())
+
+	session, ok := store.sessions[out.VerificationToken]
+	if !ok {
+		t.Fatalf("expected returned token to remain stored, got token=%q store=%v", out.VerificationToken, store.sessions)
+	}
+	if session.ExpiresAtMS != out.VerificationExpiresAtMS {
+		t.Fatalf("expected response expiry to match stored session expiry, got response=%d store=%d", out.VerificationExpiresAtMS, session.ExpiresAtMS)
+	}
+	if store.deleteCalls != 1 {
+		t.Fatalf("expected old token to be deleted once, got delete_calls=%d", store.deleteCalls)
+	}
+}
+
+func TestAuthHandler_ResendVerifyEmailExpiredRetainedTokenHasStructuredLog(t *testing.T) {
+	start := time.Now()
+	store := newAccountHandlerVerifyEmailStoreStub()
+	store.sessions["expired-token"] = authPort.VerificationSession{
+		AccountID:         101,
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(-time.Minute).UnixMilli(),
+		RemainingAttempts: 3,
+	}
+	store.accountTokens[101] = "expired-token"
+	accountRepo := newAccountHandlerVerifyEmailAccountRepoStub()
+	accountRepo.accountsByID[101] = &domainaccount.Account{
+		ID:          101,
+		Email:       shared.EmailAddress("applying@example.com"),
+		AccountName: "applying_account",
+		Status:      domainaccount.Applying,
+	}
+	router := newAccountHandlerResendVerifyEmailRouter(store, accountRepo)
+
+	t.Log("Given: resend verify email token is expired by expires_at_ms but still retained in the store")
+	t.Log("Input: token_present=true token_expired=true account_status=Applying")
+	t.Log("Action: POST /api/auth/resend-verify-email")
+
+	resp := performAccountResendVerifyEmailRequest(router, `{"token":"expired-token"}`)
+	body := resp.Body.String()
+
+	t.Logf("Output: status=%d body=%s", resp.Code, body)
+	t.Logf("Mutation: get_calls=%d delete_calls=%d sessions_in_store=%d", store.getCalls, store.deleteCalls, len(store.sessions))
+	t.Logf("Duration: %s", time.Since(start))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.Code, body)
+	}
+
+	var out ResendVerifyEmailResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode resend verify email response: %v body=%s", err, resp.Body.String())
+	}
+	if out.VerificationToken == "" || out.VerificationToken == "expired-token" {
+		t.Fatalf("expected a fresh verification token, got %+v", out)
+	}
+	assertVerificationExpiryContract(t, out.VerificationExpiresAtMS, start, time.Now())
 }
 
 func TestAuthHandler_RegisterInvalidPayloadHasStructuredLog(t *testing.T) {

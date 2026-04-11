@@ -27,14 +27,14 @@ type AppConfig struct {
 	} `mapstructure:"secrets"`
 
 	RateLimitConfig struct {
-		GlobalLimit      int64         `mapstructure:"global_limit"`
-		IPLimit          int64         `mapstructure:"ip_limit"`
-		UserLimit        int64         `mapstructure:"user_limit"`
-		GlobalUnit       time.Duration `mapstructure:"global_unit"`
-		IPUnit           time.Duration `mapstructure:"ip_unit"`
-		UserUnit         time.Duration `mapstructure:"user_unit"`
-		RegisterIPLimit  int64         `mapstructure:"register_ip_limit"`
-		RegisterIPUnit   time.Duration `mapstructure:"register_ip_unit"`
+		GlobalLimit     int64         `mapstructure:"global_limit"`
+		IPLimit         int64         `mapstructure:"ip_limit"`
+		UserLimit       int64         `mapstructure:"user_limit"`
+		GlobalUnit      time.Duration `mapstructure:"global_unit"`
+		IPUnit          time.Duration `mapstructure:"ip_unit"`
+		UserUnit        time.Duration `mapstructure:"user_unit"`
+		RegisterIPLimit int64         `mapstructure:"register_ip_limit"`
+		RegisterIPUnit  time.Duration `mapstructure:"register_ip_unit"`
 	} `mapstructure:"rate_limit_config"`
 
 	Storage struct {
@@ -43,11 +43,12 @@ type AppConfig struct {
 	} `mapstructure:"storage"`
 
 	Email struct {
-		SenderAddress string        `mapstructure:"sender_address"`
-		SenderName    string        `mapstructure:"sender_name"`
-		ApiKey        string        `mapstructure:"api_key"`
-		BaseURL       string        `mapstructure:"base_url"`
-		VerifyTTL     time.Duration `mapstructure:"verify_ttl"`
+		SenderAddress  string        `mapstructure:"sender_address"`
+		SenderName     string        `mapstructure:"sender_name"`
+		ApiKey         string        `mapstructure:"api_key"`
+		BaseURL        string        `mapstructure:"base_url"`
+		VerifyTTL      time.Duration `mapstructure:"verify_ttl"`
+		VerifyCacheTTL time.Duration `mapstructure:"verify_cache_ttl"`
 	} `mapstructure:"email"`
 
 	E2EE struct {

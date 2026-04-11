@@ -391,7 +391,18 @@ func (s *authVerificationStoreStub) FindTokenByAccountID(_ context.Context, acco
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	token, ok := s.accountTokens[accountID]
-	return token, ok, nil
+	if !ok {
+		return "", false, nil
+	}
+
+	session, sessionOK := s.sessions[token]
+	if !sessionOK || session.ExpiresAtMS <= time.Now().UTC().UnixMilli() {
+		delete(s.accountTokens, accountID)
+		delete(s.sessions, token)
+		return "", false, nil
+	}
+
+	return token, true, nil
 }
 
 func (s *authVerificationStoreStub) Delete(_ context.Context, token string) error {

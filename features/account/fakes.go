@@ -767,17 +767,20 @@ func (s *bddVerificationStore) Store(_ context.Context, token string, session au
 	return nil
 }
 
-// expireToken simulates Redis TTL elapse: removes the token from the store without
-// incrementing deleteCalls, so mutation assertions can distinguish TTL expiry from
-// use-case-initiated Delete calls.
+// expireToken simulates the business expiry elapsing while Redis still retains
+// the token/account mapping for resend lookup.
 func (s *bddVerificationStore) expireToken(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.sessions[token]
-	if ok {
-		delete(s.accountTokens, session.AccountID)
+	if !ok {
+		return
 	}
-	delete(s.sessions, token)
+	session.ExpiresAtMS = time.Now().Add(-time.Second).UnixMilli()
+	s.sessions[token] = session
+	if s.lastStoredToken == token {
+		s.lastStoredSession = session
+	}
 }
 
 func (s *bddVerificationStore) Get(_ context.Context, token string) (authPort.VerificationSession, bool, error) {
@@ -794,7 +797,18 @@ func (s *bddVerificationStore) FindTokenByAccountID(_ context.Context, accountID
 	defer s.mu.Unlock()
 
 	token, ok := s.accountTokens[accountID]
-	return token, ok, nil
+	if !ok {
+		return "", false, nil
+	}
+
+	session, sessionOK := s.sessions[token]
+	if !sessionOK || session.ExpiresAtMS <= time.Now().UTC().UnixMilli() {
+		delete(s.accountTokens, accountID)
+		delete(s.sessions, token)
+		return "", false, nil
+	}
+
+	return token, true, nil
 }
 
 func (s *bddVerificationStore) Delete(_ context.Context, token string) error {

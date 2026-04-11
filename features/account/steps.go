@@ -10,6 +10,7 @@ import (
 
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
 	authPort "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
+	"github.com/HiroLiang/tentserv-chat-server/internal/config"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
@@ -17,6 +18,8 @@ import (
 	infraSecurity "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
 	"github.com/cucumber/godog"
 )
+
+const verificationExpiryTolerance = 5 * time.Second
 
 type steps struct {
 	*bddsupport.APITestContext
@@ -177,12 +180,12 @@ func (a *steps) theRegisterResponseShouldIncludeVerificationTokenAndExpiryTimest
 		return err
 	}
 
-	valid := body.VerificationToken != "" && body.VerificationExpiresAtMS > 0
-	fmt.Printf("Output: has_token=%t has_expiry=%t\n", body.VerificationToken != "", body.VerificationExpiresAtMS > 0)
+	hasToken, futureExpiry, ttlMatches, matchesStore := a.verificationMetadataStatus(body.VerificationToken, body.VerificationExpiresAtMS)
+	fmt.Printf("Output: has_token=%t future_expiry=%t ttl_matches=%t matches_store=%t\n", hasToken, futureExpiry, ttlMatches, matchesStore)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
-	if !valid {
+	if !(hasToken && futureExpiry && ttlMatches && matchesStore) {
 		return fmt.Errorf("expected register response to include verification token and expiry, got body=%s", string(a.ResponseBody))
 	}
 	return nil
@@ -228,7 +231,7 @@ func (a *steps) theApplyingAccountHasAnExpiredVerificationSession() error {
 	}
 	fmt.Println("Given: the applying account previously had a verification session that already expired")
 	fmt.Printf("Input: account_id=%d\n", account.ID)
-	fmt.Println("Action: store a verification session and expire it immediately")
+	fmt.Println("Action: store a verification session and mark its business expiry as elapsed while keeping Redis data")
 
 	session := authPort.VerificationSession{
 		AccountID:         int64(account.ID),
@@ -250,9 +253,9 @@ func (a *steps) theApplyingAccountHasAnExpiredVerificationSession() error {
 func (a *steps) theVerificationTokenExpires() error {
 	a.start = time.Now()
 	token := a.deps.store.lastStoredToken
-	fmt.Println("Given: a valid token was issued but its TTL has elapsed")
+	fmt.Println("Given: a valid token was issued but its business expiry has elapsed")
 	fmt.Printf("Input: token_present=%t\n", token != "")
-	fmt.Println("Action: expire token in verification store (simulates Redis TTL)")
+	fmt.Println("Action: mark the stored verification session as expired while keeping Redis data")
 	a.deps.store.expireToken(token)
 	fmt.Printf("Output: sessions_remaining=%d\n", len(a.deps.store.sessions))
 	fmt.Printf("Mutation: token_expired=true delete_calls_unchanged=%d\n", a.deps.store.deleteCalls)
@@ -317,24 +320,22 @@ func (a *steps) iResendVerificationEmailWithTheExpiredRegisteredToken() error {
 func (a *steps) theExpiredTokenVerificationShouldNotActivateAccount() error {
 	start := time.Now()
 	fmt.Println("Given: verification token was expired before the verify attempt")
-	fmt.Println("Input: expecting no account activation and no delete call from verify use case")
+	fmt.Println("Input: expecting no account activation and cleanup of the expired retained token")
 	fmt.Println("Action: inspect account and verification store state after expired-token verify")
 
-	// After registration: updateCalls=1 (link user). Verify should NOT add another update.
-	// expireToken() did not increment deleteCalls, so deleteCalls should still be 0.
-	noVerifyDelete := a.deps.store.deleteCalls == 0
+	expiredTokenCleaned := a.deps.store.deleteCalls == 1
 	noActivation := len(a.deps.store.sessions) == 0
 
 	status, accountFound := a.firstAccountStatus()
 	notActive := !accountFound || status == domainaccount.Applying
 
-	fmt.Printf("Output: no_verify_delete=%t no_activation=%t account_status=%s\n", noVerifyDelete, noActivation, status)
+	fmt.Printf("Output: expired_token_cleaned=%t no_activation=%t account_status=%s\n", expiredTokenCleaned, noActivation, status)
 	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
 		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
-	if !noVerifyDelete {
-		return fmt.Errorf("expected no delete call from verify use case for expired token, got delete_calls=%d", a.deps.store.deleteCalls)
+	if !expiredTokenCleaned {
+		return fmt.Errorf("expected verify use case to clean retained expired token, got delete_calls=%d", a.deps.store.deleteCalls)
 	}
 	if !noActivation || !notActive {
 		return fmt.Errorf("expected account to remain unactivated, got sessions_remaining=%d account_status=%s", len(a.deps.store.sessions), status)
@@ -419,15 +420,26 @@ func (a *steps) theResendResponseShouldIncludeANewVerificationTokenAndExpiryTime
 		return err
 	}
 
-	matchesStore := body.VerificationToken != "" && body.VerificationToken == a.deps.store.lastStoredToken && body.VerificationExpiresAtMS == a.deps.store.lastStoredSession.ExpiresAtMS
-	fmt.Printf("Output: matches_store=%t has_token=%t has_expiry=%t\n", matchesStore, body.VerificationToken != "", body.VerificationExpiresAtMS > 0)
+	hasToken, futureExpiry, ttlMatches, matchesStore := a.verificationMetadataStatus(body.VerificationToken, body.VerificationExpiresAtMS)
+	fmt.Printf("Output: has_token=%t future_expiry=%t ttl_matches=%t matches_store=%t\n", hasToken, futureExpiry, ttlMatches, matchesStore)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
-	if !matchesStore {
+	if !(hasToken && futureExpiry && ttlMatches && matchesStore) {
 		return fmt.Errorf("expected resend response to include the latest token and expiry, got body=%s", string(a.ResponseBody))
 	}
 	return nil
+}
+
+func (a *steps) verificationMetadataStatus(token string, expiresAtMS int64) (bool, bool, bool, bool) {
+	now := time.Now()
+	ttl := config.App().Email.VerifyTTL
+	remaining := time.Until(time.UnixMilli(expiresAtMS))
+	hasToken := token != ""
+	futureExpiry := expiresAtMS > now.UnixMilli()
+	ttlMatches := remaining >= ttl-verificationExpiryTolerance && remaining <= ttl+verificationExpiryTolerance
+	matchesStore := token == a.deps.store.lastStoredToken && expiresAtMS == a.deps.store.lastStoredSession.ExpiresAtMS
+	return hasToken, futureExpiry, ttlMatches, matchesStore
 }
 
 func (a *steps) theResponseRemainingAttemptsShouldBe(expected int) error {

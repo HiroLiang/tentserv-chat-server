@@ -16,11 +16,12 @@ const (
 )
 
 type VerificationStore struct {
-	cache cache.Cache
+	cache    cache.Cache
+	cacheTTL time.Duration
 }
 
-func NewVerificationStore(c cache.Cache) *VerificationStore {
-	return &VerificationStore{cache: c}
+func NewVerificationStore(c cache.Cache, cacheTTL time.Duration) *VerificationStore {
+	return &VerificationStore{cache: c, cacheTTL: cacheTTL}
 }
 
 var _ port.VerificationStore = (*VerificationStore)(nil)
@@ -30,10 +31,11 @@ func (s *VerificationStore) Store(ctx context.Context, token string, session por
 	if err != nil {
 		return err
 	}
-	if err := s.cache.Set(ctx, tokenCacheKey(token), payload, ttl); err != nil {
+	storeTTL := s.storeTTL(ttl)
+	if err := s.cache.Set(ctx, tokenCacheKey(token), payload, storeTTL); err != nil {
 		return err
 	}
-	return s.cache.Set(ctx, accountCacheKey(session.AccountID), []byte(token), ttl)
+	return s.cache.Set(ctx, accountCacheKey(session.AccountID), []byte(token), storeTTL)
 }
 
 func (s *VerificationStore) Get(ctx context.Context, token string) (port.VerificationSession, bool, error) {
@@ -62,10 +64,21 @@ func (s *VerificationStore) FindTokenByAccountID(ctx context.Context, accountID 
 	}
 
 	token := string(data)
-	if _, sessionOK, err := s.Get(ctx, token); err != nil {
+	session, sessionOK, err := s.Get(ctx, token)
+	if err != nil {
 		return "", false, err
-	} else if !sessionOK {
+	}
+	if !sessionOK {
 		if err := s.cache.Delete(ctx, accountCacheKey(accountID)); err != nil {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	if isSessionExpired(session, time.Now().UTC()) {
+		if err := s.cache.Delete(ctx, accountCacheKey(accountID)); err != nil {
+			return "", false, err
+		}
+		if err := s.cache.Delete(ctx, tokenCacheKey(token)); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
@@ -93,4 +106,15 @@ func tokenCacheKey(token string) string {
 
 func accountCacheKey(accountID int64) string {
 	return accountKeyPrefix + fmt.Sprintf("%d", accountID)
+}
+
+func (s *VerificationStore) storeTTL(sessionTTL time.Duration) time.Duration {
+	if s.cacheTTL > sessionTTL {
+		return s.cacheTTL
+	}
+	return sessionTTL
+}
+
+func isSessionExpired(session port.VerificationSession, now time.Time) bool {
+	return session.ExpiresAtMS <= now.UnixMilli()
 }

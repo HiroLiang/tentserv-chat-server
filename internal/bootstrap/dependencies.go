@@ -165,7 +165,7 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 		ContextHasher:             infraSharedSecurity.NewContentHasher(),
 		LocalFileStorage:          infraStorage.NewLocalFileStorage(conf.Storage.BasePath, conf.Storage.BaseURL),
 		HMacer:                    infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
-		VerificationStore:         infraVerification.NewVerificationStore(redisCache),
+		VerificationStore:         infraVerification.NewVerificationStore(redisCache, conf.Email.VerifyCacheTTL),
 		EmailService:              infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
 		AccountRepo:               postgresAccount.NewAccountRepo(postgresDB),
 		UserRepo:                  postgresUser.NewUserRepository(postgresDB),

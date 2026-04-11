@@ -27,6 +27,16 @@ func seedVerificationSession(store *authVerificationStoreStub, token string, acc
 	store.accountTokens[accountID] = token
 }
 
+func seedExpiredVerificationSession(store *authVerificationStoreStub, token string, accountID int64) {
+	store.sessions[token] = port.VerificationSession{
+		AccountID:         accountID,
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(-time.Minute).UnixMilli(),
+		RemainingAttempts: verificationMaxAttempts,
+	}
+	store.accountTokens[accountID] = token
+}
+
 func TestVerifyEmailUseCase_ActivatesApplyingAccountHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
@@ -211,17 +221,15 @@ func TestVerifyEmailUseCase_UpdateFailureHasStructuredLog(t *testing.T) {
 
 func TestVerifyEmailUseCase_ExpiredTokenHasStructuredLog(t *testing.T) {
 	start := time.Now()
-	// Store is empty — token was stored at registration but Redis TTL has elapsed.
-	// Get returns (0, false, nil), which is indistinguishable from a never-issued token
-	// from the use case's perspective: both paths return ErrTokenInvalid.
 	store := newAuthVerificationStoreStub()
+	seedExpiredVerificationSession(store, "expired-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Applying)
 	uc := NewVerifyEmailUseCase(store, accountRepo)
 	input := verifyEmailInput("expired-token")
 
-	t.Log("Given: verification token was issued but TTL has elapsed (not present in store)")
-	t.Log("Input: token_present=false (simulates Redis TTL expiry)")
+	t.Log("Given: verification token is still retained in store but its expires_at_ms is already in the past")
+	t.Log("Input: token_present=true token_expired=true")
 	t.Log("Action: execute email verification expired token path")
 
 	out, err := uc.Execute(context.Background(), input)
@@ -232,8 +240,8 @@ func TestVerifyEmailUseCase_ExpiredTokenHasStructuredLog(t *testing.T) {
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertRegisterError(t, err, ErrTokenInvalid)
-	if store.deleteCalls != 0 || accountRepo.findByIDCalls != 0 || accountRepo.updateCalls != 0 {
-		t.Fatalf("expected no delete/find/update for expired token, got delete=%d find=%d update=%d",
+	if store.deleteCalls != 1 || accountRepo.findByIDCalls != 0 || accountRepo.updateCalls != 0 {
+		t.Fatalf("expected delete=1 find=0 update=0 for retained expired token, got delete=%d find=%d update=%d",
 			store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls)
 	}
 }
