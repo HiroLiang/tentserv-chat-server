@@ -19,11 +19,11 @@ func TestRegisterMailBuilder_BuildEmailHasStructuredLog(t *testing.T) {
 		sender,
 		"new@example.com",
 		`New <Display>`,
-		`https://api.example.com/api/auth/verify-email?token=redacted-token&next=<home>`,
+		`012345`,
 	)
 
-	t.Log("Given: register mail builder with sender, recipient, display name, and verify URL")
-	t.Log("Input: recipient_email=new@example.com recipient_name_contains_html=true verify_url_present=true")
+	t.Log("Given: register mail builder with sender, recipient, display name, and a 6-digit verification code")
+	t.Log("Input: recipient_email=new@example.com recipient_name_contains_html=true verification_code=012345")
 	t.Log("Action: build register verification email")
 
 	mail, err := builder.BuildEmail(context.Background())
@@ -41,19 +41,25 @@ func TestRegisterMailBuilder_BuildEmailHasStructuredLog(t *testing.T) {
 	if len(mail.Recipients) != 1 || mail.Recipients[0] != "new@example.com" {
 		t.Fatalf("expected one recipient new@example.com, got %v", mail.Recipients)
 	}
-	if mail.Subject != "Verify your email" {
+	if mail.Subject != "Your Tentserv verification code" {
 		t.Fatalf("expected verify subject, got %q", mail.Subject)
 	}
 	if !strings.Contains(mail.Body.HTML, "New &lt;Display&gt;") || strings.Contains(mail.Body.HTML, "New <Display>") {
 		t.Fatalf("expected display name to be escaped in HTML body, got %s", mail.Body.HTML)
 	}
-	if !strings.Contains(mail.Body.HTML, "&lt;home&gt;") || strings.Contains(mail.Body.HTML, "<home>") {
-		t.Fatalf("expected verify URL to be escaped in HTML body, got %s", mail.Body.HTML)
+	if !strings.Contains(mail.Body.HTML, "012345") {
+		t.Fatalf("expected HTML body to include verification code, got %s", mail.Body.HTML)
+	}
+	if !strings.Contains(mail.Body.HTML, "expire in 3 minutes") {
+		t.Fatalf("expected HTML body to mention 3 minute expiry, got %s", mail.Body.HTML)
 	}
 	if !strings.Contains(mail.Body.Text, "New <Display>") {
 		t.Fatalf("expected text body to keep readable display name, got %s", mail.Body.Text)
 	}
-	if !strings.Contains(mail.Body.Text, "https://api.example.com/api/auth/verify-email?token=redacted-token") {
-		t.Fatalf("expected text body to include verify URL, got %s", mail.Body.Text)
+	if !strings.Contains(mail.Body.Text, "012345") {
+		t.Fatalf("expected text body to include verification code, got %s", mail.Body.Text)
+	}
+	if !strings.Contains(mail.Body.Text, "expire in 3 minutes") {
+		t.Fatalf("expected text body to mention 3 minute expiry, got %s", mail.Body.Text)
 	}
 }

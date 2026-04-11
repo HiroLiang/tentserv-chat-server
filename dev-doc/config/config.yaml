@@ -35,7 +35,7 @@ email:
   sender_name: ${EMAIL_SENDER_NAME:Tentserv}
   api_key: ${RESEND_API_KEY}
   base_url: ${APP_BASE_URL:http://localhost:8080}
-  verify_ttl: 24h
+  verify_ttl: 3m
 e2ee:
   otp_prekey_target_count: 20
   otp_prekey_replenish_threshold: 5

@@ -13,34 +13,34 @@ type RegisterMailBuilder struct {
 	sender         shared.EmailSender
 	recipientEmail shared.EmailAddress
 	recipientName  string
-	verifyURL      string
+	verificationCode string
 }
 
-func NewRegisterMailBuilder(sender shared.EmailSender, recipientEmail, recipientName, verifyURL string) *RegisterMailBuilder {
+func NewRegisterMailBuilder(sender shared.EmailSender, recipientEmail, recipientName, verificationCode string) *RegisterMailBuilder {
 	return &RegisterMailBuilder{
-		sender:         sender,
-		recipientEmail: shared.EmailAddress(recipientEmail),
-		recipientName:  recipientName,
-		verifyURL:      verifyURL,
+		sender:           sender,
+		recipientEmail:   shared.EmailAddress(recipientEmail),
+		recipientName:    recipientName,
+		verificationCode: verificationCode,
 	}
 }
 
 func (b *RegisterMailBuilder) BuildEmail(_ context.Context) (*shared.Email, error) {
 	htmlRecipientName := html.EscapeString(b.recipientName)
-	htmlVerifyURL := html.EscapeString(b.verifyURL)
+	htmlVerificationCode := html.EscapeString(b.verificationCode)
 	htmlBody := fmt.Sprintf(
-		`<p>Hi %s,</p><p>Please verify your email address by clicking the link below:</p><p><a href="%s">Verify Email</a></p><p>This link will expire in 24 hours.</p>`,
-		htmlRecipientName, htmlVerifyURL,
+		`<p>Hi %s,</p><p>Use the verification code below to finish creating your Tentserv Chat account:</p><p style="font-size: 28px; font-weight: 700; letter-spacing: 0.4rem;">%s</p><p>This code will expire in 3 minutes.</p>`,
+		htmlRecipientName, htmlVerificationCode,
 	)
 	textBody := fmt.Sprintf(
-		"Hi %s,\n\nPlease verify your email address by visiting:\n%s\n\nThis link will expire in 24 hours.",
-		b.recipientName, b.verifyURL,
+		"Hi %s,\n\nUse this verification code to finish creating your Tentserv Chat account:\n%s\n\nThis code will expire in 3 minutes.",
+		b.recipientName, b.verificationCode,
 	)
 
 	return &shared.Email{
 		Sender:     b.sender,
 		Recipients: []shared.EmailAddress{b.recipientEmail},
-		Subject:    "Verify your email",
+		Subject:    "Your Tentserv verification code",
 		Body: shared.EmailBody{
 			HTML: htmlBody,
 			Text: textBody,

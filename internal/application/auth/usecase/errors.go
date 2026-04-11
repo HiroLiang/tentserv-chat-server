@@ -26,5 +26,8 @@ var (
 
 	ErrPasswordError = errors.New("password error")
 
-	ErrTokenInvalid = errors.New("invalid or expired verification token")
+	ErrTokenInvalid                  = errors.New("invalid or expired verification token")
+	ErrVerificationPending           = errors.New("verification is already pending for this account")
+	ErrVerificationCodeInvalid       = errors.New("verification code is incorrect")
+	ErrVerificationAttemptsExceeded  = errors.New("verification attempts exceeded")
 )

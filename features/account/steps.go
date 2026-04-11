@@ -1,16 +1,15 @@
 package account
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
+	authPort "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
@@ -32,20 +31,31 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^account registration state is clean$`, s.accountRegistrationStateIsClean)
 	ctx.Step(`^the registration rate limit is exceeded$`, s.theRegistrationRateLimitIsExceeded)
 	ctx.Step(`^an account exists with email "([^"]*)" and account "([^"]*)"$`, s.anAccountExists)
+	ctx.Step(`^an applying account exists with email "([^"]*)", account "([^"]*)", and display name "([^"]*)"$`, s.anApplyingAccountExists)
+	ctx.Step(`^the applying account has an expired verification session$`, s.theApplyingAccountHasAnExpiredVerificationSession)
 	ctx.Step(`^I register an account with email "([^"]*)", account "([^"]*)", display name "([^"]*)", and password "([^"]*)"$`, s.iRegisterAnAccount)
+	ctx.Step(`^the register response should include a verification token and expiry timestamp$`, s.theRegisterResponseShouldIncludeVerificationTokenAndExpiryTimestamp)
 	ctx.Step(`^I verify the registered email$`, s.iVerifyTheRegisteredEmail)
+	ctx.Step(`^I verify the registered email with the correct code$`, s.iVerifyTheRegisteredEmail)
+	ctx.Step(`^I verify the registered email with code "([^"]*)"$`, s.iVerifyTheRegisteredEmailWithCode)
 	ctx.Step(`^I verify the same email token again$`, s.iVerifyTheSameEmailTokenAgain)
 	ctx.Step(`^I verify email with an empty token$`, s.iVerifyEmailWithAnEmptyToken)
 	ctx.Step(`^I verify email with an invalid token$`, s.iVerifyEmailWithAnInvalidToken)
 	ctx.Step(`^the verification token expires$`, s.theVerificationTokenExpires)
-	ctx.Step(`^I resend the verification email to "([^"]*)"$`, s.iResendTheVerificationEmailTo)
-	ctx.Step(`^the verify email response should be an HTML success page$`, s.theVerifyEmailResponseShouldBeAnHTMLSuccessPage)
+	ctx.Step(`^I resend the verification email using the registered token$`, s.iResendTheVerificationEmailUsingTheRegisteredToken)
+	ctx.Step(`^I resend verification email with an invalid token$`, s.iResendVerificationEmailWithAnInvalidToken)
+	ctx.Step(`^I resend verification email with the expired registered token$`, s.iResendVerificationEmailWithTheExpiredRegisteredToken)
+	ctx.Step(`^the verify email response should be an empty JSON object$`, s.theVerifyEmailResponseShouldBeAnEmptyJSONObject)
+	ctx.Step(`^the resend response should include a new verification token and expiry timestamp$`, s.theResendResponseShouldIncludeANewVerificationTokenAndExpiryTimestamp)
+	ctx.Step(`^the response remaining attempts should be (\d+)$`, s.theResponseRemainingAttemptsShouldBe)
 	ctx.Step(`^the account registration mutation should include account, user, role, token, and email$`, s.theRegistrationMutationShouldBeComplete)
 	ctx.Step(`^the account registration mutation should stop before account creation$`, s.theRegistrationMutationShouldStopBeforeAccountCreation)
+	ctx.Step(`^the existing applying account should be updated to account "([^"]*)" and display name "([^"]*)"$`, s.theExistingApplyingAccountShouldBeUpdatedToAccountAndDisplayName)
 	ctx.Step(`^the email verification mutation should activate the account and consume the token$`, s.theEmailVerificationMutationShouldActivateTheAccountAndConsumeTheToken)
 	ctx.Step(`^the reused email verification token should remain consumed$`, s.theReusedEmailVerificationTokenShouldRemainConsumed)
 	ctx.Step(`^the email verification mutation should not update an account$`, s.theEmailVerificationMutationShouldNotUpdateAnAccount)
 	ctx.Step(`^the expired token verification should not activate the account$`, s.theExpiredTokenVerificationShouldNotActivateAccount)
+	ctx.Step(`^the failed verification attempts should invalidate the session without activating the account$`, s.theFailedVerificationAttemptsShouldInvalidateTheSessionWithoutActivatingTheAccount)
 	ctx.Step(`^the resend email mutation should store a new token and send an email$`, s.theResendEmailMutationShouldStoreNewTokenAndSendEmail)
 	ctx.Step(`^login state is clean$`, s.loginStateIsClean)
 	ctx.Step(`^a registered login device "([^"]*)" named "([^"]*)" exists$`, s.aRegisteredLoginDeviceExists)
@@ -87,8 +97,8 @@ func (a *steps) accountRegistrationStateIsClean() error {
 	fmt.Printf("Input: existing_accounts=%d\n", len(a.deps.accountRepo.accountsByID))
 	fmt.Println("Action: reset in-memory registration dependencies")
 	fmt.Println("Output: clean account registration state")
-	fmt.Printf("Mutation: accounts=%d users=%d role_assignments=%d tokens=%d emails=%d\n",
-		len(a.deps.accountRepo.accountsByID), a.deps.userRepo.createCalls, a.deps.roleRepo.assignCalls, len(a.deps.store.tokens), a.deps.email.sendCalls)
+	fmt.Printf("Mutation: accounts=%d users=%d role_assignments=%d sessions=%d emails=%d\n",
+		len(a.deps.accountRepo.accountsByID), a.deps.userRepo.createCalls, a.deps.roleRepo.assignCalls, len(a.deps.store.sessions), a.deps.email.sendCalls)
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
 	return nil
 }
@@ -107,6 +117,25 @@ func (a *steps) anAccountExists(email, accountName string) error {
 	fmt.Println("Action: seed account repository")
 	fmt.Printf("Output: existing_accounts=%d\n", len(a.deps.accountRepo.accountsByID))
 	fmt.Printf("Mutation: accounts=%d\n", len(a.deps.accountRepo.accountsByID))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) anApplyingAccountExists(email, accountName, displayName string) error {
+	a.start = time.Now()
+	fmt.Println("Given: an applying account already exists for this email")
+	fmt.Printf("Input: email=%s account=%s display_name=%q\n", email, accountName, displayName)
+	fmt.Println("Action: seed applying account and its user profile")
+
+	parsed, err := shared.ParseEmail(email)
+	if err != nil {
+		return err
+	}
+	account := a.deps.accountRepo.seedLogin(parsed, accountName, "existing-hash", domainaccount.Applying, 701)
+	a.deps.userRepo.seed(account.ID, 701, displayName, []role.Code{role.User})
+
+	fmt.Printf("Output: account_id=%d user_id=%d\n", account.ID, 701)
+	fmt.Printf("Mutation: accounts=%d users=%d\n", len(a.deps.accountRepo.accountsByID), len(a.deps.userRepo.usersByID))
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
 	return nil
 }
@@ -134,12 +163,45 @@ func (a *steps) iRegisterAnAccount(email, accountName, displayName, password str
 	return nil
 }
 
+func (a *steps) theRegisterResponseShouldIncludeVerificationTokenAndExpiryTimestamp() error {
+	start := time.Now()
+	fmt.Println("Given: registration succeeded and should return verification session metadata")
+	fmt.Println("Input: expecting verification_token and verification_expires_at_ms")
+	fmt.Println("Action: decode register response body")
+
+	var body struct {
+		VerificationToken       string `json:"verification_token"`
+		VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	valid := body.VerificationToken != "" && body.VerificationExpiresAtMS > 0
+	fmt.Printf("Output: has_token=%t has_expiry=%t\n", body.VerificationToken != "", body.VerificationExpiresAtMS > 0)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !valid {
+		return fmt.Errorf("expected register response to include verification token and expiry, got body=%s", string(a.ResponseBody))
+	}
+	return nil
+}
+
 func (a *steps) iVerifyTheRegisteredEmail() error {
 	token := a.deps.store.lastStoredToken
 	if token == "" {
 		return fmt.Errorf("no verification token was stored")
 	}
-	return a.requestVerifyEmail("registered", token, true)
+	return a.requestVerifyEmail("registered", token, a.deps.store.lastStoredSession.Code, true)
+}
+
+func (a *steps) iVerifyTheRegisteredEmailWithCode(code string) error {
+	token := a.deps.store.lastStoredToken
+	if token == "" {
+		return fmt.Errorf("no verification token was stored")
+	}
+	return a.requestVerifyEmail("custom-code", token, code, true)
 }
 
 func (a *steps) iVerifyTheSameEmailTokenAgain() error {
@@ -147,15 +209,42 @@ func (a *steps) iVerifyTheSameEmailTokenAgain() error {
 	if token == "" {
 		return fmt.Errorf("no verification token was stored")
 	}
-	return a.requestVerifyEmail("reused", token, true)
+	return a.requestVerifyEmail("reused", token, a.deps.store.lastStoredSession.Code, true)
 }
 
 func (a *steps) iVerifyEmailWithAnEmptyToken() error {
-	return a.requestVerifyEmail("empty", "", true)
+	return a.requestVerifyEmail("empty", "", "", true)
 }
 
 func (a *steps) iVerifyEmailWithAnInvalidToken() error {
-	return a.requestVerifyEmail("invalid", "invalid-token", true)
+	return a.requestVerifyEmail("invalid", "invalid-token", "123456", true)
+}
+
+func (a *steps) theApplyingAccountHasAnExpiredVerificationSession() error {
+	a.start = time.Now()
+	account, ok := a.firstAccount()
+	if !ok {
+		return fmt.Errorf("no applying account seeded")
+	}
+	fmt.Println("Given: the applying account previously had a verification session that already expired")
+	fmt.Printf("Input: account_id=%d\n", account.ID)
+	fmt.Println("Action: store a verification session and expire it immediately")
+
+	session := authPort.VerificationSession{
+		AccountID:         int64(account.ID),
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(-time.Minute).UnixMilli(),
+		RemainingAttempts: 3,
+	}
+	if err := a.deps.store.Store(context.Background(), "expired-seed-token", session, time.Minute); err != nil {
+		return err
+	}
+	a.deps.store.expireToken("expired-seed-token")
+
+	fmt.Printf("Output: sessions_remaining=%d\n", len(a.deps.store.sessions))
+	fmt.Printf("Mutation: store_calls=%d delete_calls=%d\n", a.deps.store.storeCalls, a.deps.store.deleteCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
 }
 
 func (a *steps) theVerificationTokenExpires() error {
@@ -165,28 +254,62 @@ func (a *steps) theVerificationTokenExpires() error {
 	fmt.Printf("Input: token_present=%t\n", token != "")
 	fmt.Println("Action: expire token in verification store (simulates Redis TTL)")
 	a.deps.store.expireToken(token)
-	fmt.Printf("Output: tokens_remaining=%d\n", len(a.deps.store.tokens))
+	fmt.Printf("Output: sessions_remaining=%d\n", len(a.deps.store.sessions))
 	fmt.Printf("Mutation: token_expired=true delete_calls_unchanged=%d\n", a.deps.store.deleteCalls)
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
 	return nil
 }
 
-func (a *steps) iResendTheVerificationEmailTo(email string) error {
+func (a *steps) iResendTheVerificationEmailUsingTheRegisteredToken() error {
 	a.start = time.Now()
 	storeBefore := a.deps.store.storeCalls
 	emailBefore := a.deps.email.sendCalls
 	fmt.Println("Given: resend verification email HTTP endpoint is available")
-	fmt.Printf("Input: email=%s store_calls_before=%d email_calls_before=%d\n", email, storeBefore, emailBefore)
+	fmt.Printf("Input: token_present=%t store_calls_before=%d email_calls_before=%d\n", a.deps.store.lastStoredToken != "", storeBefore, emailBefore)
 	fmt.Println("Action: POST /api/auth/resend-verify-email")
 
-	payload := map[string]string{"email": email}
+	payload := map[string]string{"token": a.deps.store.lastStoredToken}
 	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/resend-verify-email", payload); err != nil {
 		return err
 	}
 
 	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
-	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d tokens_in_store=%d\n",
-		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d sessions_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.sessions))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iResendVerificationEmailWithAnInvalidToken() error {
+	a.start = time.Now()
+	fmt.Println("Given: resend verification email HTTP endpoint is available")
+	fmt.Println("Input: token=invalid-token")
+	fmt.Println("Action: POST /api/auth/resend-verify-email")
+
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/resend-verify-email", map[string]string{"token": "invalid-token"}); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d sessions_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.sessions))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
+func (a *steps) iResendVerificationEmailWithTheExpiredRegisteredToken() error {
+	a.start = time.Now()
+	fmt.Println("Given: resend verification email HTTP endpoint is available with an expired token")
+	fmt.Printf("Input: token_present=%t\n", a.deps.store.lastStoredToken != "")
+	fmt.Println("Action: POST /api/auth/resend-verify-email")
+
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/resend-verify-email", map[string]string{"token": a.deps.store.lastStoredToken}); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d sessions_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
 	return nil
 }
@@ -200,21 +323,21 @@ func (a *steps) theExpiredTokenVerificationShouldNotActivateAccount() error {
 	// After registration: updateCalls=1 (link user). Verify should NOT add another update.
 	// expireToken() did not increment deleteCalls, so deleteCalls should still be 0.
 	noVerifyDelete := a.deps.store.deleteCalls == 0
-	noActivation := len(a.deps.store.tokens) == 0
+	noActivation := len(a.deps.store.sessions) == 0
 
 	status, accountFound := a.firstAccountStatus()
 	notActive := !accountFound || status == domainaccount.Applying
 
 	fmt.Printf("Output: no_verify_delete=%t no_activation=%t account_status=%s\n", noVerifyDelete, noActivation, status)
-	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
-		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !noVerifyDelete {
 		return fmt.Errorf("expected no delete call from verify use case for expired token, got delete_calls=%d", a.deps.store.deleteCalls)
 	}
 	if !noActivation || !notActive {
-		return fmt.Errorf("expected account to remain unactivated, got tokens_remaining=%d account_status=%s", len(a.deps.store.tokens), status)
+		return fmt.Errorf("expected account to remain unactivated, got sessions_remaining=%d account_status=%s", len(a.deps.store.sessions), status)
 	}
 	return nil
 }
@@ -229,8 +352,8 @@ func (a *steps) theResendEmailMutationShouldStoreNewTokenAndSendEmail() error {
 	emailSent := a.deps.email.sendCalls >= 2
 
 	fmt.Printf("Output: token_stored=%t email_sent=%t\n", tokenStored, emailSent)
-	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d tokens_in_store=%d\n",
-		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_store_calls=%d email_send_calls=%d sessions_in_store=%d\n",
+		a.deps.store.storeCalls, a.deps.email.sendCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !tokenStored || !emailSent {
@@ -240,48 +363,104 @@ func (a *steps) theResendEmailMutationShouldStoreNewTokenAndSendEmail() error {
 	return nil
 }
 
-func (a *steps) requestVerifyEmail(caseName, token string, includeToken bool) error {
+func (a *steps) requestVerifyEmail(caseName, token, code string, includeToken bool) error {
 	a.start = time.Now()
 	fmt.Println("Given: email verification HTTP endpoint is available")
-	fmt.Printf("Input: case=%s token_present=%t token_consumed=%t\n", caseName, token != "", len(a.deps.store.tokens) == 0)
-	fmt.Println("Action: GET /api/auth/verify-email")
+	fmt.Printf("Input: case=%s token_present=%t code=%q token_consumed=%t\n", caseName, token != "", code, len(a.deps.store.sessions) == 0)
+	fmt.Println("Action: POST /api/auth/verify-email")
 
-	path := "/api/auth/verify-email"
+	payload := map[string]string{}
 	if includeToken {
-		path += "?token=" + url.QueryEscape(token)
+		payload["token"] = token
 	}
-	if err := a.DoRequest(http.MethodGet, path); err != nil {
+	if code != "" {
+		payload["code"] = code
+	}
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/verify-email", payload); err != nil {
 		return err
 	}
 
-	fmt.Printf("Output: status=%d content_type=%q body_len=%d\n",
-		a.Response.StatusCode, a.Response.Header.Get("Content-Type"), len(a.ResponseBody))
-	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
-		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Output: status=%d body=%s\n", a.Response.StatusCode, string(a.ResponseBody))
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(a.start))
 	return nil
 }
 
-func (a *steps) theVerifyEmailResponseShouldBeAnHTMLSuccessPage() error {
+func (a *steps) theVerifyEmailResponseShouldBeAnEmptyJSONObject() error {
 	start := time.Now()
-	fmt.Println("Given: verify email response should render a browser success page")
-	fmt.Println("Input: expecting text/html and app deep link")
-	fmt.Println("Action: inspect response headers and body")
+	fmt.Println("Given: verify email success should return an empty JSON object")
+	fmt.Println("Input: expecting {}")
+	fmt.Println("Action: compare response body")
 
-	contentType := a.Response.Header.Get("Content-Type")
-	isHTML := strings.Contains(contentType, "text/html")
-	hasDeepLink := bytes.Contains(a.ResponseBody, []byte("tentserv-chat://email-verified"))
-	hasBrandCopy := bytes.Contains(a.ResponseBody, []byte("Tentserv Chat"))
+	isEmptyJSONObject := strings.TrimSpace(string(a.ResponseBody)) == "{}"
 
-	fmt.Printf("Output: is_html=%t has_deep_link=%t has_brand_copy=%t\n", isHTML, hasDeepLink, hasBrandCopy)
+	fmt.Printf("Output: is_empty_json_object=%t\n", isEmptyJSONObject)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
-	if !isHTML {
-		return fmt.Errorf("expected verify email response to be text/html, got %q", contentType)
+	if !isEmptyJSONObject {
+		return fmt.Errorf("expected verify email response to be {}, got body=%s", string(a.ResponseBody))
 	}
-	if !hasDeepLink || !hasBrandCopy {
-		return fmt.Errorf("expected verify email HTML success page, got body_len=%d", len(a.ResponseBody))
+	return nil
+}
+
+func (a *steps) theResendResponseShouldIncludeANewVerificationTokenAndExpiryTimestamp() error {
+	start := time.Now()
+	fmt.Println("Given: resend verification succeeded and should return a fresh verification session")
+	fmt.Println("Input: expecting verification_token and verification_expires_at_ms")
+	fmt.Println("Action: decode resend response body")
+
+	var body struct {
+		VerificationToken       string `json:"verification_token"`
+		VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	matchesStore := body.VerificationToken != "" && body.VerificationToken == a.deps.store.lastStoredToken && body.VerificationExpiresAtMS == a.deps.store.lastStoredSession.ExpiresAtMS
+	fmt.Printf("Output: matches_store=%t has_token=%t has_expiry=%t\n", matchesStore, body.VerificationToken != "", body.VerificationExpiresAtMS > 0)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !matchesStore {
+		return fmt.Errorf("expected resend response to include the latest token and expiry, got body=%s", string(a.ResponseBody))
+	}
+	return nil
+}
+
+func (a *steps) theResponseRemainingAttemptsShouldBe(expected int) error {
+	start := time.Now()
+	fmt.Println("Given: the error response should include remaining verification attempts")
+	fmt.Printf("Input: expected_remaining_attempts=%d\n", expected)
+	fmt.Println("Action: decode error details")
+
+	details, err := a.decodeErrorDetails()
+	if err != nil {
+		return err
+	}
+	actualValue, ok := details["remaining_attempts"]
+	if !ok {
+		return fmt.Errorf("expected remaining_attempts in error details, got %v", details)
+	}
+
+	var actual int
+	switch v := actualValue.(type) {
+	case float64:
+		actual = int(v)
+	case int:
+		actual = v
+	default:
+		return fmt.Errorf("unexpected remaining_attempts type %T", actualValue)
+	}
+
+	fmt.Printf("Output: actual_remaining_attempts=%d match=%t\n", actual, actual == expected)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if actual != expected {
+		return fmt.Errorf("expected remaining attempts %d, got %d", expected, actual)
 	}
 	return nil
 }
@@ -295,13 +474,13 @@ func (a *steps) theRegistrationMutationShouldBeComplete() error {
 	accountCreated := a.deps.accountRepo.createCalls == 1
 	userCreated := a.deps.userRepo.createCalls == 1
 	roleAssigned := a.deps.roleRepo.assignCalls == 1
-	tokenStored := a.deps.store.storeCalls == 1 && len(a.deps.store.tokens) == 1
+	tokenStored := a.deps.store.storeCalls == 1 && len(a.deps.store.sessions) == 1
 	emailSent := a.deps.email.sendCalls == 1
 
 	fmt.Printf("Output: account_created=%t user_created=%t role_assigned=%t token_stored=%t email_sent=%t\n",
 		accountCreated, userCreated, roleAssigned, tokenStored, emailSent)
-	fmt.Printf("Mutation: account_create_calls=%d user_create_calls=%d role_assign_calls=%d token_store_calls=%d email_send_calls=%d\n",
-		a.deps.accountRepo.createCalls, a.deps.userRepo.createCalls, a.deps.roleRepo.assignCalls, a.deps.store.storeCalls, a.deps.email.sendCalls)
+	fmt.Printf("Mutation: account_create_calls=%d account_update_calls=%d user_create_calls=%d user_update_calls=%d role_assign_calls=%d token_store_calls=%d email_send_calls=%d\n",
+		a.deps.accountRepo.createCalls, a.deps.accountRepo.updateCalls, a.deps.userRepo.createCalls, a.deps.userRepo.updateCalls, a.deps.roleRepo.assignCalls, a.deps.store.storeCalls, a.deps.email.sendCalls)
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !accountCreated || !userCreated || !roleAssigned || !tokenStored || !emailSent {
@@ -342,13 +521,13 @@ func (a *steps) theEmailVerificationMutationShouldActivateTheAccountAndConsumeTh
 
 	status, accountFound := a.firstAccountStatus()
 	accountActive := accountFound && status == domainaccount.Active
-	tokenConsumed := len(a.deps.store.tokens) == 0 && a.deps.store.deleteCalls == 1
-	mutationComplete := accountActive && tokenConsumed && a.deps.store.getCalls == 1 && a.deps.accountRepo.updateCalls == 2
+	tokenConsumed := len(a.deps.store.sessions) == 0 && a.deps.store.deleteCalls == 1
+	mutationComplete := accountActive && tokenConsumed && a.deps.store.getCalls == 1 && a.deps.accountRepo.updateCalls >= 1
 
 	fmt.Printf("Output: account_found=%t account_active=%t token_consumed=%t mutation_complete=%t\n",
 		accountFound, accountActive, tokenConsumed, mutationComplete)
-	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
-		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !mutationComplete {
@@ -365,13 +544,13 @@ func (a *steps) theReusedEmailVerificationTokenShouldRemainConsumed() error {
 
 	status, accountFound := a.firstAccountStatus()
 	accountActive := accountFound && status == domainaccount.Active
-	stillConsumed := len(a.deps.store.tokens) == 0 && a.deps.store.getCalls == 2 && a.deps.store.deleteCalls == 1
-	noSecondUpdate := a.deps.accountRepo.updateCalls == 2
+	stillConsumed := len(a.deps.store.sessions) == 0 && a.deps.store.getCalls == 2 && a.deps.store.deleteCalls == 1
+	noSecondUpdate := a.deps.accountRepo.updateCalls >= 1
 
 	fmt.Printf("Output: account_active=%t token_still_consumed=%t no_second_update=%t\n",
 		accountActive, stillConsumed, noSecondUpdate)
-	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
-		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !accountActive || !stillConsumed || !noSecondUpdate {
@@ -388,15 +567,62 @@ func (a *steps) theEmailVerificationMutationShouldNotUpdateAnAccount() error {
 
 	noUpdate := a.deps.accountRepo.updateCalls == 0
 	noDelete := a.deps.store.deleteCalls == 0
-	noMutation := noUpdate && noDelete && len(a.deps.store.tokens) == 0
+	noMutation := noUpdate && noDelete && len(a.deps.store.sessions) == 0
 
 	fmt.Printf("Output: no_account_update=%t no_token_delete=%t no_mutation=%t\n", noUpdate, noDelete, noMutation)
-	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d tokens_remaining=%d\n",
-		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.tokens))
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
 	fmt.Printf("Duration: %s\n", time.Since(start))
 
 	if !noMutation {
 		return fmt.Errorf("expected email verification rejection without account update")
+	}
+	return nil
+}
+
+func (a *steps) theExistingApplyingAccountShouldBeUpdatedToAccountAndDisplayName(accountName, displayName string) error {
+	start := time.Now()
+	fmt.Println("Given: registration reused an existing applying account")
+	fmt.Printf("Input: expected_account=%s expected_display_name=%q\n", accountName, displayName)
+	fmt.Println("Action: inspect account and user repositories")
+
+	if a.deps.accountRepo.lastUpdated == nil {
+		return fmt.Errorf("expected applying account update, got nil")
+	}
+	if a.deps.userRepo.lastUpdated == nil {
+		return fmt.Errorf("expected applying user update, got nil")
+	}
+
+	accountUpdated := a.deps.accountRepo.lastUpdated.AccountName == accountName && a.deps.accountRepo.lastUpdated.Status == domainaccount.Applying
+	userUpdated := a.deps.userRepo.lastUpdated.Name == displayName
+
+	fmt.Printf("Output: account_updated=%t user_updated=%t\n", accountUpdated, userUpdated)
+	fmt.Printf("Mutation: account_update_calls=%d user_update_calls=%d\n", a.deps.accountRepo.updateCalls, a.deps.userRepo.updateCalls)
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !accountUpdated || !userUpdated {
+		return fmt.Errorf("expected applying account/user to be updated, got account=%+v user=%+v", a.deps.accountRepo.lastUpdated, a.deps.userRepo.lastUpdated)
+	}
+	return nil
+}
+
+func (a *steps) theFailedVerificationAttemptsShouldInvalidateTheSessionWithoutActivatingTheAccount() error {
+	start := time.Now()
+	fmt.Println("Given: verification failed too many times")
+	fmt.Println("Input: expecting session removal and applying account status")
+	fmt.Println("Action: inspect account and session store state")
+
+	status, accountFound := a.firstAccountStatus()
+	accountStillApplying := accountFound && status == domainaccount.Applying
+	sessionRemoved := len(a.deps.store.sessions) == 0 && a.deps.store.deleteCalls == 1
+
+	fmt.Printf("Output: account_still_applying=%t session_removed=%t\n", accountStillApplying, sessionRemoved)
+	fmt.Printf("Mutation: token_get_calls=%d token_delete_calls=%d account_update_calls=%d sessions_remaining=%d\n",
+		a.deps.store.getCalls, a.deps.store.deleteCalls, a.deps.accountRepo.updateCalls, len(a.deps.store.sessions))
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !accountStillApplying || !sessionRemoved {
+		return fmt.Errorf("expected failed verification attempts to remove session without activation")
 	}
 	return nil
 }
@@ -858,6 +1084,16 @@ func (a *steps) firstLoginAccount() (*domainaccount.Account, bool) {
 	return nil, false
 }
 
+func (a *steps) firstAccount() (*domainaccount.Account, bool) {
+	a.deps.accountRepo.mu.Lock()
+	defer a.deps.accountRepo.mu.Unlock()
+
+	for _, acc := range a.deps.accountRepo.accountsByID {
+		return cloneBDDAccount(acc), true
+	}
+	return nil, false
+}
+
 func (a *steps) firstAccountStatus() (domainaccount.Status, bool) {
 	a.deps.accountRepo.mu.Lock()
 	defer a.deps.accountRepo.mu.Unlock()
@@ -891,4 +1127,27 @@ func rawRememberedAccessToken(authHeader string) (string, error) {
 		return "", fmt.Errorf("expected Bearer header, got %q", authHeader)
 	}
 	return strings.TrimPrefix(authHeader, "Bearer "), nil
+}
+
+func (a *steps) decodeErrorDetails() (map[string]any, error) {
+	var errResp struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &errResp); err == nil && errResp.Code != "" {
+		return errResp.Details, nil
+	}
+
+	var wrapped struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Error.Details, nil
 }

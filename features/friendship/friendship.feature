@@ -73,6 +73,18 @@ Feature: Friendship search and requests
     Then the response status should be 200
     And the friends response should include "Luna" with status "accepted"
 
+  Scenario: Friends overview returns friends, requests, and blocked users in one response
+    Given a searchable user "Aiko" exists with id 616, account "aiko_account", public id "aiko-public", and avatar "avatars/aiko.png"
+    And I am accepted friends with user 616
+    And a searchable user "Rin" exists with id 617, account "rin_account", public id "rin-public", and avatar "avatars/rin.png"
+    And an inbound pending friend request exists from user 617
+    And a searchable user "Toma" exists with id 618, account "toma_account", public id "toma-public", and avatar "avatars/toma.png"
+    When I block user 618
+    Then the response status should be 200
+    When I request the friends overview
+    Then the response status should be 200
+    And the friends overview should include friend "Aiko", request "Rin", and blocked user "Toma"
+
   Scenario: Accept creates a direct room with owner role for both participants
     Given a searchable user "Yuki" exists with id 607, account "yuki_account", public id "yuki-public", and avatar "avatars/yuki.png"
     And an inbound pending friend request exists from user 607

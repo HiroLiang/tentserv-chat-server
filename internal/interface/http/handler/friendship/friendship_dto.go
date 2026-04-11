@@ -20,6 +20,12 @@ type FriendRequestResponse struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type FriendsOverviewResponse struct {
+	Friends  []FriendResponse        `json:"friends"`
+	Requests []FriendRequestResponse `json:"requests"`
+	Blocked  []FriendResponse        `json:"blocked"`
+}
+
 type ApplyFriendRequest struct {
 	FriendID int64 `json:"friend_id" binding:"required"`
 }

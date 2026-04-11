@@ -345,7 +345,9 @@ type bddUserRepo struct {
 	nextID      shared.UserID
 	usersByID   map[shared.UserID]*domainuser.User
 	createCalls int
+	updateCalls int
 	lastCreated *domainuser.User
+	lastUpdated *domainuser.User
 }
 
 func newBDDUserRepo() *bddUserRepo {
@@ -359,7 +361,9 @@ func (r *bddUserRepo) reset() {
 	r.nextID = 500
 	r.usersByID = map[shared.UserID]*domainuser.User{}
 	r.createCalls = 0
+	r.updateCalls = 0
 	r.lastCreated = nil
+	r.lastUpdated = nil
 }
 
 func (r *bddUserRepo) seed(accountID shared.AccountID, userID shared.UserID, name string, roles []role.Code) {
@@ -405,11 +409,31 @@ func (r *bddUserRepo) FindByID(_ context.Context, id shared.UserID) (*domainuser
 	return &copied, nil
 }
 
-func (r *bddUserRepo) FindByAccountID(context.Context, shared.AccountID) (*[]domainuser.User, error) {
-	return nil, nil
+func (r *bddUserRepo) FindByAccountID(_ context.Context, accountID shared.AccountID) (*[]domainuser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	users := make([]domainuser.User, 0, len(r.usersByID))
+	for _, u := range r.usersByID {
+		if u.AccountID != accountID {
+			continue
+		}
+		copied := *u
+		copied.RoleCodes = append([]role.Code(nil), u.RoleCodes...)
+		users = append(users, copied)
+	}
+	return &users, nil
 }
 
-func (r *bddUserRepo) Update(context.Context, *domainuser.User) error {
+func (r *bddUserRepo) Update(_ context.Context, u *domainuser.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	updated := *u
+	updated.RoleCodes = append([]role.Code(nil), u.RoleCodes...)
+	r.usersByID[updated.ID] = &updated
+	r.updateCalls++
+	r.lastUpdated = &updated
 	return nil
 }
 
@@ -699,13 +723,15 @@ func (r *bddParticipantRepo) Create(_ context.Context, p *participant.Participan
 }
 
 type bddVerificationStore struct {
-	mu              sync.Mutex
-	tokens          map[string]int64
-	storeCalls      int
-	getCalls        int
-	deleteCalls     int
-	lastStoredToken string
-	deleted         []string
+	mu                sync.Mutex
+	sessions          map[string]authPort.VerificationSession
+	accountTokens     map[int64]string
+	storeCalls        int
+	getCalls          int
+	deleteCalls       int
+	lastStoredToken   string
+	lastStoredSession authPort.VerificationSession
+	deleted           []string
 }
 
 func newBDDVerificationStore() *bddVerificationStore {
@@ -716,21 +742,28 @@ func (s *bddVerificationStore) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.tokens = map[string]int64{}
+	s.sessions = map[string]authPort.VerificationSession{}
+	s.accountTokens = map[int64]string{}
 	s.storeCalls = 0
 	s.getCalls = 0
 	s.deleteCalls = 0
 	s.lastStoredToken = ""
+	s.lastStoredSession = authPort.VerificationSession{}
 	s.deleted = nil
 }
 
-func (s *bddVerificationStore) Store(_ context.Context, token string, accountID int64, _ time.Duration) error {
+func (s *bddVerificationStore) Store(_ context.Context, token string, session authPort.VerificationSession, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if prevToken, ok := s.accountTokens[session.AccountID]; ok && prevToken != token {
+		delete(s.sessions, prevToken)
+	}
 	s.storeCalls++
-	s.tokens[token] = accountID
+	s.sessions[token] = session
+	s.accountTokens[session.AccountID] = token
 	s.lastStoredToken = token
+	s.lastStoredSession = session
 	return nil
 }
 
@@ -740,16 +773,28 @@ func (s *bddVerificationStore) Store(_ context.Context, token string, accountID 
 func (s *bddVerificationStore) expireToken(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.tokens, token)
+	session, ok := s.sessions[token]
+	if ok {
+		delete(s.accountTokens, session.AccountID)
+	}
+	delete(s.sessions, token)
 }
 
-func (s *bddVerificationStore) Get(_ context.Context, token string) (int64, bool, error) {
+func (s *bddVerificationStore) Get(_ context.Context, token string) (authPort.VerificationSession, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.getCalls++
-	id, ok := s.tokens[token]
-	return id, ok, nil
+	session, ok := s.sessions[token]
+	return session, ok, nil
+}
+
+func (s *bddVerificationStore) FindTokenByAccountID(_ context.Context, accountID int64) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	token, ok := s.accountTokens[accountID]
+	return token, ok, nil
 }
 
 func (s *bddVerificationStore) Delete(_ context.Context, token string) error {
@@ -758,7 +803,11 @@ func (s *bddVerificationStore) Delete(_ context.Context, token string) error {
 
 	s.deleteCalls++
 	s.deleted = append(s.deleted, token)
-	delete(s.tokens, token)
+	session, ok := s.sessions[token]
+	if ok {
+		delete(s.accountTokens, session.AccountID)
+	}
+	delete(s.sessions, token)
 	return nil
 }
 

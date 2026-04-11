@@ -2,10 +2,7 @@ package usecase
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -30,7 +27,9 @@ type RegisterInput struct {
 }
 
 type RegisterOutput struct {
-	ID int64
+	ID                      int64
+	VerificationToken       string
+	VerificationExpiresAtMS int64
 }
 
 type RegisterUseCase struct {
@@ -92,9 +91,11 @@ func (uc *RegisterUseCase) Execute(
 		return RegisterOutput{}, ErrInvalidEmail
 	}
 
-	if _, err := uc.accountRepo.FindByEmail(ctx, emailAddr); err == nil {
-		return RegisterOutput{}, ErrEmailExist
-	} else if !errors.Is(err, account.ErrAccountNotFound) {
+	existingApplyingAccount, err := uc.findApplyingAccountByEmail(ctx, emailAddr)
+	if err != nil {
+		if errors.Is(err, ErrVerificationPending) || errors.Is(err, ErrEmailExist) {
+			return RegisterOutput{}, err
+		}
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
@@ -103,9 +104,10 @@ func (uc *RegisterUseCase) Execute(
 		return RegisterOutput{}, ErrInvalidAccount
 	}
 
-	if _, err := uc.accountRepo.FindByAccountName(ctx, input.Data.Account); err == nil {
-		return RegisterOutput{}, ErrAccountExist
-	} else if !errors.Is(err, account.ErrAccountNotFound) {
+	if err := uc.ensureAccountNameAvailable(ctx, input.Data.Account, existingApplyingAccount); err != nil {
+		if errors.Is(err, ErrAccountExist) {
+			return RegisterOutput{}, err
+		}
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
@@ -120,50 +122,11 @@ func (uc *RegisterUseCase) Execute(
 		return RegisterOutput{}, ErrInvalidPassword
 	}
 
-	// Generate public ID
-	publicID, err := uuid.NewV4()
+	accountID, recipientName, err := uc.upsertApplyingAccount(ctx, existingApplyingAccount, emailAddr, input, hash)
 	if err != nil {
-		return RegisterOutput{}, ErrRegisterFailed
-	}
-
-	// Create Account
-	newAccount := account.NewAccount(
-		publicID,
-		emailAddr,
-		input.Data.Account,
-		hash,
-		1,
-	)
-	accountId, err := uc.accountRepo.Create(ctx, newAccount)
-	if err != nil {
-		switch {
-		case errors.Is(err, account.ErrAccountExist):
-			return RegisterOutput{}, ErrAccountExist
-		case errors.Is(err, account.ErrEmailExist):
-			return RegisterOutput{}, ErrEmailExist
-		default:
-			return RegisterOutput{}, ErrRegisterFailed
+		if errors.Is(err, ErrAccountExist) || errors.Is(err, ErrEmailExist) {
+			return RegisterOutput{}, err
 		}
-	}
-	newAccount.ID = accountId
-
-	// Create a user with the provided display name
-	newUser := user.NewUser(accountId, input.Data.Name)
-	userID, err := uc.userRepo.Create(ctx, newUser)
-	if err != nil {
-		return RegisterOutput{}, ErrRegisterFailed
-	}
-
-	// Assign default roles
-	for _, code := range newUser.RoleCodes {
-		if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
-			return RegisterOutput{}, ErrRegisterFailed
-		}
-	}
-
-	// Link user to account
-	newAccount.AddUser(userID)
-	if err := uc.accountRepo.Update(ctx, newAccount); err != nil {
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
@@ -172,30 +135,27 @@ func (uc *RegisterUseCase) Execute(
 	}
 	committed = true
 
-	// Generate verification token
-	token, err := generateVerificationToken()
-	if err != nil {
-		return RegisterOutput{}, ErrRegisterFailed
-	}
-
 	conf := config.App()
-	if err := uc.verificationStore.Store(ctx, token, int64(accountId), conf.Email.VerifyTTL); err != nil {
-		return RegisterOutput{}, ErrRegisterFailed
-	}
-
-	verifyURL, err := buildVerificationURL(conf.Email.BaseURL, token)
+	token, session, err := newVerificationSession(int64(accountID), conf.Email.VerifyTTL)
 	if err != nil {
-		_ = uc.verificationStore.Delete(ctx, token)
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
-	builder := uc.mailBuilderFactory(input.Data.Email, input.Data.Name, verifyURL)
+	if err := uc.verificationStore.Store(ctx, token, session, conf.Email.VerifyTTL); err != nil {
+		return RegisterOutput{}, ErrRegisterFailed
+	}
+
+	builder := uc.mailBuilderFactory(input.Data.Email, recipientName, session.Code)
 	if err := uc.emailService.Send(ctx, builder); err != nil {
 		_ = uc.verificationStore.Delete(ctx, token)
 		return RegisterOutput{}, ErrRegisterFailed
 	}
 
-	return RegisterOutput{int64(accountId)}, nil
+	return RegisterOutput{
+		ID:                      int64(accountID),
+		VerificationToken:       token,
+		VerificationExpiresAtMS: session.ExpiresAtMS,
+	}, nil
 }
 
 var accountNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
@@ -209,22 +169,136 @@ var commonPasswords = map[string]struct{}{
 	"shadow": {}, "batman": {}, "football": {}, "1q2w3e4r": {},
 }
 
-func generateVerificationToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+func (uc *RegisterUseCase) findApplyingAccountByEmail(ctx context.Context, email shared.EmailAddress) (*account.Account, error) {
+	acc, err := uc.accountRepo.FindByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, account.ErrAccountNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+
+	if acc.Status != account.Applying {
+		return nil, ErrEmailExist
+	}
+
+	if _, ok, err := uc.verificationStore.FindTokenByAccountID(ctx, int64(acc.ID)); err != nil {
+		return nil, err
+	} else if ok {
+		return nil, ErrVerificationPending
+	}
+
+	return acc, nil
 }
 
-func buildVerificationURL(baseURL, token string) (string, error) {
-	u, err := url.Parse(baseURL)
+func (uc *RegisterUseCase) ensureAccountNameAvailable(ctx context.Context, accountName string, existingApplyingAccount *account.Account) error {
+	acc, err := uc.accountRepo.FindByAccountName(ctx, accountName)
 	if err != nil {
-		return "", err
+		if errors.Is(err, account.ErrAccountNotFound) {
+			return nil
+		}
+		return err
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/api/auth/verify-email"
-	q := u.Query()
-	q.Set("token", token)
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+
+	if existingApplyingAccount != nil && acc.ID == existingApplyingAccount.ID {
+		return nil
+	}
+
+	return ErrAccountExist
+}
+
+func (uc *RegisterUseCase) upsertApplyingAccount(
+	ctx context.Context,
+	existingApplyingAccount *account.Account,
+	email shared.EmailAddress,
+	input appShared.UseCaseInput[RegisterInput],
+	passwordHash string,
+) (shared.AccountID, string, error) {
+	if existingApplyingAccount == nil {
+		return uc.createApplyingAccount(ctx, email, input, passwordHash)
+	}
+	return uc.updateApplyingAccount(ctx, existingApplyingAccount, email, input, passwordHash)
+}
+
+func (uc *RegisterUseCase) createApplyingAccount(
+	ctx context.Context,
+	email shared.EmailAddress,
+	input appShared.UseCaseInput[RegisterInput],
+	passwordHash string,
+) (shared.AccountID, string, error) {
+	publicID, err := uuid.NewV4()
+	if err != nil {
+		return 0, "", err
+	}
+
+	newAccount := account.NewAccount(
+		publicID,
+		email,
+		input.Data.Account,
+		passwordHash,
+		1,
+	)
+	accountID, err := uc.accountRepo.Create(ctx, newAccount)
+	if err != nil {
+		switch {
+		case errors.Is(err, account.ErrAccountExist):
+			return 0, "", ErrAccountExist
+		case errors.Is(err, account.ErrEmailExist):
+			return 0, "", ErrEmailExist
+		default:
+			return 0, "", err
+		}
+	}
+	newAccount.ID = accountID
+
+	newUser := user.NewUser(accountID, input.Data.Name)
+	userID, err := uc.userRepo.Create(ctx, newUser)
+	if err != nil {
+		return 0, "", err
+	}
+
+	for _, code := range newUser.RoleCodes {
+		if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
+			return 0, "", err
+		}
+	}
+
+	newAccount.AddUser(userID)
+	if err := uc.accountRepo.Update(ctx, newAccount); err != nil {
+		return 0, "", err
+	}
+
+	return accountID, input.Data.Name, nil
+}
+
+func (uc *RegisterUseCase) updateApplyingAccount(
+	ctx context.Context,
+	acc *account.Account,
+	email shared.EmailAddress,
+	input appShared.UseCaseInput[RegisterInput],
+	passwordHash string,
+) (shared.AccountID, string, error) {
+	acc.Email = email
+	acc.AccountName = input.Data.Account
+	acc.Password = passwordHash
+
+	if err := uc.accountRepo.Update(ctx, acc); err != nil {
+		return 0, "", err
+	}
+
+	accountUsers, err := uc.userRepo.FindByAccountID(ctx, acc.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	if accountUsers == nil || len(*accountUsers) == 0 {
+		return 0, "", user.ErrUserNotFound
+	}
+
+	primaryUser := (*accountUsers)[0]
+	primaryUser.Name = input.Data.Name
+	if err := uc.userRepo.Update(ctx, &primaryUser); err != nil {
+		return 0, "", err
+	}
+
+	return acc.ID, primaryUser.Name, nil
 }

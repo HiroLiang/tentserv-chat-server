@@ -17,6 +17,25 @@ func HandleError(ctx *gin.Context, err error) {
 		message string
 	}
 
+	if remainingAttempts, ok := usecase.VerificationAttemptsRemaining(err); ok {
+		switch {
+		case errors.Is(err, usecase.ErrVerificationAttemptsExceeded):
+			ctx.JSON(http.StatusBadRequest, response.ErrorResponse{
+				Code:    "VERIFY_ATTEMPTS_EXCEEDED",
+				Message: "verification attempts exceeded",
+				Details: map[string]any{"remaining_attempts": remainingAttempts},
+			})
+			return
+		case errors.Is(err, usecase.ErrVerificationCodeInvalid):
+			ctx.JSON(http.StatusBadRequest, response.ErrorResponse{
+				Code:    "VERIFY_CODE_INVALID",
+				Message: "verification code is incorrect",
+				Details: map[string]any{"remaining_attempts": remainingAttempts},
+			})
+			return
+		}
+	}
+
 	errMap := []struct {
 		target error
 		res    errResponse
@@ -32,6 +51,7 @@ func HandleError(ctx *gin.Context, err error) {
 		{usecase.ErrWeakPassword, errResponse{http.StatusBadRequest, "WEAK_PASSWORD", "password is too common or weak"}},
 		{usecase.ErrEmailExist, errResponse{http.StatusConflict, "EMAIL_EXIST", "email already exists"}},
 		{usecase.ErrAccountExist, errResponse{http.StatusConflict, "ACCOUNT_EXIST", "account already exists"}},
+		{usecase.ErrVerificationPending, errResponse{http.StatusConflict, "ACCOUNT_APPLYING", "verification is already pending"}},
 		{usecase.ErrAccountNotFound, errResponse{http.StatusNotFound, "ACCOUNT_NOT_FOUND", "account not found"}},
 		{usecase.ErrAccountBanned, errResponse{http.StatusForbidden, "ACCOUNT_BANNED", "account has been banned"}},
 		{usecase.ErrAccountApplying, errResponse{http.StatusForbidden, "ACCOUNT_APPLYING", "account is pending approval"}},

@@ -12,10 +12,13 @@ import (
 )
 
 type ResendVerifyEmailInput struct {
-	Email string
+	Token string
 }
 
-type ResendVerifyEmailOutput struct{}
+type ResendVerifyEmailOutput struct {
+	VerificationToken       string
+	VerificationExpiresAtMS int64
+}
 
 type ResendVerifyEmailUseCase struct {
 	verificationStore  port.VerificationStore
@@ -42,36 +45,42 @@ func (uc *ResendVerifyEmailUseCase) Execute(
 	ctx context.Context,
 	input appShared.UseCaseInput[ResendVerifyEmailInput],
 ) (ResendVerifyEmailOutput, error) {
-	acc, err := uc.accountRepo.FindByEmail(ctx, shared.EmailAddress(input.Data.Email))
+	currentSession, ok, err := uc.verificationStore.Get(ctx, input.Data.Token)
+	if err != nil || !ok {
+		return ResendVerifyEmailOutput{}, ErrTokenInvalid
+	}
+
+	acc, err := uc.accountRepo.FindByID(ctx, shared.AccountID(currentSession.AccountID))
 	if err != nil {
-		return ResendVerifyEmailOutput{}, ErrRegisterFailed
+		return ResendVerifyEmailOutput{}, ErrTokenInvalid
 	}
 
 	if acc.Status != account.Applying {
-		return ResendVerifyEmailOutput{}, ErrRegisterFailed
+		return ResendVerifyEmailOutput{}, ErrTokenInvalid
 	}
 
-	token, err := generateVerificationToken()
-	if err != nil {
+	if err := uc.verificationStore.Delete(ctx, input.Data.Token); err != nil {
 		return ResendVerifyEmailOutput{}, ErrRegisterFailed
 	}
 
 	conf := config.App()
-	if err := uc.verificationStore.Store(ctx, token, int64(acc.ID), conf.Email.VerifyTTL); err != nil {
-		return ResendVerifyEmailOutput{}, ErrRegisterFailed
-	}
-
-	verifyURL, err := buildVerificationURL(conf.Email.BaseURL, token)
+	token, session, err := newVerificationSession(int64(acc.ID), conf.Email.VerifyTTL)
 	if err != nil {
-		_ = uc.verificationStore.Delete(ctx, token)
 		return ResendVerifyEmailOutput{}, ErrRegisterFailed
 	}
 
-	builder := uc.mailBuilderFactory(input.Data.Email, acc.AccountName, verifyURL)
+	if err := uc.verificationStore.Store(ctx, token, session, conf.Email.VerifyTTL); err != nil {
+		return ResendVerifyEmailOutput{}, ErrRegisterFailed
+	}
+
+	builder := uc.mailBuilderFactory(string(acc.Email), acc.AccountName, session.Code)
 	if err := uc.emailService.Send(ctx, builder); err != nil {
 		_ = uc.verificationStore.Delete(ctx, token)
 		return ResendVerifyEmailOutput{}, ErrRegisterFailed
 	}
 
-	return ResendVerifyEmailOutput{}, nil
+	return ResendVerifyEmailOutput{
+		VerificationToken:       token,
+		VerificationExpiresAtMS: session.ExpiresAtMS,
+	}, nil
 }

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	friendshipUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/friendship/usecase"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -24,6 +26,9 @@ import (
 )
 
 type handlerFriendshipRepoStub struct {
+	findByUserID            func(ctx context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error)
+	findAllByUserID         func(ctx context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error)
+	findPendingByFriendID   func(ctx context.Context, friendID shared.UserID) ([]*domainfriendship.Friendship, error)
 	findByUserIDAndFriendID func(ctx context.Context, userID, friendID shared.UserID) (*domainfriendship.Friendship, error)
 	findByID                func(ctx context.Context, id int64) (*domainfriendship.Friendship, error)
 	create                  func(ctx context.Context, userID, friendID shared.UserID) error
@@ -32,10 +37,16 @@ type handlerFriendshipRepoStub struct {
 	delete                  func(ctx context.Context, id int64) error
 }
 
-func (s *handlerFriendshipRepoStub) FindByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+func (s *handlerFriendshipRepoStub) FindByUserID(ctx context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error) {
+	if s.findByUserID != nil {
+		return s.findByUserID(ctx, userID)
+	}
 	return nil, nil
 }
-func (s *handlerFriendshipRepoStub) FindAllByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+func (s *handlerFriendshipRepoStub) FindAllByUserID(ctx context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error) {
+	if s.findAllByUserID != nil {
+		return s.findAllByUserID(ctx, userID)
+	}
 	return nil, nil
 }
 func (s *handlerFriendshipRepoStub) FindPendingByUserID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
@@ -68,7 +79,10 @@ func (s *handlerFriendshipRepoStub) FindByUserIDAndFriendID(ctx context.Context,
 func (s *handlerFriendshipRepoStub) FindBetweenUsers(context.Context, shared.UserID, shared.UserID) ([]*domainfriendship.Friendship, error) {
 	return nil, domainfriendship.ErrFriendshipNotFound
 }
-func (s *handlerFriendshipRepoStub) FindPendingByFriendID(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+func (s *handlerFriendshipRepoStub) FindPendingByFriendID(ctx context.Context, friendID shared.UserID) ([]*domainfriendship.Friendship, error) {
+	if s.findPendingByFriendID != nil {
+		return s.findPendingByFriendID(ctx, friendID)
+	}
 	return nil, nil
 }
 func (s *handlerFriendshipRepoStub) UpdateStatus(ctx context.Context, id int64, status domainfriendship.Status) error {
@@ -333,4 +347,145 @@ func (handlerUserRepoStub) FindByAccountName(context.Context, string, int, int) 
 }
 func (handlerUserRepoStub) FindByPublicID(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
 	return nil, nil
+}
+
+type handlerOverviewUserRepoStub struct {
+	users map[shared.UserID]*user.User
+}
+
+func (s handlerOverviewUserRepoStub) Create(context.Context, *user.User) (shared.UserID, error) {
+	return 0, nil
+}
+func (s handlerOverviewUserRepoStub) FindByID(_ context.Context, id shared.UserID) (*user.User, error) {
+	u, ok := s.users[id]
+	if !ok {
+		return nil, user.ErrUserNotFound
+	}
+	cloned := *u
+	return &cloned, nil
+}
+func (s handlerOverviewUserRepoStub) FindByAccountID(context.Context, shared.AccountID) (*[]user.User, error) {
+	return nil, nil
+}
+func (s handlerOverviewUserRepoStub) Update(context.Context, *user.User) error { return nil }
+func (s handlerOverviewUserRepoStub) SearchByName(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+func (s handlerOverviewUserRepoStub) FindByAccountName(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+func (s handlerOverviewUserRepoStub) FindByPublicID(context.Context, string, int, int) ([]*user.UserSearchResult, error) {
+	return nil, nil
+}
+
+func TestFriendshipHandler_GetOverviewReturnsAggregatedLists(t *testing.T) {
+	now := time.Date(2026, 1, 1, 9, 30, 0, 0, time.UTC)
+	repo := &handlerFriendshipRepoStub{
+		findByUserID: func(_ context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error) {
+			require.Equal(t, shared.UserID(501), userID)
+			return []*domainfriendship.Friendship{
+				{ID: 1, UserID: 501, FriendID: 601, Status: domainfriendship.StatusAccepted, CreatedAt: now},
+				{ID: 3, UserID: 501, FriendID: 603, Status: domainfriendship.StatusBlocked, CreatedAt: now.Add(time.Minute)},
+			}, nil
+		},
+		findAllByUserID: func(_ context.Context, userID shared.UserID) ([]*domainfriendship.Friendship, error) {
+			require.Equal(t, shared.UserID(501), userID)
+			return []*domainfriendship.Friendship{
+				{ID: 1, UserID: 501, FriendID: 601, Status: domainfriendship.StatusAccepted, CreatedAt: now},
+				{ID: 3, UserID: 501, FriendID: 603, Status: domainfriendship.StatusBlocked, CreatedAt: now.Add(time.Minute)},
+			}, nil
+		},
+		findPendingByFriendID: func(_ context.Context, friendID shared.UserID) ([]*domainfriendship.Friendship, error) {
+			require.Equal(t, shared.UserID(501), friendID)
+			return []*domainfriendship.Friendship{
+				{ID: 2, UserID: 602, FriendID: 501, Status: domainfriendship.StatusPending, CreatedAt: now.Add(2 * time.Minute)},
+			}, nil
+		},
+		findByUserIDAndFriendID: func(_ context.Context, userID, friendID shared.UserID) (*domainfriendship.Friendship, error) {
+			if userID == 501 && friendID == 602 {
+				return nil, domainfriendship.ErrFriendshipNotFound
+			}
+			return nil, domainfriendship.ErrFriendshipNotFound
+		},
+	}
+	userRepo := handlerOverviewUserRepoStub{
+		users: map[shared.UserID]*user.User{
+			601: {ID: 601, Name: "Accepted Friend", Avatar: "accepted.png"},
+			602: {ID: 602, Name: "Pending Request", Avatar: "pending.png"},
+			603: {ID: 603, Name: "Blocked User", Avatar: "blocked.png"},
+		},
+	}
+	handler := NewFriendshipHandler(
+		friendshipUseCase.NewGetFriendsUseCase(repo, userRepo),
+		friendshipUseCase.NewGetBlockedUsersUseCase(repo, userRepo),
+		friendshipUseCase.NewApplyFriendshipUseCase(repo),
+		friendshipUseCase.NewAcceptFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
+		friendshipUseCase.NewGetFriendRequestsUseCase(repo, userRepo),
+		friendshipUseCase.NewRemoveFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
+		friendshipUseCase.NewGetSentRequestsUseCase(repo, userRepo),
+		friendshipUseCase.NewCancelSentRequestUseCase(repo),
+		friendshipUseCase.NewBlockUserUseCase(repo),
+		friendshipUseCase.NewUnblockUserUseCase(repo),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/friends/overview", nil)
+	resp := httptest.NewRecorder()
+	friendshipTestRouter(handler).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	var body FriendsOverviewResponse
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	require.Len(t, body.Friends, 1)
+	assert.Equal(t, "Accepted Friend", body.Friends[0].Name)
+	require.Len(t, body.Requests, 1)
+	assert.Equal(t, "Pending Request", body.Requests[0].Name)
+	require.Len(t, body.Blocked, 1)
+	assert.Equal(t, "Blocked User", body.Blocked[0].Name)
+	assert.Equal(t, "blocked", body.Blocked[0].Status)
+}
+
+func TestFriendshipHandler_GetOverviewPropagatesUseCaseErrors(t *testing.T) {
+	repo := &handlerFriendshipRepoStub{
+		findByUserID: func(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+			return []*domainfriendship.Friendship{}, nil
+		},
+		findAllByUserID: func(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+			return []*domainfriendship.Friendship{}, nil
+		},
+		findPendingByFriendID: func(context.Context, shared.UserID) ([]*domainfriendship.Friendship, error) {
+			return nil, errors.New("requests unavailable")
+		},
+	}
+	userRepo := handlerOverviewUserRepoStub{users: map[shared.UserID]*user.User{}}
+	handler := NewFriendshipHandler(
+		friendshipUseCase.NewGetFriendsUseCase(repo, userRepo),
+		friendshipUseCase.NewGetBlockedUsersUseCase(repo, userRepo),
+		friendshipUseCase.NewApplyFriendshipUseCase(repo),
+		friendshipUseCase.NewAcceptFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
+		friendshipUseCase.NewGetFriendRequestsUseCase(repo, userRepo),
+		friendshipUseCase.NewRemoveFriendshipUseCase(handlerUOWStub{}, repo, handlerParticipantRepoStub{}, handlerChatRoomRepoStub{}, handlerChatMemberRepoStub{}),
+		friendshipUseCase.NewGetSentRequestsUseCase(repo, userRepo),
+		friendshipUseCase.NewCancelSentRequestUseCase(repo),
+		friendshipUseCase.NewBlockUserUseCase(repo),
+		friendshipUseCase.NewUnblockUserUseCase(repo),
+	)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(middleware.AuthContextKey, &appShared.AuthContext{UserID: 501})
+		c.Next()
+		if len(c.Errors) > 0 && !c.Writer.Written() {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": c.Errors.Last().Error()})
+		}
+	})
+	router.Use(middleware.ContextMiddleware())
+	handler.RegisterFriendshipRoutes(router.Group(""))
+
+	req := httptest.NewRequest(http.MethodGet, "/friends/overview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusInternalServerError, resp.Code)
+	assert.Contains(t, resp.Body.String(), "requests unavailable")
 }

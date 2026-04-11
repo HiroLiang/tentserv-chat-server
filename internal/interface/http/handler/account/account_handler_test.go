@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	authPort "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	authUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/auth/usecase"
 	appEmail "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/email"
 	"github.com/HiroLiang/tentserv-chat-server/internal/config"
@@ -278,12 +279,16 @@ func (accountHandlerParticipantRepoStub) Create(_ context.Context, p *participan
 
 type accountHandlerVerificationStoreStub struct{}
 
-func (accountHandlerVerificationStoreStub) Store(context.Context, string, int64, time.Duration) error {
+func (accountHandlerVerificationStoreStub) Store(context.Context, string, authPort.VerificationSession, time.Duration) error {
 	return nil
 }
 
-func (accountHandlerVerificationStoreStub) Get(context.Context, string) (int64, bool, error) {
-	return 0, false, nil
+func (accountHandlerVerificationStoreStub) Get(context.Context, string) (authPort.VerificationSession, bool, error) {
+	return authPort.VerificationSession{}, false, nil
+}
+
+func (accountHandlerVerificationStoreStub) FindTokenByAccountID(context.Context, int64) (string, bool, error) {
+	return "", false, nil
 }
 
 func (accountHandlerVerificationStoreStub) Delete(context.Context, string) error {
@@ -303,28 +308,43 @@ func (accountHandlerEmailBuilderStub) BuildEmail(context.Context) (*shared.Email
 }
 
 type accountHandlerVerifyEmailStoreStub struct {
-	tokens      map[string]int64
-	getCalls    int
-	deleteCalls int
+	sessions      map[string]authPort.VerificationSession
+	accountTokens map[int64]string
+	getCalls      int
+	deleteCalls   int
 }
 
 func newAccountHandlerVerifyEmailStoreStub() *accountHandlerVerifyEmailStoreStub {
-	return &accountHandlerVerifyEmailStoreStub{tokens: map[string]int64{}}
+	return &accountHandlerVerifyEmailStoreStub{
+		sessions:      map[string]authPort.VerificationSession{},
+		accountTokens: map[int64]string{},
+	}
 }
 
-func (s *accountHandlerVerifyEmailStoreStub) Store(context.Context, string, int64, time.Duration) error {
+func (s *accountHandlerVerifyEmailStoreStub) Store(_ context.Context, token string, session authPort.VerificationSession, _ time.Duration) error {
+	s.sessions[token] = session
+	s.accountTokens[session.AccountID] = token
 	return nil
 }
 
-func (s *accountHandlerVerifyEmailStoreStub) Get(_ context.Context, token string) (int64, bool, error) {
+func (s *accountHandlerVerifyEmailStoreStub) Get(_ context.Context, token string) (authPort.VerificationSession, bool, error) {
 	s.getCalls++
-	id, ok := s.tokens[token]
-	return id, ok, nil
+	session, ok := s.sessions[token]
+	return session, ok, nil
+}
+
+func (s *accountHandlerVerifyEmailStoreStub) FindTokenByAccountID(_ context.Context, accountID int64) (string, bool, error) {
+	token, ok := s.accountTokens[accountID]
+	return token, ok, nil
 }
 
 func (s *accountHandlerVerifyEmailStoreStub) Delete(_ context.Context, token string) error {
 	s.deleteCalls++
-	delete(s.tokens, token)
+	session, ok := s.sessions[token]
+	if ok {
+		delete(s.accountTokens, session.AccountID)
+	}
+	delete(s.sessions, token)
 	return nil
 }
 
@@ -474,8 +494,9 @@ func performAccountLoginRequest(router *gin.Engine, body string) *httptest.Respo
 	return resp
 }
 
-func performAccountVerifyEmailRequest(router *gin.Engine, target string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+func performAccountVerifyEmailRequest(router *gin.Engine, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify-email", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	return resp
@@ -508,8 +529,15 @@ func TestAuthHandler_RegisterSuccessHasStructuredLog(t *testing.T) {
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if resp.Body.String() != "{}" {
-		t.Fatalf("expected empty JSON object, got %s", resp.Body.String())
+	var out RegisterResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode register response: %v body=%s", err, resp.Body.String())
+	}
+	if out.VerificationToken == "" {
+		t.Fatalf("expected verification token, got %+v", out)
+	}
+	if out.VerificationExpiresAtMS <= time.Now().UnixMilli() {
+		t.Fatalf("expected future verification expiry, got %+v", out)
 	}
 }
 
@@ -749,7 +777,13 @@ func TestAuthHandler_LoginInvalidPayloadHasStructuredLog(t *testing.T) {
 func TestAuthHandler_VerifyEmailSuccessHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAccountHandlerVerifyEmailStoreStub()
-	store.tokens["redacted-token"] = 101
+	store.sessions["redacted-token"] = authPort.VerificationSession{
+		AccountID:         101,
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(3 * time.Minute).UnixMilli(),
+		RemainingAttempts: 3,
+	}
+	store.accountTokens[101] = "redacted-token"
 	accountRepo := newAccountHandlerVerifyEmailAccountRepoStub()
 	accountRepo.accountsByID[101] = &domainaccount.Account{
 		ID:          101,
@@ -759,39 +793,27 @@ func TestAuthHandler_VerifyEmailSuccessHasStructuredLog(t *testing.T) {
 	}
 	router := newAccountHandlerVerifyEmailRouter(store, accountRepo)
 
-	t.Log("Given: verification token maps to an applying account")
-	t.Log("Input: token_present=true")
-	t.Log("Action: GET /api/auth/verify-email")
+	t.Log("Given: verification token and 6-digit code map to an applying account")
+	t.Log("Input: token_present=true code_present=true")
+	t.Log("Action: POST /api/auth/verify-email")
 
-	resp := performAccountVerifyEmailRequest(router, "/api/auth/verify-email?token=redacted-token")
+	resp := performAccountVerifyEmailRequest(router, `{"token":"redacted-token","code":"123456"}`)
 	body := resp.Body.String()
-	contentType := resp.Header().Get("Content-Type")
 	updatedStatus := domainaccount.Status("<nil>")
 	if accountRepo.lastUpdated != nil {
 		updatedStatus = accountRepo.lastUpdated.Status
 	}
 
-	t.Logf("Output: status=%d content_type=%q body_len=%d", resp.Code, contentType, len(body))
+	t.Logf("Output: status=%d body=%s", resp.Code, body)
 	t.Logf("Mutation: get_calls=%d delete_calls=%d update_calls=%d token_removed=%t account_status=%s",
-		store.getCalls, store.deleteCalls, accountRepo.updateCalls, len(store.tokens) == 0, updatedStatus)
+		store.getCalls, store.deleteCalls, accountRepo.updateCalls, len(store.sessions) == 0, updatedStatus)
 	t.Logf("Duration: %s", time.Since(start))
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", resp.Code, body)
 	}
-	if !strings.Contains(contentType, "text/html") {
-		t.Fatalf("expected HTML content type, got %q", contentType)
-	}
-	for _, want := range []string{
-		"tentserv-chat://email-verified",
-		"--background: 38 16.7% 90.6%;",
-		"--card: 120 3.8% 64.1%;",
-		"--primary: 174 12.5% 15.7%;",
-		"--radius: 8px;",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected verify email HTML to contain %q", want)
-		}
+	if body != "{}" {
+		t.Fatalf("expected empty JSON body, got %s", body)
 	}
 	if store.deleteCalls != 1 || accountRepo.updateCalls != 1 || accountRepo.lastUpdated == nil || accountRepo.lastUpdated.Status != domainaccount.Active {
 		t.Fatalf("expected delete=1 update=1 active account, got delete=%d update=%d account=%+v",
@@ -805,11 +827,11 @@ func TestAuthHandler_VerifyEmailMissingTokenHasStructuredLog(t *testing.T) {
 	accountRepo := newAccountHandlerVerifyEmailAccountRepoStub()
 	router := newAccountHandlerVerifyEmailRouter(store, accountRepo)
 
-	t.Log("Given: verify email request has an empty token")
-	t.Log("Input: token_present=false")
-	t.Log("Action: GET /api/auth/verify-email")
+	t.Log("Given: verify email request has an invalid payload")
+	t.Log("Input: token_present=false code_present=false")
+	t.Log("Action: POST /api/auth/verify-email")
 
-	resp := performAccountVerifyEmailRequest(router, "/api/auth/verify-email?token=")
+	resp := performAccountVerifyEmailRequest(router, `{}`)
 	errResp := decodeAccountHandlerError(t, resp.Body)
 
 	t.Logf("Output: status=%d code=%s message=%q", resp.Code, errResp.Code, errResp.Message)
@@ -819,8 +841,8 @@ func TestAuthHandler_VerifyEmailMissingTokenHasStructuredLog(t *testing.T) {
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if errResp.Code != "TOKEN_INVALID" {
-		t.Fatalf("expected TOKEN_INVALID, got %+v", errResp)
+	if errResp.Code != "INVALID_REQUEST" {
+		t.Fatalf("expected INVALID_REQUEST, got %+v", errResp)
 	}
 	if store.getCalls != 0 || store.deleteCalls != 0 || accountRepo.updateCalls != 0 {
 		t.Fatalf("expected missing token to stop before usecase, got get=%d delete=%d update=%d",
@@ -835,10 +857,10 @@ func TestAuthHandler_VerifyEmailInvalidTokenHasStructuredLog(t *testing.T) {
 	router := newAccountHandlerVerifyEmailRouter(store, accountRepo)
 
 	t.Log("Given: verify email token is not present in the store")
-	t.Log("Input: token_present=true")
-	t.Log("Action: GET /api/auth/verify-email")
+	t.Log("Input: token_present=true code_present=true")
+	t.Log("Action: POST /api/auth/verify-email")
 
-	resp := performAccountVerifyEmailRequest(router, "/api/auth/verify-email?token=missing-token")
+	resp := performAccountVerifyEmailRequest(router, `{"token":"missing-token","code":"123456"}`)
 	errResp := decodeAccountHandlerError(t, resp.Body)
 
 	t.Logf("Output: status=%d code=%s message=%q", resp.Code, errResp.Code, errResp.Message)

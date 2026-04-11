@@ -53,6 +53,12 @@ type requestResponse struct {
 	Avatar       string `json:"avatar"`
 }
 
+type friendsOverviewResponse struct {
+	Friends  []friendResponse  `json:"friends"`
+	Requests []requestResponse `json:"requests"`
+	Blocked  []friendResponse  `json:"blocked"`
+}
+
 type removedDirectRoomResponse struct {
 	RoomID    int64   `json:"room_id"`
 	MemberIDs []int64 `json:"member_ids"`
@@ -82,7 +88,9 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I apply to the logged in user$`, s.iApplyToTheLoggedInUser)
 	ctx.Step(`^friendship rows should contain "([^"]*)" from the logged in user to user (\d+)$`, s.friendshipRowsShouldContainFromTheLoggedInUserToUser)
 	ctx.Step(`^I request my friends$`, s.iRequestMyFriends)
+	ctx.Step(`^I request the friends overview$`, s.iRequestTheFriendsOverview)
 	ctx.Step(`^the friends response should include "([^"]*)" with status "([^"]*)"$`, s.theFriendsResponseShouldIncludeWithStatus)
+	ctx.Step(`^the friends overview should include friend "([^"]*)", request "([^"]*)", and blocked user "([^"]*)"$`, s.theFriendsOverviewShouldIncludeFriendRequestAndBlockedUser)
 	ctx.Step(`^the friends response should include user (\d+) with status "([^"]*)" and blocked by "([^"]*)"$`, s.theFriendsResponseShouldIncludeUserWithStatusAndBlockedBy)
 	ctx.Step(`^the friends response should not include user (\d+)$`, s.theFriendsResponseShouldNotIncludeUser)
 	ctx.Step(`^I request sent friend requests$`, s.iRequestSentFriendRequests)
@@ -421,6 +429,26 @@ func (s *steps) iRequestMyFriends() error {
 	return nil
 }
 
+func (s *steps) iRequestTheFriendsOverview() error {
+	s.start = time.Now()
+	authHeader, err := s.authorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the logged in user requests the combined friends overview")
+	fmt.Printf("Input: auth_header_present=%t\n", authHeader != "")
+	fmt.Println("Action: GET /api/user/friends/overview")
+
+	if err := s.DoRequestWithHeaders(http.MethodGet, "/api/user/friends/overview", s.authHeaders(authHeader)); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
 func (s *steps) theFriendsResponseShouldIncludeWithStatus(name, status string) error {
 	start := time.Now()
 	fmt.Println("Given: friends tab data should include a named friendship row")
@@ -440,6 +468,51 @@ func (s *steps) theFriendsResponseShouldIncludeWithStatus(name, status string) e
 		}
 	}
 	return fmt.Errorf("expected friends response to include %s with status %s; body=%s", name, status, string(s.ResponseBody))
+}
+
+func (s *steps) theFriendsOverviewShouldIncludeFriendRequestAndBlockedUser(friendName, requestName, blockedName string) error {
+	start := time.Now()
+	fmt.Println("Given: friends overview should include friends, requests, and blocked lists together")
+	fmt.Printf("Input: friend=%s request=%s blocked=%s\n", friendName, requestName, blockedName)
+	fmt.Println("Action: decode friends overview response")
+
+	body, err := decodeFriendsOverviewResponse(s.ResponseBody)
+	if err != nil {
+		return err
+	}
+
+	hasFriend := false
+	for _, item := range body.Friends {
+		if item.Name == friendName {
+			hasFriend = true
+			break
+		}
+	}
+
+	hasRequest := false
+	for _, item := range body.Requests {
+		if item.Name == requestName {
+			hasRequest = true
+			break
+		}
+	}
+
+	hasBlocked := false
+	for _, item := range body.Blocked {
+		if item.Name == blockedName {
+			hasBlocked = true
+			break
+		}
+	}
+
+	fmt.Printf("Output: has_friend=%t has_request=%t has_blocked=%t\n", hasFriend, hasRequest, hasBlocked)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !hasFriend || !hasRequest || !hasBlocked {
+		return fmt.Errorf("expected overview to include friend=%s request=%s blocked=%s; body=%s", friendName, requestName, blockedName, string(s.ResponseBody))
+	}
+	return nil
 }
 
 func (s *steps) theFriendsResponseShouldIncludeUserWithStatusAndBlockedBy(userID int64, status, blockedBy string) error {
@@ -1003,6 +1076,14 @@ func decodeRequestResponse(body []byte) ([]requestResponse, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+func decodeFriendsOverviewResponse(body []byte) (*friendsOverviewResponse, error) {
+	var items friendsOverviewResponse
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, err
+	}
+	return &items, nil
 }
 
 func (s *steps) aDirectChatRoomShouldExistBetweenLoggedInUserAndUser(userID int64) error {

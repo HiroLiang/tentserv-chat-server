@@ -237,10 +237,15 @@ func (s *authAccountRepoStub) ReplaceDevices(context.Context, shared.AccountID, 
 }
 
 type authUserRepoStub struct {
-	nextID      shared.UserID
-	createErr   error
-	createCalls int
-	lastCreated *user.User
+	nextID           shared.UserID
+	createErr        error
+	updateErr        error
+	findByAccountErr error
+	createCalls      int
+	updateCalls      int
+	lastCreated      *user.User
+	lastUpdated      *user.User
+	usersByAccountID map[shared.AccountID][]user.User
 }
 
 func (s *authUserRepoStub) Create(_ context.Context, u *user.User) (shared.UserID, error) {
@@ -254,6 +259,10 @@ func (s *authUserRepoStub) Create(_ context.Context, u *user.User) (shared.UserI
 	created := *u
 	created.ID = s.nextID
 	s.lastCreated = &created
+	if s.usersByAccountID == nil {
+		s.usersByAccountID = map[shared.AccountID][]user.User{}
+	}
+	s.usersByAccountID[created.AccountID] = append(s.usersByAccountID[created.AccountID], created)
 	return s.nextID, nil
 }
 
@@ -261,11 +270,33 @@ func (s *authUserRepoStub) FindByID(context.Context, shared.UserID) (*user.User,
 	return nil, user.ErrUserNotFound
 }
 
-func (s *authUserRepoStub) FindByAccountID(context.Context, shared.AccountID) (*[]user.User, error) {
-	return nil, nil
+func (s *authUserRepoStub) FindByAccountID(_ context.Context, accountID shared.AccountID) (*[]user.User, error) {
+	if s.findByAccountErr != nil {
+		return nil, s.findByAccountErr
+	}
+	users := append([]user.User(nil), s.usersByAccountID[accountID]...)
+	return &users, nil
 }
 
-func (s *authUserRepoStub) Update(context.Context, *user.User) error {
+func (s *authUserRepoStub) Update(_ context.Context, updatedUser *user.User) error {
+	s.updateCalls++
+	if s.updateErr != nil {
+		return s.updateErr
+	}
+	copied := *updatedUser
+	s.lastUpdated = &copied
+	if s.usersByAccountID == nil {
+		s.usersByAccountID = map[shared.AccountID][]user.User{}
+	}
+	users := s.usersByAccountID[updatedUser.AccountID]
+	for i := range users {
+		if users[i].ID == updatedUser.ID {
+			users[i] = copied
+			s.usersByAccountID[updatedUser.AccountID] = users
+			return nil
+		}
+	}
+	s.usersByAccountID[updatedUser.AccountID] = append(users, copied)
 	return nil
 }
 
@@ -306,25 +337,30 @@ func (s *authUserRoleRepoStub) Revoke(context.Context, shared.UserID, role.Code)
 }
 
 type authVerificationStoreStub struct {
-	mu          sync.Mutex
-	tokens      map[string]int64
-	storeErr    error
-	getErr      error
-	deleteErr   error
-	storeCalls  int
-	getCalls    int
-	deleteCalls int
-	storedToken string
-	storedID    int64
-	storedTTL   time.Duration
-	deleted     []string
+	mu            sync.Mutex
+	sessions      map[string]port.VerificationSession
+	accountTokens map[int64]string
+	storeErr      error
+	getErr        error
+	deleteErr     error
+	storeCalls    int
+	getCalls      int
+	deleteCalls   int
+	storedToken   string
+	storedID      int64
+	storedTTL     time.Duration
+	storedSession port.VerificationSession
+	deleted       []string
 }
 
 func newAuthVerificationStoreStub() *authVerificationStoreStub {
-	return &authVerificationStoreStub{tokens: map[string]int64{}}
+	return &authVerificationStoreStub{
+		sessions:      map[string]port.VerificationSession{},
+		accountTokens: map[int64]string{},
+	}
 }
 
-func (s *authVerificationStoreStub) Store(_ context.Context, token string, accountID int64, ttl time.Duration) error {
+func (s *authVerificationStoreStub) Store(_ context.Context, token string, session port.VerificationSession, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.storeCalls++
@@ -332,21 +368,30 @@ func (s *authVerificationStoreStub) Store(_ context.Context, token string, accou
 		return s.storeErr
 	}
 	s.storedToken = token
-	s.storedID = accountID
+	s.storedID = session.AccountID
 	s.storedTTL = ttl
-	s.tokens[token] = accountID
+	s.storedSession = session
+	s.sessions[token] = session
+	s.accountTokens[session.AccountID] = token
 	return nil
 }
 
-func (s *authVerificationStoreStub) Get(_ context.Context, token string) (int64, bool, error) {
+func (s *authVerificationStoreStub) Get(_ context.Context, token string) (port.VerificationSession, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.getCalls++
 	if s.getErr != nil {
-		return 0, false, s.getErr
+		return port.VerificationSession{}, false, s.getErr
 	}
-	id, ok := s.tokens[token]
-	return id, ok, nil
+	session, ok := s.sessions[token]
+	return session, ok, nil
+}
+
+func (s *authVerificationStoreStub) FindTokenByAccountID(_ context.Context, accountID int64) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, ok := s.accountTokens[accountID]
+	return token, ok, nil
 }
 
 func (s *authVerificationStoreStub) Delete(_ context.Context, token string) error {
@@ -357,7 +402,11 @@ func (s *authVerificationStoreStub) Delete(_ context.Context, token string) erro
 		return s.deleteErr
 	}
 	s.deleted = append(s.deleted, token)
-	delete(s.tokens, token)
+	session, ok := s.sessions[token]
+	if ok {
+		delete(s.accountTokens, session.AccountID)
+	}
+	delete(s.sessions, token)
 	return nil
 }
 
@@ -380,17 +429,17 @@ func (authEmailBuilderStub) BuildEmail(context.Context) (*shared.Email, error) {
 }
 
 type registerMailFactoryCapture struct {
-	calls          int
-	recipientEmail string
-	recipientName  string
-	verifyURL      string
+	calls            int
+	recipientEmail   string
+	recipientName    string
+	verificationCode string
 }
 
-func (c *registerMailFactoryCapture) factory(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder {
+func (c *registerMailFactoryCapture) factory(recipientEmail, recipientName, verificationCode string) appEmail.EmailBuilder {
 	c.calls++
 	c.recipientEmail = recipientEmail
 	c.recipientName = recipientName
-	c.verifyURL = verifyURL
+	c.verificationCode = verificationCode
 	return authEmailBuilderStub{}
 }
 
@@ -469,7 +518,7 @@ func TestRegisterUseCase_SuccessHasStructuredLog(t *testing.T) {
 		t.Fatalf("Output: unexpected error=%v; Duration=%s", err, time.Since(start))
 	}
 
-	t.Logf("Output: account_id=%d verification_token_present=%t verify_url_has_token=%t", out.ID, store.storedToken != "", strings.Contains(mailFactory.verifyURL, "token="))
+	t.Logf("Output: account_id=%d verification_token_present=%t verification_code_present=%t", out.ID, store.storedToken != "", mailFactory.verificationCode != "")
 	t.Logf("Mutation: find_email_calls=%d find_account_calls=%d hash_calls=%d account_create_calls=%d user_create_calls=%d role_assign_calls=%d account_update_calls=%d store_calls=%d email_send_calls=%d commit_calls=%d rollback_calls=%d",
 		accountRepo.findByEmailCalls, accountRepo.findByAccountCalls, hasher.hashCalls, accountRepo.createCalls, userRepo.createCalls,
 		roleRepo.assignCalls, accountRepo.updateCalls, store.storeCalls, emailService.sendCalls, uow.tx.commitCalls, uow.tx.rollbackCalls)
@@ -496,8 +545,8 @@ func TestRegisterUseCase_SuccessHasStructuredLog(t *testing.T) {
 	if mailFactory.recipientEmail != input.Data.Email || mailFactory.recipientName != input.Data.Name {
 		t.Fatalf("expected register mail factory to use email/display name, got email=%s name=%s", mailFactory.recipientEmail, mailFactory.recipientName)
 	}
-	if !strings.HasPrefix(mailFactory.verifyURL, config.App().Email.BaseURL+"/api/auth/verify-email?token=") {
-		t.Fatalf("expected verify URL to use configured base URL and token query, got %s", mailFactory.verifyURL)
+	if len(mailFactory.verificationCode) != 6 {
+		t.Fatalf("expected verification code to be 6 digits, got %q", mailFactory.verificationCode)
 	}
 	if uow.tx.commitCalls != 1 || uow.tx.rollbackCalls != 0 {
 		t.Fatalf("expected commit=1 rollback=0, got commit=%d rollback=%d", uow.tx.commitCalls, uow.tx.rollbackCalls)
@@ -784,13 +833,13 @@ func TestRegisterUseCase_EmailSendFailureCleansTokenHasStructuredLog(t *testing.
 
 	t.Logf("Output: out=%+v err=%v", out, err)
 	t.Logf("Mutation: store_calls=%d delete_calls=%d email_send_calls=%d commit_calls=%d rollback_calls=%d token_cleaned=%t",
-		store.storeCalls, store.deleteCalls, emailService.sendCalls, uow.tx.commitCalls, uow.tx.rollbackCalls, len(store.tokens) == 0)
+		store.storeCalls, store.deleteCalls, emailService.sendCalls, uow.tx.commitCalls, uow.tx.rollbackCalls, len(store.sessions) == 0)
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertRegisterError(t, err, ErrRegisterFailed)
-	if uow.tx.commitCalls != 1 || store.storeCalls != 1 || store.deleteCalls != 1 || emailService.sendCalls != 1 || len(store.tokens) != 0 {
+	if uow.tx.commitCalls != 1 || store.storeCalls != 1 || store.deleteCalls != 1 || emailService.sendCalls != 1 || len(store.sessions) != 0 {
 		t.Fatalf("expected committed DB and token cleanup on email failure, got commit=%d store=%d delete=%d email=%d remaining_tokens=%d",
-			uow.tx.commitCalls, store.storeCalls, store.deleteCalls, emailService.sendCalls, len(store.tokens))
+			uow.tx.commitCalls, store.storeCalls, store.deleteCalls, emailService.sendCalls, len(store.sessions))
 	}
 }
 

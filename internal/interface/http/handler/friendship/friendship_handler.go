@@ -3,6 +3,7 @@ package friendship
 import (
 	"net/http"
 	"strconv"
+	"sync"
 
 	friendshipUseCase "github.com/HiroLiang/tentserv-chat-server/internal/application/friendship/usecase"
 	"github.com/HiroLiang/tentserv-chat-server/internal/interface/http/adapter"
@@ -66,19 +67,7 @@ func (h *FriendshipHandler) getBlockedUsers(c *gin.Context) {
 		return
 	}
 
-	resp := make([]FriendResponse, 0, len(out.Blocked))
-	for _, f := range out.Blocked {
-		resp = append(resp, FriendResponse{
-			FriendshipID: f.FriendshipID,
-			UserID:       f.UserID,
-			Name:         f.Name,
-			Avatar:       f.Avatar,
-			Status:       f.Status,
-			BlockedBy:    f.BlockedBy,
-			CreatedAt:    f.CreatedAt,
-		})
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, mapFriendItems(out.Blocked))
 }
 
 // @Summary Get friends list
@@ -98,19 +87,78 @@ func (h *FriendshipHandler) getFriends(c *gin.Context) {
 		return
 	}
 
-	resp := make([]FriendResponse, 0, len(out.Friends))
-	for _, f := range out.Friends {
-		resp = append(resp, FriendResponse{
-			FriendshipID: f.FriendshipID,
-			UserID:       f.UserID,
-			Name:         f.Name,
-			Avatar:       f.Avatar,
-			Status:       f.Status,
-			BlockedBy:    f.BlockedBy,
-			CreatedAt:    f.CreatedAt,
-		})
+	c.JSON(http.StatusOK, mapFriendItems(out.Friends))
+}
+
+// @Summary Get friendship overview
+// @Description Get friends, requests, and blocked users in one response.
+// @Tags User
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} FriendsOverviewResponse
+// @Failure 401 {object} response.ErrorResponse "Unauthorized"
+// @Failure 500 {object} response.ErrorResponse "Internal Server Error"
+// @Router /api/user/friends/overview [get]
+func (h *FriendshipHandler) getOverview(c *gin.Context) {
+	input := adapter.BuildEmptyInput(c)
+
+	var (
+		friendsOut  *friendshipUseCase.GetFriendsOutput
+		requestsOut *friendshipUseCase.GetFriendRequestsOutput
+		blockedOut  *friendshipUseCase.GetBlockedUsersOutput
+		firstErr    error
+		errMu       sync.Mutex
+		wg          sync.WaitGroup
+	)
+
+	run := func(fn func() error) {
+		defer wg.Done()
+		if err := fn(); err != nil {
+			errMu.Lock()
+			if firstErr == nil {
+				firstErr = err
+			}
+			errMu.Unlock()
+		}
 	}
-	c.JSON(http.StatusOK, resp)
+
+	wg.Add(3)
+	go run(func() error {
+		out, err := h.getFriendsUseCase.Execute(c.Request.Context(), input)
+		if err != nil {
+			return err
+		}
+		friendsOut = out
+		return nil
+	})
+	go run(func() error {
+		out, err := h.getFriendRequestsUseCase.Execute(c.Request.Context(), input)
+		if err != nil {
+			return err
+		}
+		requestsOut = out
+		return nil
+	})
+	go run(func() error {
+		out, err := h.getBlockedUsersUseCase.Execute(c.Request.Context(), input)
+		if err != nil {
+			return err
+		}
+		blockedOut = out
+		return nil
+	})
+	wg.Wait()
+
+	if firstErr != nil {
+		HandleFriendshipError(c, firstErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, FriendsOverviewResponse{
+		Friends:  mapFriendItems(friendsOut.Friends),
+		Requests: mapFriendRequestItems(requestsOut.Requests),
+		Blocked:  mapFriendItems(blockedOut.Blocked),
+	})
 }
 
 // @Summary Apply for friendship
@@ -185,17 +233,7 @@ func (h *FriendshipHandler) getFriendRequests(c *gin.Context) {
 		return
 	}
 
-	resp := make([]FriendRequestResponse, 0, len(out.Requests))
-	for _, r := range out.Requests {
-		resp = append(resp, FriendRequestResponse{
-			FriendshipID: r.FriendshipID,
-			UserID:       r.UserID,
-			Name:         r.Name,
-			Avatar:       r.Avatar,
-			CreatedAt:    r.CreatedAt,
-		})
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, mapFriendRequestItems(out.Requests))
 }
 
 // @Summary Remove a friendship or cancel/reject a friend request
@@ -252,17 +290,7 @@ func (h *FriendshipHandler) getSentRequests(c *gin.Context) {
 		return
 	}
 
-	resp := make([]FriendRequestResponse, 0, len(out.Requests))
-	for _, r := range out.Requests {
-		resp = append(resp, FriendRequestResponse{
-			FriendshipID: r.FriendshipID,
-			UserID:       r.UserID,
-			Name:         r.Name,
-			Avatar:       r.Avatar,
-			CreatedAt:    r.CreatedAt,
-		})
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, mapSentRequestItems(out.Requests))
 }
 
 // @Summary Cancel a sent friend request
@@ -350,6 +378,7 @@ func (h *FriendshipHandler) unblockUser(c *gin.Context) {
 
 func (h *FriendshipHandler) RegisterFriendshipRoutes(r *gin.RouterGroup) {
 	r.GET("/friends", h.getFriends)
+	r.GET("/friends/overview", h.getOverview)
 	r.POST("/friends/apply", h.applyFriend)
 	r.POST("/friends/:id/accept", h.acceptFriend)
 	r.GET("/friends/requests", h.getFriendRequests)
@@ -359,4 +388,48 @@ func (h *FriendshipHandler) RegisterFriendshipRoutes(r *gin.RouterGroup) {
 	r.GET("/block", h.getBlockedUsers)
 	r.POST("/block/:id", h.blockUser)
 	r.DELETE("/block/:id", h.unblockUser)
+}
+
+func mapFriendItems(items []friendshipUseCase.FriendItem) []FriendResponse {
+	resp := make([]FriendResponse, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, FriendResponse{
+			FriendshipID: item.FriendshipID,
+			UserID:       item.UserID,
+			Name:         item.Name,
+			Avatar:       item.Avatar,
+			Status:       item.Status,
+			BlockedBy:    item.BlockedBy,
+			CreatedAt:    item.CreatedAt,
+		})
+	}
+	return resp
+}
+
+func mapFriendRequestItems(items []friendshipUseCase.FriendRequestItem) []FriendRequestResponse {
+	resp := make([]FriendRequestResponse, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, FriendRequestResponse{
+			FriendshipID: item.FriendshipID,
+			UserID:       item.UserID,
+			Name:         item.Name,
+			Avatar:       item.Avatar,
+			CreatedAt:    item.CreatedAt,
+		})
+	}
+	return resp
+}
+
+func mapSentRequestItems(items []friendshipUseCase.SentRequestItem) []FriendRequestResponse {
+	resp := make([]FriendRequestResponse, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, FriendRequestResponse{
+			FriendshipID: item.FriendshipID,
+			UserID:       item.UserID,
+			Name:         item.Name,
+			Avatar:       item.Avatar,
+			CreatedAt:    item.CreatedAt,
+		})
+	}
+	return resp
 }

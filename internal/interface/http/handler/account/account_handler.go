@@ -51,7 +51,7 @@ func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
 	r.POST("/login", h.login)
 	r.POST("/logout", middleware.RequireAuthMiddleware(), h.logout)
 	r.GET("/profile", middleware.RequireAuthMiddleware(), h.getProfile)
-	r.GET("/verify-email", h.verifyEmail)
+	r.POST("/verify-email", h.verifyEmail)
 	r.POST("/resend-verify-email", h.resendVerifyEmail)
 }
 
@@ -86,13 +86,16 @@ func (h *AuthHandler) register(c *gin.Context) {
 		Password: req.Password,
 	})
 
-	_, err := h.registerUsecase.Execute(c.Request.Context(), input)
+	out, err := h.registerUsecase.Execute(c.Request.Context(), input)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, RegisterResponse{})
+	c.JSON(http.StatusCreated, RegisterResponse{
+		VerificationToken:       out.VerificationToken,
+		VerificationExpiresAtMS: out.VerificationExpiresAtMS,
+	})
 }
 
 // @Summary Account Login
@@ -195,36 +198,43 @@ func (h *AuthHandler) getProfile(c *gin.Context) {
 }
 
 // @Summary Verify email address
-// @Description Verify account email using the token sent during registration. Returns an HTML page on success.
+// @Description Verify account email using the token and 6-digit code sent during registration.
 // @Tags Auth
-// @Produce html
-// @Param token query string true "Verification token"
-// @Success 200 {string} string "Verified HTML page"
+// @Accept json
+// @Produce json
+// @Param payload body VerifyEmailRequest true "Verification payload"
+// @Success 200 {object} VerifyEmailResponse
 // @Failure 400 {object} response.ErrorResponse "Bad Request"
-// @Router /api/auth/verify-email [get]
+// @Router /api/auth/verify-email [post]
 func (h *AuthHandler) verifyEmail(c *gin.Context) {
-	token := c.Query("token")
-	if token == "" {
-		HandleError(c, authUseCase.ErrTokenInvalid)
+	var req VerifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid verify email payload",
+		})
 		return
 	}
 
-	input := adapter.BuildInput(c, authUseCase.VerifyEmailInput{Token: token})
+	input := adapter.BuildInput(c, authUseCase.VerifyEmailInput{
+		Token: req.Token,
+		Code:  req.Code,
+	})
 	_, err := h.verifyEmailUsecase.Execute(c.Request.Context(), input)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
 
-	c.Data(http.StatusOK, "text/html; charset=utf-8", authUseCase.EmailVerifiedHTML)
+	c.JSON(http.StatusOK, VerifyEmailResponse{})
 }
 
 // @Summary Resend verification email
-// @Description Resend the verification email to an applying account. Generates a new token each call.
+// @Description Resend the verification code for an existing verification session. Generates a new token each call.
 // @Tags Auth
 // @Accept json
 // @Produce json
-// @Param payload body ResendVerifyEmailRequest true "Email payload"
+// @Param payload body ResendVerifyEmailRequest true "Token payload"
 // @Success 200 {object} ResendVerifyEmailResponse
 // @Failure 400 {object} response.ErrorResponse "Bad Request"
 // @Failure 500 {object} response.ErrorResponse "Internal Server Error"
@@ -239,12 +249,15 @@ func (h *AuthHandler) resendVerifyEmail(c *gin.Context) {
 		return
 	}
 
-	input := adapter.BuildInput(c, authUseCase.ResendVerifyEmailInput{Email: req.Email})
-	_, err := h.resendVerifyEmailUsecase.Execute(c.Request.Context(), input)
+	input := adapter.BuildInput(c, authUseCase.ResendVerifyEmailInput{Token: req.Token})
+	out, err := h.resendVerifyEmailUsecase.Execute(c.Request.Context(), input)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, ResendVerifyEmailResponse{})
+	c.JSON(http.StatusOK, ResendVerifyEmailResponse{
+		VerificationToken:       out.VerificationToken,
+		VerificationExpiresAtMS: out.VerificationExpiresAtMS,
+	})
 }

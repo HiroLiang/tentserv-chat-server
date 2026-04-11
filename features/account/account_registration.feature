@@ -1,11 +1,29 @@
 Feature: Account registration
-  The Sign Up Page submits email, account, display name, and password to create an account.
+  The Sign Up Page submits email, account, display name, and password to create an applying account and verification session.
 
-  Scenario: Successful account registration
+  Scenario: Successful account registration returns verification session metadata
     Given account registration state is clean
     When I register an account with email "new@example.com", account "new_account", display name "New Display", and password "redacted-password"
     Then the response status should be 201
+    And the register response should include a verification token and expiry timestamp
     And the account registration mutation should include account, user, role, token, and email
+
+  Scenario: Reuse an applying account after its verification session expired
+    Given account registration state is clean
+    And an applying account exists with email "reuse@example.com", account "old_account", and display name "Old Display"
+    And the applying account has an expired verification session
+    When I register an account with email "reuse@example.com", account "new_account", display name "New Display", and password "redacted-password"
+    Then the response status should be 201
+    And the register response should include a verification token and expiry timestamp
+    And the existing applying account should be updated to account "new_account" and display name "New Display"
+
+  Scenario: Reject registration when the same email still has an active verification session
+    Given account registration state is clean
+    When I register an account with email "pending@example.com", account "pending_account", display name "Pending User", and password "redacted-password"
+    Then the response status should be 201
+    When I register an account with email "pending@example.com", account "pending_account_2", display name "Updated Pending User", and password "redacted-password"
+    Then the response status should be 409
+    And the response error code should be "ACCOUNT_APPLYING"
 
   Scenario: Reject invalid email
     Given account registration state is clean

@@ -7,19 +7,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HiroLiang/tentserv-chat-server/internal/application/auth/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 func verifyEmailInput(token string) appShared.UseCaseInput[VerifyEmailInput] {
-	return appShared.UseCaseInput[VerifyEmailInput]{Data: VerifyEmailInput{Token: token}}
+	return appShared.UseCaseInput[VerifyEmailInput]{Data: VerifyEmailInput{Token: token, Code: "123456"}}
+}
+
+func seedVerificationSession(store *authVerificationStoreStub, token string, accountID int64) {
+	store.sessions[token] = port.VerificationSession{
+		AccountID:         accountID,
+		Code:              "123456",
+		ExpiresAtMS:       time.Now().Add(time.Minute).UnixMilli(),
+		RemainingAttempts: verificationMaxAttempts,
+	}
+	store.accountTokens[accountID] = token
 }
 
 func TestVerifyEmailUseCase_ActivatesApplyingAccountHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["valid-token"] = 101
+	seedVerificationSession(store, "valid-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Applying)
 	uc := NewVerifyEmailUseCase(store, accountRepo)
@@ -36,7 +47,7 @@ func TestVerifyEmailUseCase_ActivatesApplyingAccountHasStructuredLog(t *testing.
 
 	t.Logf("Output: out=%+v account_status=%s", out, accountRepo.lastUpdated.Status)
 	t.Logf("Mutation: get_calls=%d delete_calls=%d find_account_calls=%d update_calls=%d token_removed=%t",
-		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.tokens) == 0)
+		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.sessions) == 0)
 	t.Logf("Duration: %s", time.Since(start))
 
 	if accountRepo.lastUpdated == nil || accountRepo.lastUpdated.Status != account.Active {
@@ -96,7 +107,7 @@ func TestVerifyEmailUseCase_StoreGetFailureHasStructuredLog(t *testing.T) {
 func TestVerifyEmailUseCase_DeleteFailureHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["valid-token"] = 101
+	seedVerificationSession(store, "valid-token", 101)
 	store.deleteErr = errors.New("redis delete failed")
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Applying)
@@ -123,7 +134,7 @@ func TestVerifyEmailUseCase_DeleteFailureHasStructuredLog(t *testing.T) {
 func TestVerifyEmailUseCase_AccountNotFoundHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["valid-token"] = 101
+	seedVerificationSession(store, "valid-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	uc := NewVerifyEmailUseCase(store, accountRepo)
 	input := verifyEmailInput("valid-token")
@@ -136,7 +147,7 @@ func TestVerifyEmailUseCase_AccountNotFoundHasStructuredLog(t *testing.T) {
 
 	t.Logf("Output: out=%+v err=%v", out, err)
 	t.Logf("Mutation: get_calls=%d delete_calls=%d find_account_calls=%d update_calls=%d token_removed=%t",
-		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.tokens) == 0)
+		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.sessions) == 0)
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertRegisterError(t, err, ErrTokenInvalid)
@@ -148,7 +159,7 @@ func TestVerifyEmailUseCase_AccountNotFoundHasStructuredLog(t *testing.T) {
 func TestVerifyEmailUseCase_NonApplyingAccountHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["valid-token"] = 101
+	seedVerificationSession(store, "valid-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Active)
 	uc := NewVerifyEmailUseCase(store, accountRepo)
@@ -162,7 +173,7 @@ func TestVerifyEmailUseCase_NonApplyingAccountHasStructuredLog(t *testing.T) {
 
 	t.Logf("Output: out=%+v err=%v", out, err)
 	t.Logf("Mutation: get_calls=%d delete_calls=%d find_account_calls=%d update_calls=%d token_removed=%t",
-		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.tokens) == 0)
+		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.sessions) == 0)
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertRegisterError(t, err, ErrTokenInvalid)
@@ -174,7 +185,7 @@ func TestVerifyEmailUseCase_NonApplyingAccountHasStructuredLog(t *testing.T) {
 func TestVerifyEmailUseCase_UpdateFailureHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["valid-token"] = 101
+	seedVerificationSession(store, "valid-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Applying)
 	accountRepo.updateErr = errors.New("update failed")
@@ -189,7 +200,7 @@ func TestVerifyEmailUseCase_UpdateFailureHasStructuredLog(t *testing.T) {
 
 	t.Logf("Output: out=%+v err=%v", out, err)
 	t.Logf("Mutation: get_calls=%d delete_calls=%d find_account_calls=%d update_calls=%d token_removed=%t",
-		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.tokens) == 0)
+		store.getCalls, store.deleteCalls, accountRepo.findByIDCalls, accountRepo.updateCalls, len(store.sessions) == 0)
 	t.Logf("Duration: %s", time.Since(start))
 
 	assertRegisterError(t, err, ErrRegisterFailed)
@@ -240,7 +251,7 @@ func TestVerifyEmailUseCase_ConcurrentTokenVerificationRaceHasStructuredLog(t *t
 	// individual operations are safe; the final account state is always Active.
 	start := time.Now()
 	store := newAuthVerificationStoreStub()
-	store.tokens["race-token"] = 101
+	seedVerificationSession(store, "race-token", 101)
 	accountRepo := newAuthAccountRepoStub()
 	accountRepo.accountsByID[101] = newExistingAuthAccount(101, shared.EmailAddress("new@example.com"), "new_account", account.Applying)
 	uc := NewVerifyEmailUseCase(store, accountRepo)

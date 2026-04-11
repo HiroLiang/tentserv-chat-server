@@ -7,10 +7,11 @@ Feature: Cross-feature backend integration
     And a registered login device "11111111-1111-1111-1111-111111111111" named "Cross Test Device" exists
     When I register an account with email "cross@example.com", account "cross_account", display name "Cross User", and password "redacted-password"
     Then the response status should be 201
+    And the register response should include a verification token and expiry timestamp
     And the account registration mutation should include account, user, role, token, and email
     When I verify the registered email
     Then the response status should be 200
-    And the verify email response should be an HTML success page
+    And the verify email response should be an empty JSON object
     And the email verification mutation should activate the account and consume the token
     When I login with identifier "cross@example.com", password "redacted-password", and device "11111111-1111-1111-1111-111111111111"
     Then the response status should be 200

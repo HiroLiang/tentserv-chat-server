@@ -10,6 +10,8 @@ type RegisterRequest struct {
 
 // RegisterResponse User register response
 type RegisterResponse struct {
+	VerificationToken       string `json:"verification_token"`
+	VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
 }
 
 type LoginRequest struct {
@@ -38,10 +40,18 @@ type UserProfileItem struct {
 	RoleCodes []string `json:"role_codes"`
 }
 
+type VerifyEmailRequest struct {
+	Token string `json:"token" binding:"required"`
+	Code  string `json:"code" binding:"required,len=6,numeric"`
+}
+
 type VerifyEmailResponse struct{}
 
 type ResendVerifyEmailRequest struct {
-	Email string `json:"email" binding:"required,email,max=254"`
+	Token string `json:"token" binding:"required"`
 }
 
-type ResendVerifyEmailResponse struct{}
+type ResendVerifyEmailResponse struct {
+	VerificationToken       string `json:"verification_token"`
+	VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
+}
