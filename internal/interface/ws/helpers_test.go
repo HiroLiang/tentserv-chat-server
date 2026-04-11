@@ -41,7 +41,9 @@ func (m *mockHandler) Calls() int {
 
 // newTestClient creates a minimal Client suitable for hub tests (no real connection).
 func newTestClient(hub *Hub, userID string) *Client {
-	return &Client{hub: hub, send: make(chan []byte, 256), UserID: userID}
+	client := &Client{hub: hub, send: make(chan []byte, 256), UserID: userID}
+	client.Touch()
+	return client
 }
 
 // testWSPair spins up an in-process HTTP server and returns a connected pair of

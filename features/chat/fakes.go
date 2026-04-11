@@ -3,9 +3,11 @@ package chat
 import (
 	"context"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	chatusecase "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/usecase"
 	appPort "github.com/HiroLiang/tentserv-chat-server/internal/application/shared/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
@@ -27,6 +29,7 @@ type Deps struct {
 	friendshipRepo  *bddFriendshipRepo
 	userRepo        *bddUserRepo
 	agentRepo       *bddAgentRepo
+	presenceReader  *bddPresenceReader
 }
 
 func NewDeps() *Deps {
@@ -38,6 +41,7 @@ func NewDeps() *Deps {
 		friendshipRepo:  newBDDFriendshipRepo(),
 		userRepo:        newBDDUserRepo(),
 		agentRepo:       &bddAgentRepo{},
+		presenceReader:  newBDDPresenceReader(),
 	}
 	deps.Reset()
 	return deps
@@ -50,6 +54,7 @@ func (d *Deps) Reset() {
 	d.chatMessageRepo.reset()
 	d.friendshipRepo.reset()
 	d.userRepo.reset()
+	d.presenceReader.reset()
 }
 
 func (d *Deps) RegisterGetUserChatRoomsUseCase() *chatusecase.GetUserChatRoomsUseCase {
@@ -61,7 +66,12 @@ func (d *Deps) RegisterGetUserChatRoomsUseCase() *chatusecase.GetUserChatRoomsUs
 		d.userRepo,
 		d.agentRepo,
 		d.friendshipRepo,
+		d.presenceReader,
 	)
+}
+
+func (d *Deps) SetUserPresence(userID shared.UserID, snapshot chatPort.PresenceSnapshot) {
+	d.presenceReader.set(userID, snapshot)
 }
 
 func (d *Deps) RegisterGetChatRoomDetailUseCase() *chatusecase.GetChatRoomDetailUseCase {
@@ -204,6 +214,39 @@ func (d *Deps) MemberIDForUser(roomID chatroom.ID, userID shared.UserID) chatmem
 		return 0
 	}
 	return member.ID
+}
+
+type bddPresenceReader struct {
+	mu        sync.Mutex
+	snapshots map[string]chatPort.PresenceSnapshot
+}
+
+func newBDDPresenceReader() *bddPresenceReader {
+	return &bddPresenceReader{}
+}
+
+func (r *bddPresenceReader) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.snapshots = map[string]chatPort.PresenceSnapshot{}
+}
+
+func (r *bddPresenceReader) set(userID shared.UserID, snapshot chatPort.PresenceSnapshot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.snapshots == nil {
+		r.snapshots = map[string]chatPort.PresenceSnapshot{}
+	}
+	r.snapshots[strconv.FormatInt(int64(userID), 10)] = snapshot
+}
+
+func (r *bddPresenceReader) GetPresence(userID string) chatPort.PresenceSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if snapshot, ok := r.snapshots[userID]; ok {
+		return snapshot
+	}
+	return chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOffline}
 }
 
 type bddFriendshipRepo struct {

@@ -50,20 +50,21 @@ type UseCases struct {
 	GetChatRoomMessagesUseCase *chatUseCase.GetChatRoomMessagesUseCase
 	UpdateMemberStatusUseCase  *chatUseCase.UpdateMemberStatusUseCase
 
-	UploadIdentityKeyUseCase                *e2eeUseCase.UploadIdentityKeyUseCase
-	UploadSignedPreKeyUseCase               *e2eeUseCase.UploadSignedPreKeyUseCase
-	UploadOTPPreKeysUseCase                 *e2eeUseCase.UploadOTPPreKeysUseCase
-	CountOTPPreKeysUseCase                  *e2eeUseCase.CountOTPPreKeysUseCase
-	GetKeyBundleUseCase                     *e2eeUseCase.GetKeyBundleUseCase
-	CheckKeyStatusUseCase                   *e2eeUseCase.CheckKeyStatusUseCase
-	GetKeyPolicyUseCase                     *e2eeUseCase.GetKeyPolicyUseCase
-	UploadSenderKeyUseCase                  *e2eeUseCase.UploadSenderKeyUseCase
-	GetSenderKeysUseCase                    *e2eeUseCase.GetSenderKeysUseCase
-	GetSenderKeyDistributionStatusUseCase   *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
-	GetPendingSenderKeyDistributionsUseCase *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase
-	ConsumeSenderKeyDistributionUseCase     *e2eeUseCase.ConsumeSenderKeyDistributionUseCase
-	CreateSenderKeyRequestUseCase           *e2eeUseCase.CreateSenderKeyRequestUseCase
-	NotifyPendingSenderKeyRequestsUseCase   *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
+	UploadIdentityKeyUseCase                   *e2eeUseCase.UploadIdentityKeyUseCase
+	UploadSignedPreKeyUseCase                  *e2eeUseCase.UploadSignedPreKeyUseCase
+	UploadOTPPreKeysUseCase                    *e2eeUseCase.UploadOTPPreKeysUseCase
+	CountOTPPreKeysUseCase                     *e2eeUseCase.CountOTPPreKeysUseCase
+	GetKeyBundleUseCase                        *e2eeUseCase.GetKeyBundleUseCase
+	CheckKeyStatusUseCase                      *e2eeUseCase.CheckKeyStatusUseCase
+	GetKeyPolicyUseCase                        *e2eeUseCase.GetKeyPolicyUseCase
+	UploadSenderKeyUseCase                     *e2eeUseCase.UploadSenderKeyUseCase
+	GetSenderKeysUseCase                       *e2eeUseCase.GetSenderKeysUseCase
+	GetSenderKeyDistributionStatusUseCase      *e2eeUseCase.GetSenderKeyDistributionStatusUseCase
+	GetPendingSenderKeyDistributionsUseCase    *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase
+	ConsumeSenderKeyDistributionUseCase        *e2eeUseCase.ConsumeSenderKeyDistributionUseCase
+	CreateSenderKeyRequestUseCase              *e2eeUseCase.CreateSenderKeyRequestUseCase
+	NotifyPendingSenderKeyRequestsUseCase      *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
+	NotifyPendingSenderKeyDistributionsUseCase *e2eeUseCase.NotifyPendingSenderKeyDistributionsUseCase
 
 	SendMessageUseCase     *chatUseCase.SendMessageUseCase
 	UploadRoomMediaUseCase *chatUseCase.UploadRoomMediaUseCase
@@ -182,6 +183,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.UserRepo,
 			deps.AgentRepo,
 			deps.FriendshipRepo,
+			deps.Hub,
 		),
 		GetChatRoomDetailUseCase: chatUseCase.NewGetChatRoomDetailUseCase(
 			deps.ParticipantRepository,
@@ -255,6 +257,12 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ChatMemberRepo,
 			deps.SenderKeyRequestRepo,
 			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
+			deps.Hub,
+		),
+		NotifyPendingSenderKeyDistributionsUseCase: e2eeUseCase.NewNotifyPendingSenderKeyDistributionsUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
 			deps.SenderKeyDistributionRepo,
 			deps.Hub,
 		),

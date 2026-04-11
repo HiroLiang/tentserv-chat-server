@@ -3,13 +3,10 @@ package usecase
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"strconv"
 
 	e2eePort "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
-	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
@@ -17,6 +14,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -120,71 +118,16 @@ func (u *UploadSenderKeyUseCase) Execute(
 			zap.Error(err),
 		)
 	}
-	go u.notifyReceiver(context.Background(), dist, int64(roomID))
+	go notifySenderKeyDistributionAvailable(
+		context.Background(),
+		u.broadcaster,
+		u.participantRepo,
+		u.chatMemberRepo,
+		dist,
+		int64(roomID),
+	)
 
 	return &UploadSenderKeyOutput{}, nil
-}
-
-type wsSenderKeyDistributionAvailablePayload struct {
-	RoomID           int64 `json:"room_id"`
-	DistributionID   int64 `json:"distribution_id"`
-	SenderMemberID   int64 `json:"sender_member_id"`
-	ReceiverMemberID int64 `json:"receiver_member_id"`
-	SenderKeyVersion int64 `json:"sender_key_version"`
-}
-
-func (u *UploadSenderKeyUseCase) notifyReceiver(
-	ctx context.Context,
-	dist *senderkeydistribution.SenderKeyDistribution,
-	roomID int64,
-) {
-	receiverMember, err := u.chatMemberRepo.FindByID(ctx, dist.ReceiverMemberID)
-	if err != nil || receiverMember.IsDeleted {
-		return
-	}
-	receiverParticipant, err := u.participantRepo.FindByID(ctx, receiverMember.ParticipantID)
-	if err != nil || receiverParticipant.UserID == nil {
-		return
-	}
-	userIDStr := strconv.FormatInt(int64(*receiverParticipant.UserID), 10)
-
-	payload, err := json.Marshal(struct {
-		Type    string                                  `json:"type"`
-		Payload wsSenderKeyDistributionAvailablePayload `json:"payload"`
-	}{
-		Type: "e2ee.sender_key_distribution_available",
-		Payload: wsSenderKeyDistributionAvailablePayload{
-			RoomID:           roomID,
-			DistributionID:   int64(dist.ID),
-			SenderMemberID:   int64(dist.SenderMemberID),
-			ReceiverMemberID: int64(dist.ReceiverMemberID),
-			SenderKeyVersion: dist.SenderKeyVersion,
-		},
-	})
-	if err == nil {
-		u.broadcaster.SendToUser(userIDStr, payload)
-	}
-
-	// Legacy shim kept during migration.
-	legacyPayload, err := json.Marshal(struct {
-		Type    string `json:"type"`
-		Payload struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		} `json:"payload"`
-	}{
-		Type: "e2ee.direct_key_ready",
-		Payload: struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		}{
-			RoomID:           roomID,
-			ProviderMemberID: int64(dist.SenderMemberID),
-		},
-	})
-	if err == nil {
-		u.broadcaster.SendToUser(userIDStr, legacyPayload)
-	}
 }
 
 func (u *UploadSenderKeyUseCase) hasBlockedRelationship(

@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"sync/atomic"
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
@@ -28,20 +29,25 @@ const (
 
 // Client represents a single WebSocket connection.
 type Client struct {
-	hub    *Hub
-	conn   *websocket.Conn
-	send   chan []byte
-	UserID string
+	hub              *Hub
+	conn             *websocket.Conn
+	send             chan []byte
+	UserID           string
+	DeviceID         string
+	lastSeenUnixNano atomic.Int64
 }
 
 // NewClient creates a new Client and registers it with the hub.
-func NewClient(hub *Hub, conn *websocket.Conn, userID string) *Client {
-	return &Client{
-		hub:    hub,
-		conn:   conn,
-		send:   make(chan []byte, 256),
-		UserID: userID,
+func NewClient(hub *Hub, conn *websocket.Conn, userID, deviceID string) *Client {
+	client := &Client{
+		hub:      hub,
+		conn:     conn,
+		send:     make(chan []byte, 256),
+		UserID:   userID,
+		DeviceID: deviceID,
 	}
+	client.Touch()
+	return client
 }
 
 // ReadPump reads messages from the WebSocket connection and routes them.
@@ -55,6 +61,7 @@ func (c *Client) ReadPump(router *MessageRouter) {
 	c.conn.SetReadLimit(maxMessageSize)
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
+		c.Touch()
 		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
@@ -64,6 +71,7 @@ func (c *Client) ReadPump(router *MessageRouter) {
 		if err != nil {
 			break
 		}
+		c.Touch()
 
 		var msg Message
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -118,4 +126,24 @@ func (c *Client) Send(msg []byte) {
 	default:
 		logger.Log.Warn("ws: send buffer full, dropping message", zap.String("user_id", c.UserID))
 	}
+}
+
+func (c *Client) Touch() {
+	c.lastSeenUnixNano.Store(time.Now().UTC().UnixNano())
+}
+
+func (c *Client) LastSeenAt() time.Time {
+	unixNano := c.lastSeenUnixNano.Load()
+	if unixNano == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, unixNano).UTC()
+}
+
+func (c *Client) IsStale(now time.Time, ttl time.Duration) bool {
+	lastSeen := c.LastSeenAt()
+	if lastSeen.IsZero() {
+		return false
+	}
+	return now.UTC().Sub(lastSeen) > ttl
 }

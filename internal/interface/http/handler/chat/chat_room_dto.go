@@ -42,15 +42,18 @@ type ResolveInvitationResponse struct {
 }
 
 type ChatRoomSummaryResponse struct {
-	RoomID            int64   `json:"room_id"`
-	RoomType          string  `json:"room_type"`
-	DisplayName       string  `json:"display_name"`
-	AvatarURL         *string `json:"avatar_url"`
-	LatestMsg         *string `json:"latest_message"`
-	LatestMsgSenderID *int64  `json:"latest_message_sender_id,omitempty"`
-	UnreadCount       int64   `json:"unread_count"`
-	BlockedByPeer     bool    `json:"blocked_by_peer,omitempty"`
-	BlockedByMe       bool    `json:"blocked_by_me,omitempty"`
+	RoomID            int64      `json:"room_id"`
+	RoomType          string     `json:"room_type"`
+	DisplayName       string     `json:"display_name"`
+	AvatarURL         *string    `json:"avatar_url"`
+	PeerUserID        *int64     `json:"peer_user_id,omitempty"`
+	PresenceStatus    *string    `json:"presence_status,omitempty"`
+	LastSeenAt        *time.Time `json:"last_seen_at,omitempty"`
+	LatestMsg         *string    `json:"latest_message"`
+	LatestMsgSenderID *int64     `json:"latest_message_sender_id,omitempty"`
+	UnreadCount       int64      `json:"unread_count"`
+	BlockedByPeer     bool       `json:"blocked_by_peer,omitempty"`
+	BlockedByMe       bool       `json:"blocked_by_me,omitempty"`
 }
 
 type ChatRoomMemberInfoResponse struct {

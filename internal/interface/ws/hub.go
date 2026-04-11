@@ -4,120 +4,134 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 )
 
-// [EN] Hub is the central WebSocket message broker. It maintains:
-//      - clients: all connected Client instances (accessed only from Run() goroutine — no lock needed).
-//      - userClients: userID → []*Client mapping (protected by mu RWMutex for concurrent access).
-//      - pendingAcks: tracks in-flight messages waiting for client ACK (protected by ackMu).
-//      - onConnect: hook called in a goroutine when a new client registers (used for replay of queued keys).
-// [中] Hub 為中央 WebSocket 訊息代理。維護：
-//      clients（所有連線，僅在 Run() goroutine 中存取，無需鎖定）；
-//      userClients（userID → []*Client，以 mu RWMutex 保護並發存取）；
-//      pendingAcks（追蹤等待 ACK 的訊息，以 ackMu 保護）；
-//      onConnect（新客戶端連線時在 goroutine 中執行的鉤子，用於重播佇列金鑰）。
-// [日] Hub は WebSocket メッセージブローカーの中核。以下を管理する：
-//      clients（全接続 Client、Run() goroutine からのみアクセス — ロック不要）；
-//      userClients（userID → []*Client、mu RWMutex で並行アクセスを保護）；
-//      pendingAcks（ACK 待ちの配信を追跡、ackMu で保護）；
-//      onConnect（新クライアント登録時に goroutine で呼び出されるフック、キュー鍵の再配信に使用）。
+const (
+	defaultPresenceTTL     = pongWait + 15*time.Second
+	defaultCleanupInterval = 15 * time.Second
+)
 
-// Hub manages all active WebSocket clients and routes broadcasts.
+// [EN] Hub is the central WebSocket message broker. It now also tracks per-user presence
+//
+//	from active WS connections and exposes snapshots for direct-room summaries.
+//
+// [中] Hub 為中央 WebSocket 訊息代理，現在也根據活躍 WS 連線追蹤每位使用者的 presence，
+//
+//	並提供 direct room 摘要查詢。
+//
+// [日] Hub は WebSocket メッセージブローカーの中核であり、現在はアクティブな WS 接続から
+//
+//	ユーザーごとの presence も追跡し、ダイレクトルーム概要向けのスナップショットを提供する。
 type Hub struct {
-	// clients holds every connected client; only accessed from Run().
 	clients map[*Client]bool
 
-	// userClients maps userID → clients; protected by mu.
-	userClients map[string][]*Client
-	mu          sync.RWMutex
+	userClients    map[string][]*Client
+	lastSeenByUser map[string]time.Time
+	mu             sync.RWMutex
 
-	// Broadcast sends a message to every connected client.
-	Broadcast chan []byte
-
-	// Register adds a client to the hub.
-	Register chan *Client
-
-	// Unregister removes a client from the hub.
+	Broadcast  chan []byte
+	Register   chan *Client
 	Unregister chan *Client
 
-	// pendingAcks tracks in-flight deliveries waiting for client ACK.
 	pendingAcks map[int64]chan struct{}
 	ackMu       sync.Mutex
 
-	// onConnect is an optional hook called (in a goroutine) when a new client connects.
-	// userID is the string user ID of the newly connected client.
-	onConnect func(userID string)
+	presenceTTL     time.Duration
+	cleanupInterval time.Duration
+
+	onConnect         func(userID string)
+	onPresenceChanged func(userID string, snapshot chatPort.PresenceSnapshot)
 }
 
-// NewHub creates a new Hub.
+var _ chatPort.PresenceReader = (*Hub)(nil)
+
 func NewHub() *Hub {
 	return &Hub{
-		clients:     make(map[*Client]bool),
-		userClients: make(map[string][]*Client),
-		Broadcast:   make(chan []byte, 256),
-		Register:    make(chan *Client),
-		Unregister:  make(chan *Client),
-		pendingAcks: make(map[int64]chan struct{}),
+		clients:         make(map[*Client]bool),
+		userClients:     make(map[string][]*Client),
+		lastSeenByUser:  make(map[string]time.Time),
+		Broadcast:       make(chan []byte, 256),
+		Register:        make(chan *Client),
+		Unregister:      make(chan *Client),
+		pendingAcks:     make(map[int64]chan struct{}),
+		presenceTTL:     defaultPresenceTTL,
+		cleanupInterval: defaultCleanupInterval,
 	}
 }
 
-// [EN] Run: event loop (select) for Register/Unregister/Broadcast channels. Single goroutine owns clients map.
-// [中] Run：Register/Unregister/Broadcast channel 的事件迴圈，單一 goroutine 擁有 clients map。
-// [日] Run：Register/Unregister/Broadcast チャネルのイベントループ。clients map は単一 goroutine が所有する。
-// Run starts the Hub event loop. Must be called in a goroutine.
 func (h *Hub) Run() {
+	cleanupTicker := time.NewTicker(h.cleanupInterval)
+	defer cleanupTicker.Stop()
+
 	for {
 		select {
 		case client := <-h.Register:
-			h.clients[client] = true
-			if client.UserID != "" {
-				h.mu.Lock()
-				h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
-				h.mu.Unlock()
-				if h.onConnect != nil {
-					go h.onConnect(client.UserID)
-				}
-			}
+			h.registerClient(client)
 
 		case client := <-h.Unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-				if client.UserID != "" {
-					h.mu.Lock()
-					h.removeUserClient(client.UserID, client)
-					h.mu.Unlock()
-				}
-			}
+			h.unregisterClient(client, time.Now().UTC())
 
 		case message := <-h.Broadcast:
 			for client := range h.clients {
 				client.Send(message)
 			}
+
+		case now := <-cleanupTicker.C:
+			h.pruneStaleClients(now.UTC())
 		}
 	}
 }
 
-// SendToUser sends a message to all active connections belonging to userID.
-// Safe to call from any goroutine.
 func (h *Hub) SendToUser(userID string, msg []byte) {
-	h.mu.RLock()
-	clients := h.userClients[userID]
-	h.mu.RUnlock()
+	h.sendToUser(userID, msg)
+}
 
-	for _, c := range clients {
-		c.Send(msg)
+func (h *Hub) SendToUsers(userIDs []string, msg []byte) {
+	seen := make(map[string]struct{}, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == "" {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		h.sendToUser(userID, msg)
 	}
 }
 
-// [EN] PushAndWaitAck: sends a message with delivery_id and blocks until ACK received or timeout.
-//      Used by the retry scheduler for guaranteed delivery to online clients.
-// [中] PushAndWaitAck：傳送含 delivery_id 的訊息，阻塞直到收到 ACK 或逾時。
-//      由重試排程器用於對線上客戶端的保證送達。
-// [日] PushAndWaitAck：delivery_id 付きメッセージを送信し、ACK 受信またはタイムアウトまでブロックする。
-//      オンラインクライアントへの配信保証のためにリトライスケジューラから使用される。
-// PushAndWaitAck sends a typed message with a delivery ID to a user and waits for the client ACK.
-// Returns true if ACK was received within timeout, false otherwise.
+func (h *Hub) GetPresence(userID string) chatPort.PresenceSnapshot {
+	now := time.Now().UTC()
+
+	h.mu.RLock()
+	clients := append([]*Client(nil), h.userClients[userID]...)
+	lastSeen, hasLastSeen := h.lastSeenByUser[userID]
+	h.mu.RUnlock()
+
+	staleClients := make([]*Client, 0)
+	for _, client := range clients {
+		if client.IsStale(now, h.presenceTTL) {
+			staleClients = append(staleClients, client)
+			continue
+		}
+		return chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOnline}
+	}
+
+	h.queueStaleUnregisters(staleClients)
+
+	if !hasLastSeen || lastSeen.IsZero() {
+		return chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOffline}
+	}
+
+	lastSeenCopy := lastSeen
+	return chatPort.PresenceSnapshot{
+		Status:     chatPort.PresenceStatusOffline,
+		LastSeenAt: &lastSeenCopy,
+	}
+}
+
 func (h *Hub) PushAndWaitAck(userID string, deliveryID int64, msgType string, payload []byte, timeout time.Duration) bool {
 	ackCh := make(chan struct{}, 1)
 
@@ -131,25 +145,25 @@ func (h *Hub) PushAndWaitAck(userID string, deliveryID int64, msgType string, pa
 		DeliveryID: &deliveryID,
 	}
 	data, err := json.Marshal(msg)
-	if err == nil {
-		h.SendToUser(userID, data)
+	if err != nil {
+		h.deletePendingAck(deliveryID)
+		return false
+	}
+	if delivered := h.sendToUser(userID, data); delivered == 0 {
+		h.deletePendingAck(deliveryID)
+		return false
 	}
 
 	select {
 	case <-ackCh:
-		h.ackMu.Lock()
-		delete(h.pendingAcks, deliveryID)
-		h.ackMu.Unlock()
+		h.deletePendingAck(deliveryID)
 		return true
 	case <-time.After(timeout):
-		h.ackMu.Lock()
-		delete(h.pendingAcks, deliveryID)
-		h.ackMu.Unlock()
+		h.deletePendingAck(deliveryID)
 		return false
 	}
 }
 
-// ResolveAck closes the pending ACK channel for the given deliveryID.
 func (h *Hub) ResolveAck(deliveryID int64) {
 	h.ackMu.Lock()
 	ch, ok := h.pendingAcks[deliveryID]
@@ -162,17 +176,135 @@ func (h *Hub) ResolveAck(deliveryID int64) {
 	}
 }
 
-// SetOnConnect registers a hook function called (in a goroutine) each time a new client connects.
 func (h *Hub) SetOnConnect(fn func(userID string)) {
 	h.onConnect = fn
 }
 
-// removeUserClient removes target from h.userClients[userID].
-// Caller must hold h.mu.Lock().
-func (h *Hub) removeUserClient(userID string, target *Client) {
+func (h *Hub) SetOnPresenceChanged(fn func(userID string, snapshot chatPort.PresenceSnapshot)) {
+	h.onPresenceChanged = fn
+}
+
+func (h *Hub) deletePendingAck(deliveryID int64) {
+	h.ackMu.Lock()
+	delete(h.pendingAcks, deliveryID)
+	h.ackMu.Unlock()
+}
+
+func (h *Hub) sendToUser(userID string, msg []byte) int {
+	now := time.Now().UTC()
+
+	h.mu.RLock()
+	clients := append([]*Client(nil), h.userClients[userID]...)
+	h.mu.RUnlock()
+
+	delivered := 0
+	staleClients := make([]*Client, 0)
+	for _, client := range clients {
+		if client.IsStale(now, h.presenceTTL) {
+			staleClients = append(staleClients, client)
+			continue
+		}
+		client.Send(msg)
+		delivered++
+	}
+
+	h.queueStaleUnregisters(staleClients)
+	return delivered
+}
+
+func (h *Hub) queueStaleUnregisters(clients []*Client) {
+	for _, client := range clients {
+		go func(target *Client) {
+			h.Unregister <- target
+		}(client)
+	}
+}
+
+func (h *Hub) registerClient(client *Client) {
+	now := time.Now().UTC()
+	h.clients[client] = true
+
+	var becameOnline bool
+	var onConnect func(string)
+	var onPresenceChanged func(string, chatPort.PresenceSnapshot)
+
+	if client.UserID != "" {
+		h.mu.Lock()
+		wasOnline := h.hasActiveUserLocked(client.UserID, now)
+		h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
+		delete(h.lastSeenByUser, client.UserID)
+		becameOnline = !wasOnline
+		onConnect = h.onConnect
+		onPresenceChanged = h.onPresenceChanged
+		h.mu.Unlock()
+	}
+
+	if onConnect != nil && client.UserID != "" {
+		go onConnect(client.UserID)
+	}
+	if becameOnline && onPresenceChanged != nil {
+		go onPresenceChanged(client.UserID, chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOnline})
+	}
+}
+
+func (h *Hub) unregisterClient(client *Client, now time.Time) {
+	if _, ok := h.clients[client]; !ok {
+		return
+	}
+
+	delete(h.clients, client)
+	close(client.send)
+
+	if client.UserID == "" {
+		return
+	}
+
+	var becameOffline bool
+	var snapshot chatPort.PresenceSnapshot
+	var onPresenceChanged func(string, chatPort.PresenceSnapshot)
+
+	h.mu.Lock()
+	h.removeUserClientLocked(client.UserID, client)
+	if !h.hasActiveUserLocked(client.UserID, now) {
+		lastSeen := now
+		h.lastSeenByUser[client.UserID] = lastSeen
+		lastSeenCopy := lastSeen
+		snapshot = chatPort.PresenceSnapshot{
+			Status:     chatPort.PresenceStatusOffline,
+			LastSeenAt: &lastSeenCopy,
+		}
+		becameOffline = true
+	}
+	onPresenceChanged = h.onPresenceChanged
+	h.mu.Unlock()
+
+	if becameOffline && onPresenceChanged != nil {
+		go onPresenceChanged(client.UserID, snapshot)
+	}
+}
+
+func (h *Hub) pruneStaleClients(now time.Time) {
+	for client := range h.clients {
+		if !client.IsStale(now, h.presenceTTL) {
+			continue
+		}
+		h.unregisterClient(client, now)
+	}
+}
+
+func (h *Hub) hasActiveUserLocked(userID string, now time.Time) bool {
+	for _, client := range h.userClients[userID] {
+		if !client.IsStale(now, h.presenceTTL) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Hub) removeUserClientLocked(userID string, target *Client) {
 	clients := h.userClients[userID]
-	for i, c := range clients {
-		if c == target {
+	for i, client := range clients {
+		if client == target {
 			h.userClients[userID] = append(clients[:i], clients[i+1:]...)
 			break
 		}

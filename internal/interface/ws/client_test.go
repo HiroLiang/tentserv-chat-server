@@ -56,7 +56,7 @@ func TestClient_ReadPump_RoutesValidMessage(t *testing.T) {
 	router := NewMessageRouter()
 	router.Register("chat.send", handler)
 
-	client := NewClient(hub, serverConn, "user1")
+	client := NewClient(hub, serverConn, "user1", "")
 	hub.Register <- client
 	go client.ReadPump(router)
 
@@ -83,7 +83,7 @@ func TestClient_ReadPump_IgnoresMalformedJSON(t *testing.T) {
 	router := NewMessageRouter()
 	router.Register("chat.send", handler)
 
-	client := NewClient(hub, serverConn, "")
+	client := NewClient(hub, serverConn, "", "")
 	hub.Register <- client
 	go client.ReadPump(router)
 
@@ -105,7 +105,7 @@ func TestClient_ReadPump_UnregistersOnDisconnect(t *testing.T) {
 
 	serverConn, clientConn := testWSPair(t)
 
-	client := NewClient(hub, serverConn, "user1")
+	client := NewClient(hub, serverConn, "user1", "")
 	hub.Register <- client
 	go client.ReadPump(NewMessageRouter())
 
@@ -134,7 +134,7 @@ func TestClient_WritePump_DeliversQueuedMessage(t *testing.T) {
 	serverConn, clientConn := testWSPair(t)
 	defer clientConn.Close()
 
-	client := NewClient(hub, serverConn, "")
+	client := NewClient(hub, serverConn, "", "")
 	hub.Register <- client
 	go client.WritePump()
 
@@ -154,7 +154,7 @@ func TestClient_WritePump_DeliversMultipleMessages(t *testing.T) {
 	serverConn, clientConn := testWSPair(t)
 	defer clientConn.Close()
 
-	client := NewClient(hub, serverConn, "")
+	client := NewClient(hub, serverConn, "", "")
 	hub.Register <- client
 	go client.WritePump()
 

@@ -16,7 +16,7 @@ func TestMain(m *testing.M) {
 
 func TestChatMessageHandler_Handle_InvalidJSON_ReturnsError(t *testing.T) {
 	handler := NewMessageHandler(nil)
-	client := ws.NewClient(nil, nil, "1")
+	client := ws.NewClient(nil, nil, "1", "")
 
 	err := handler.Handle(client, json.RawMessage(`not-valid-json`))
 
@@ -25,7 +25,7 @@ func TestChatMessageHandler_Handle_InvalidJSON_ReturnsError(t *testing.T) {
 
 func TestChatMessageHandler_Handle_InvalidRoomID_ReturnsError(t *testing.T) {
 	handler := NewMessageHandler(nil)
-	client := ws.NewClient(nil, nil, "1")
+	client := ws.NewClient(nil, nil, "1", "")
 
 	payload, _ := json.Marshal(SendPayload{RoomID: "not-a-number", Content: "hello"})
 	err := handler.Handle(client, payload)
@@ -35,7 +35,7 @@ func TestChatMessageHandler_Handle_InvalidRoomID_ReturnsError(t *testing.T) {
 
 func TestChatMessageHandler_Handle_InvalidUserID_ReturnsError(t *testing.T) {
 	handler := NewMessageHandler(nil)
-	client := ws.NewClient(nil, nil, "not-a-number")
+	client := ws.NewClient(nil, nil, "not-a-number", "")
 
 	payload, _ := json.Marshal(SendPayload{RoomID: "1", Content: "hello"})
 	err := handler.Handle(client, payload)
@@ -45,7 +45,7 @@ func TestChatMessageHandler_Handle_InvalidUserID_ReturnsError(t *testing.T) {
 
 func TestChatMessageHandler_Handle_AnonymousClient_ReturnsError(t *testing.T) {
 	handler := NewMessageHandler(nil)
-	client := ws.NewClient(nil, nil, "") // no user ID
+	client := ws.NewClient(nil, nil, "", "") // no user ID
 
 	payload, _ := json.Marshal(SendPayload{RoomID: "1", Content: "hi"})
 	err := handler.Handle(client, payload)

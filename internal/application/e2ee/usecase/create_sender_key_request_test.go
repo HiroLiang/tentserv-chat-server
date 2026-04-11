@@ -290,6 +290,15 @@ func (s *senderKeyReqBroadcasterStub) lastCall() senderKeyReqBroadcastCall {
 	return s.calls[len(s.calls)-1]
 }
 
+func (s *senderKeyReqBroadcasterStub) snapshotCalls() []senderKeyReqBroadcastCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	calls := make([]senderKeyReqBroadcastCall, len(s.calls))
+	copy(calls, s.calls)
+	return calls
+}
+
 var _ e2eePort.Broadcaster = (*senderKeyReqBroadcasterStub)(nil)
 
 func makeCreateSKRInput(callerUserID int64, roomID, providerMemberID int64) appShared.UseCaseInput[CreateSenderKeyRequestInput] {

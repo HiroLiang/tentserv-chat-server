@@ -115,7 +115,8 @@ func (s *notifyPendingMemberSenderKeyRepoStub) UpsertLatest(context.Context, *me
 }
 
 type notifyPendingDistributionRepoStub struct {
-	latest map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution
+	latest                map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution
+	availableByRoomMember map[[2]int64][]*senderkeydistribution.SenderKeyDistribution
 }
 
 func (s *notifyPendingDistributionRepoStub) UpsertBatch(context.Context, []*senderkeydistribution.SenderKeyDistribution) error {
@@ -138,8 +139,14 @@ func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, sender
 	return nil, senderkeydistribution.ErrNotFound
 }
 
-func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
-	return nil, nil
+func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(_ context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	rows := s.availableByRoomMember[[2]int64{int64(roomID), int64(receiverMemberID)}]
+	out := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(rows))
+	for _, row := range rows {
+		copied := *row
+		out = append(out, &copied)
+	}
+	return out, nil
 }
 
 func (s *notifyPendingDistributionRepoStub) FindByID(context.Context, senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {

@@ -3,7 +3,10 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strconv"
+	"time"
 
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	"go.uber.org/zap"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
@@ -22,6 +25,9 @@ type ChatRoomSummary struct {
 	RoomType          string
 	DisplayName       string
 	AvatarURL         *string
+	PeerUserID        *int64
+	PresenceStatus    *string
+	LastSeenAt        *time.Time
 	LatestMsg         *string
 	LatestMsgSenderID *int64
 	UnreadCount       int64
@@ -44,6 +50,7 @@ type GetUserChatRoomsUseCase struct {
 	userRepo        user.Repository
 	agentRepo       agent.Repository
 	friendshipRepo  friendship.Repository
+	presenceReader  chatPort.PresenceReader
 }
 
 func NewGetUserChatRoomsUseCase(
@@ -53,12 +60,9 @@ func NewGetUserChatRoomsUseCase(
 	chatMessageRepo chatmessage.Repository,
 	userRepo user.Repository,
 	agentRepo agent.Repository,
-	friendshipRepo ...friendship.Repository,
+	friendshipRepo friendship.Repository,
+	presenceReader chatPort.PresenceReader,
 ) *GetUserChatRoomsUseCase {
-	var fsRepo friendship.Repository
-	if len(friendshipRepo) > 0 {
-		fsRepo = friendshipRepo[0]
-	}
 	return &GetUserChatRoomsUseCase{
 		participantRepo: participantRepo,
 		chatMemberRepo:  chatMemberRepo,
@@ -66,7 +70,8 @@ func NewGetUserChatRoomsUseCase(
 		chatMessageRepo: chatMessageRepo,
 		userRepo:        userRepo,
 		agentRepo:       agentRepo,
-		friendshipRepo:  fsRepo,
+		friendshipRepo:  friendshipRepo,
+		presenceReader:  presenceReader,
 	}
 }
 
@@ -104,7 +109,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			continue
 		}
 
-		displayName, avatarURL := uc.resolveRoomDisplay(ctx, room, callerParticipant.ID)
+		displayName, avatarURL, peerUserID := uc.resolveRoomDisplay(ctx, room, callerParticipant.ID)
 		allMembers, err := uc.chatMemberRepo.FindByRoom(ctx, room.ID)
 		if err != nil {
 			return GetUserChatRoomsOutput{}, err
@@ -143,11 +148,15 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			RoomType:          string(room.Type),
 			DisplayName:       displayName,
 			AvatarURL:         avatarURL,
+			PeerUserID:        peerUserID,
 			LatestMsg:         latestMsg,
 			LatestMsgSenderID: latestMsgSenderID,
 			UnreadCount:       unreadCount,
 			BlockedByPeer:     room.Type == chatroom.Direct && blockedByPeer,
 			BlockedByMe:       room.Type == chatroom.Direct && blockedByMe,
+		}
+		if room.Type == chatroom.Direct && peerUserID != nil && uc.presenceReader != nil {
+			summary.applyPresence(uc.presenceReader.GetPresence(formatPresenceUserID(*peerUserID)))
 		}
 
 		switch room.Type {
@@ -193,7 +202,7 @@ func (uc *GetUserChatRoomsUseCase) resolveRoomDisplay(
 	ctx context.Context,
 	room *chatroom.ChatRoom,
 	callerParticipantID participant.ID,
-) (displayName string, avatarURL *string) {
+) (displayName string, avatarURL *string, peerUserID *int64) {
 	switch room.Type {
 	case chatroom.Group, chatroom.Channel:
 		displayName = room.Name
@@ -206,32 +215,45 @@ func (uc *GetUserChatRoomsUseCase) resolveRoomDisplay(
 	case chatroom.Direct, chatroom.Bot:
 		p, err := uc.findOtherParticipant(ctx, room, callerParticipantID)
 		if err != nil {
-			return room.Name, nil
+			return room.Name, nil, nil
 		}
 
 		if room.Type == chatroom.Direct && p.UserID != nil {
 			u, err := uc.userRepo.FindByID(ctx, *p.UserID)
 			if err != nil {
-				return room.Name, nil
+				peerValue := int64(*p.UserID)
+				return room.Name, nil, &peerValue
 			}
 			displayName = u.Name
 			if u.Avatar != "" {
 				avatarURL = &u.Avatar
 			}
+			peerValue := int64(*p.UserID)
+			peerUserID = &peerValue
 			return
 		}
 
 		if room.Type == chatroom.Bot && p.AgentID != nil {
 			a, err := uc.agentRepo.FindByID(ctx, agent.ID(*p.AgentID))
 			if err != nil {
-				return room.Name, nil
+				return room.Name, nil, nil
 			}
 			displayName = a.Name
 			return
 		}
 
-		return room.Name, nil
+		return room.Name, nil, nil
 	}
 
-	return room.Name, nil
+	return room.Name, nil, nil
+}
+
+func (s *ChatRoomSummary) applyPresence(snapshot chatPort.PresenceSnapshot) {
+	status := string(snapshot.Status)
+	s.PresenceStatus = &status
+	s.LastSeenAt = snapshot.LastSeenAt
+}
+
+func formatPresenceUserID(userID int64) string {
+	return strconv.FormatInt(userID, 10)
 }

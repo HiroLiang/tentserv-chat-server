@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/agent"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
@@ -89,6 +90,8 @@ func TestGetUserChatRoomsUseCase_IncludesLatestMessageSenderAndDirectAvatar(t *t
 		messageRepo,
 		userRepo,
 		&getRoomsAgentRepoStub{},
+		nil,
+		nil,
 	)
 
 	t.Log("Given: a user belongs to a direct room with an encrypted latest message and a group room with no messages")
@@ -118,6 +121,80 @@ func TestGetUserChatRoomsUseCase_IncludesLatestMessageSenderAndDirectAvatar(t *t
 	assert.Equal(t, "Launch Crew", group.DisplayName)
 	assert.Nil(t, group.LatestMsg)
 	assert.Nil(t, group.LatestMsgSenderID)
+}
+
+func TestGetUserChatRoomsUseCase_IncludesDirectPeerPresence(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	callerUserID := shared.UserID(10)
+	otherUserID := shared.UserID(20)
+	callerParticipantID := participant.ID(1)
+	otherParticipantID := participant.ID(2)
+	directRoomID := chatroom.ID(7)
+
+	participantRepo := &getRoomsParticipantRepoStub{
+		byUser: map[shared.UserID]*participant.Participant{
+			callerUserID: {ID: callerParticipantID, Type: participant.UserType, UserID: &callerUserID},
+			otherUserID:  {ID: otherParticipantID, Type: participant.UserType, UserID: &otherUserID},
+		},
+		byID: map[participant.ID]*participant.Participant{
+			callerParticipantID: {ID: callerParticipantID, Type: participant.UserType, UserID: &callerUserID},
+			otherParticipantID:  {ID: otherParticipantID, Type: participant.UserType, UserID: &otherUserID},
+		},
+	}
+	memberRepo := &getRoomsChatMemberRepoStub{
+		byParticipant: map[participant.ID][]*chatmember.ChatMember{
+			callerParticipantID: {
+				{ID: 100, RoomID: directRoomID, ParticipantID: callerParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+			},
+		},
+		byRoom: map[chatroom.ID][]*chatmember.ChatMember{
+			directRoomID: {
+				{ID: 100, RoomID: directRoomID, ParticipantID: callerParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+				{ID: 101, RoomID: directRoomID, ParticipantID: otherParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+			},
+		},
+	}
+	roomRepo := &getRoomsChatRoomRepoStub{
+		rooms: map[chatroom.ID]*chatroom.ChatRoom{
+			directRoomID: {ID: directRoomID, Name: "Direct fallback", Type: chatroom.Direct},
+		},
+	}
+	userRepo := &getRoomsUserRepoStub{
+		byID: map[shared.UserID]*domainuser.User{
+			otherUserID: {ID: otherUserID, Name: "Luna"},
+		},
+	}
+	presenceReader := getRoomsPresenceReaderStub{
+		snapshots: map[string]chatPort.PresenceSnapshot{
+			"20": {
+				Status:     chatPort.PresenceStatusOffline,
+				LastSeenAt: &now,
+			},
+		},
+	}
+
+	uc := NewGetUserChatRoomsUseCase(
+		participantRepo,
+		memberRepo,
+		roomRepo,
+		&getRoomsChatMessageRepoStub{},
+		userRepo,
+		&getRoomsAgentRepoStub{},
+		nil,
+		presenceReader,
+	)
+
+	out, err := uc.Execute(context.Background(), appShared.UseCaseInput[struct{}]{
+		Base: appShared.BaseContext{Auth: &appShared.AuthContext{UserID: callerUserID}},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, out.Direct, 1)
+	assert.Equal(t, int64(otherUserID), *out.Direct[0].PeerUserID)
+	require.NotNil(t, out.Direct[0].PresenceStatus)
+	assert.Equal(t, string(chatPort.PresenceStatusOffline), *out.Direct[0].PresenceStatus)
+	require.NotNil(t, out.Direct[0].LastSeenAt)
+	assert.True(t, out.Direct[0].LastSeenAt.Equal(now))
 }
 
 type getRoomsParticipantRepoStub struct {
@@ -323,6 +400,17 @@ func (s *getRoomsUserRepoStub) FindByPublicID(context.Context, string, int, int)
 }
 
 type getRoomsAgentRepoStub struct{}
+
+type getRoomsPresenceReaderStub struct {
+	snapshots map[string]chatPort.PresenceSnapshot
+}
+
+func (s getRoomsPresenceReaderStub) GetPresence(userID string) chatPort.PresenceSnapshot {
+	if snapshot, ok := s.snapshots[userID]; ok {
+		return snapshot
+	}
+	return chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOffline}
+}
 
 func (s *getRoomsAgentRepoStub) FindByID(context.Context, agent.ID) (*agent.Agent, error) {
 	return nil, agent.ErrNotFound

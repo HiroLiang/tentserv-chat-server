@@ -8,6 +8,7 @@ import (
 
 	accountfeatures "github.com/HiroLiang/tentserv-chat-server/features/account"
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/cucumber/godog"
@@ -22,15 +23,18 @@ type steps struct {
 }
 
 type roomSummaryResponse struct {
-	RoomID              int64   `json:"room_id"`
-	RoomType            string  `json:"room_type"`
-	DisplayName         string  `json:"display_name"`
-	AvatarURL           *string `json:"avatar_url"`
-	LatestMessage       *string `json:"latest_message"`
-	LatestMessageSender *int64  `json:"latest_message_sender_id"`
-	UnreadCount         int64   `json:"unread_count"`
-	BlockedByPeer       bool    `json:"blocked_by_peer"`
-	BlockedByMe         bool    `json:"blocked_by_me"`
+	RoomID              int64      `json:"room_id"`
+	RoomType            string     `json:"room_type"`
+	DisplayName         string     `json:"display_name"`
+	AvatarURL           *string    `json:"avatar_url"`
+	PeerUserID          *int64     `json:"peer_user_id"`
+	PresenceStatus      *string    `json:"presence_status"`
+	LastSeenAt          *time.Time `json:"last_seen_at"`
+	LatestMessage       *string    `json:"latest_message"`
+	LatestMessageSender *int64     `json:"latest_message_sender_id"`
+	UnreadCount         int64      `json:"unread_count"`
+	BlockedByPeer       bool       `json:"blocked_by_peer"`
+	BlockedByMe         bool       `json:"blocked_by_me"`
 }
 
 type getUserRoomsResponse struct {
@@ -65,6 +69,8 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the direct chat room has latest message "([^"]*)" from user (\d+)$`, s.theDirectChatRoomHasLatestMessageFromUser)
 	ctx.Step(`^the direct chat room has latest message "([^"]*)" from the logged in user$`, s.theDirectChatRoomHasLatestMessageFromTheLoggedInUser)
 	ctx.Step(`^the last chat room has latest message "([^"]*)" from user (\d+)$`, s.theLastChatRoomHasLatestMessageFromUser)
+	ctx.Step(`^the chat presence for user (\d+) is "([^"]*)"$`, s.theChatPresenceForUserIs)
+	ctx.Step(`^the chat presence for user (\d+) is "([^"]*)" with last seen "([^"]*)"$`, s.theChatPresenceForUserIsWithLastSeen)
 	ctx.Step(`^user (\d+) has blocked the logged in chat user$`, s.userHasBlockedTheLoggedInChatUser)
 	ctx.Step(`^the logged in chat user has blocked user (\d+)$`, s.theLoggedInChatUserHasBlockedUser)
 	ctx.Step(`^the direct chat room is deleted$`, s.theDirectChatRoomIsDeleted)
@@ -74,6 +80,8 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request chat room messages for the last chat room$`, s.iRequestChatRoomMessagesForTheLastChatRoom)
 	ctx.Step(`^I send a text message "([^"]*)" to the last direct room$`, s.iSendATextMessageToTheLastDirectRoom)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", and latest message sender member id from user (\d+)$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
+	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+) and presence "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresence)
+	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+), presence "([^"]*)", and last seen "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresenceWithLastSeen)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by peer with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLatestMessage)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by me with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByMeWithLatestMessage)
 	ctx.Step(`^the direct chat rooms response should not include "([^"]*)"$`, s.theDirectChatRoomsResponseShouldNotInclude)
@@ -190,6 +198,36 @@ func (s *steps) theDirectChatRoomHasLatestMessageFromTheLoggedInUser(content str
 
 func (s *steps) theLastChatRoomHasLatestMessageFromUser(content string, userID int64) error {
 	return s.theDirectChatRoomHasLatestMessageFromUser(content, userID)
+}
+
+func (s *steps) theChatPresenceForUserIs(userID int64, status string) error {
+	return s.setChatPresence(userID, status, "")
+}
+
+func (s *steps) theChatPresenceForUserIsWithLastSeen(userID int64, status, lastSeen string) error {
+	return s.setChatPresence(userID, status, lastSeen)
+}
+
+func (s *steps) setChatPresence(userID int64, status, lastSeen string) error {
+	s.start = time.Now()
+	fmt.Println("Given: the direct chat peer has a presence snapshot")
+	fmt.Printf("Input: user_id=%d status=%s last_seen=%s\n", userID, status, lastSeen)
+	fmt.Println("Action: seed fake presence snapshot for chat room summary")
+
+	snapshot := chatPort.PresenceSnapshot{Status: chatPort.PresenceStatus(status)}
+	if lastSeen != "" {
+		parsed, err := time.Parse(time.RFC3339, lastSeen)
+		if err != nil {
+			return err
+		}
+		snapshot.LastSeenAt = &parsed
+	}
+	s.deps.SetUserPresence(shared.UserID(userID), snapshot)
+
+	fmt.Printf("Output: presence_seeded=true status=%s\n", status)
+	fmt.Println("Mutation: fake presence snapshot stored")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
 }
 
 func (s *steps) userHasBlockedTheLoggedInChatUser(userID int64) error {
@@ -377,6 +415,67 @@ func (s *steps) theDirectChatRoomsResponseShouldIncludeLatestMessageSender(name,
 	}
 
 	return fmt.Errorf("expected direct room response to include %s with avatar %s; body=%s", name, avatar, string(s.ResponseBody))
+}
+
+func (s *steps) theDirectChatRoomsResponseShouldIncludePresence(name string, peerUserID int64, status string) error {
+	start := time.Now()
+	fmt.Println("Given: direct room summary should expose peer presence")
+	fmt.Printf("Input: expected_name=%s expected_peer_user_id=%d expected_status=%s\n", name, peerUserID, status)
+	fmt.Println("Action: decode chat rooms response")
+
+	var body getUserRoomsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, room := range body.Direct {
+		if room.DisplayName != name {
+			continue
+		}
+		peerMatches := room.PeerUserID != nil && *room.PeerUserID == peerUserID
+		statusMatches := room.PresenceStatus != nil && *room.PresenceStatus == status
+		fmt.Printf("Output: matched_room_id=%d peer_matches=%t status_matches=%t\n", room.RoomID, peerMatches, statusMatches)
+		fmt.Println("Mutation: none")
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		if !peerMatches || !statusMatches {
+			return fmt.Errorf("expected peer_user_id=%d and presence=%s, got %+v", peerUserID, status, room)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected direct room response to include %s; body=%s", name, string(s.ResponseBody))
+}
+
+func (s *steps) theDirectChatRoomsResponseShouldIncludePresenceWithLastSeen(name string, peerUserID int64, status, lastSeen string) error {
+	start := time.Now()
+	fmt.Println("Given: direct room summary should expose peer offline last seen")
+	fmt.Printf("Input: expected_name=%s expected_peer_user_id=%d expected_status=%s expected_last_seen=%s\n", name, peerUserID, status, lastSeen)
+	fmt.Println("Action: decode chat rooms response")
+
+	expectedLastSeen, err := time.Parse(time.RFC3339, lastSeen)
+	if err != nil {
+		return err
+	}
+
+	var body getUserRoomsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, room := range body.Direct {
+		if room.DisplayName != name {
+			continue
+		}
+		peerMatches := room.PeerUserID != nil && *room.PeerUserID == peerUserID
+		statusMatches := room.PresenceStatus != nil && *room.PresenceStatus == status
+		lastSeenMatches := room.LastSeenAt != nil && room.LastSeenAt.Equal(expectedLastSeen)
+		fmt.Printf("Output: matched_room_id=%d peer_matches=%t status_matches=%t last_seen_matches=%t\n",
+			room.RoomID, peerMatches, statusMatches, lastSeenMatches)
+		fmt.Println("Mutation: none")
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		if !peerMatches || !statusMatches || !lastSeenMatches {
+			return fmt.Errorf("expected peer_user_id=%d presence=%s last_seen=%s, got %+v", peerUserID, status, lastSeen, room)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected direct room response to include %s; body=%s", name, string(s.ResponseBody))
 }
 
 func (s *steps) theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLatestMessage(name, latestMessage string) error {

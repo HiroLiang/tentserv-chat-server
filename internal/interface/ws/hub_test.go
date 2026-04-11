@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	chatPort "github.com/HiroLiang/tentserv-chat-server/internal/application/chat/port"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // syncAfterBroadcast waits for the Hub's Run() goroutine to drain the
@@ -170,4 +172,64 @@ func TestHub_UnregisterWithUserID_RemovesFromUserIndex(t *testing.T) {
 	default:
 		// expected: nothing delivered
 	}
+}
+
+func TestHub_GetPresence_TracksOnlineAndLastSeen(t *testing.T) {
+	hub := NewHub()
+	client := newTestClient(hub, "alice")
+	client.DeviceID = "device-a"
+
+	hub.registerClient(client)
+
+	snapshot := hub.GetPresence("alice")
+	assert.Equal(t, chatPort.PresenceStatusOnline, snapshot.Status)
+	assert.Nil(t, snapshot.LastSeenAt)
+
+	lastSeen := time.Date(2026, time.April, 12, 2, 3, 4, 0, time.UTC)
+	hub.unregisterClient(client, lastSeen)
+
+	snapshot = hub.GetPresence("alice")
+	assert.Equal(t, chatPort.PresenceStatusOffline, snapshot.Status)
+	require.NotNil(t, snapshot.LastSeenAt)
+	assert.True(t, snapshot.LastSeenAt.Equal(lastSeen))
+}
+
+func TestHub_GetPresence_StaysOnlineUntilLastDeviceDisconnects(t *testing.T) {
+	hub := NewHub()
+	client1 := newTestClient(hub, "alice")
+	client1.DeviceID = "device-a"
+	client2 := newTestClient(hub, "alice")
+	client2.DeviceID = "device-b"
+
+	hub.registerClient(client1)
+	hub.registerClient(client2)
+	hub.unregisterClient(client1, time.Now().UTC())
+
+	snapshot := hub.GetPresence("alice")
+	assert.Equal(t, chatPort.PresenceStatusOnline, snapshot.Status)
+	assert.Nil(t, snapshot.LastSeenAt)
+
+	lastSeen := time.Date(2026, time.April, 12, 5, 6, 7, 0, time.UTC)
+	hub.unregisterClient(client2, lastSeen)
+
+	snapshot = hub.GetPresence("alice")
+	assert.Equal(t, chatPort.PresenceStatusOffline, snapshot.Status)
+	require.NotNil(t, snapshot.LastSeenAt)
+	assert.True(t, snapshot.LastSeenAt.Equal(lastSeen))
+}
+
+func TestHub_PruneStaleClients_MarksUserOffline(t *testing.T) {
+	hub := NewHub()
+	hub.presenceTTL = time.Second
+
+	client := newTestClient(hub, "alice")
+	client.DeviceID = "device-a"
+	client.lastSeenUnixNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+	hub.registerClient(client)
+
+	hub.pruneStaleClients(time.Now().UTC())
+
+	snapshot := hub.GetPresence("alice")
+	assert.Equal(t, chatPort.PresenceStatusOffline, snapshot.Status)
+	require.NotNil(t, snapshot.LastSeenAt)
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/deliveryqueue"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
@@ -71,6 +72,36 @@ func (r *DeliveryQueueRepository) MarkDelivered(ctx context.Context, id delivery
 		return deliveryqueue.ErrNotFound
 	}
 	return nil
+}
+
+func (r *DeliveryQueueRepository) FindPendingByUser(
+	ctx context.Context,
+	userID shared.UserID,
+) ([]*deliveryqueue.DeliveryQueue, error) {
+	query, args, err := deliveryQueueTable.Select(deliveryQueueTable.Columns...).
+		Where(squirrel.And{
+			squirrel.Eq{"user_id": userID},
+			squirrel.Eq{"status": deliveryqueue.StatusPending},
+		}).
+		OrderBy("created_at ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find pending by user query: %w", err)
+	}
+
+	records, err := postgres.ScanAll[DeliveryQueueRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan pending delivery items by user: %w", err)
+	}
+
+	items := make([]*deliveryqueue.DeliveryQueue, 0, len(records))
+	for i := range records {
+		items = append(items, toDomain(&records[i]))
+	}
+	return items, nil
 }
 
 func (r *DeliveryQueueRepository) FindPendingOlderThan(ctx context.Context, age time.Duration) ([]*deliveryqueue.DeliveryQueue, error) {
