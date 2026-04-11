@@ -7,7 +7,9 @@ import (
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/stretchr/testify/assert"
@@ -21,6 +23,7 @@ type notifyPendingChatMemberRepoStub struct {
 
 type notifyPendingSenderKeyRequestRepoStub struct {
 	requests []*senderkeyrequest.SenderKeyRequest
+	marked   [][2]chatmember.ID
 }
 
 func (s *notifyPendingChatMemberRepoStub) FindByID(_ context.Context, id chatmember.ID) (*chatmember.ChatMember, error) {
@@ -82,7 +85,72 @@ func (s *notifyPendingSenderKeyRequestRepoStub) FindPendingByProvider(_ context.
 	return out, nil
 }
 
-func (s *notifyPendingSenderKeyRequestRepoStub) MarkFulfilled(context.Context, chatmember.ID, chatmember.ID) error {
+func (s *notifyPendingSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
+	s.marked = append(s.marked, [2]chatmember.ID{requesterMemberID, providerMemberID})
+	return nil
+}
+
+type notifyPendingMemberSenderKeyRepoStub struct {
+	latestByMember map[chatmember.ID]*membersenderkey.MemberSenderKey
+}
+
+func (s *notifyPendingMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
+	if latest, ok := s.latestByMember[memberID]; ok {
+		copied := *latest
+		return &copied, nil
+	}
+	return nil, membersenderkey.ErrNotFound
+}
+
+func (s *notifyPendingMemberSenderKeyRepoStub) FindAllByMembers(context.Context, []chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
+	return nil, nil
+}
+
+func (s *notifyPendingMemberSenderKeyRepoStub) Add(context.Context, *membersenderkey.MemberSenderKey) error {
+	return nil
+}
+
+func (s *notifyPendingMemberSenderKeyRepoStub) UpsertLatest(context.Context, *membersenderkey.MemberSenderKey) error {
+	return nil
+}
+
+type notifyPendingDistributionRepoStub struct {
+	latest map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution
+}
+
+func (s *notifyPendingDistributionRepoStub) UpsertBatch(context.Context, []*senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *notifyPendingDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
+	return nil, nil
+}
+
+func (s *notifyPendingDistributionRepoStub) UpsertAvailable(context.Context, *senderkeydistribution.SenderKeyDistribution) error {
+	return nil
+}
+
+func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	if dist, ok := s.latest[[2]chatmember.ID{senderMemberID, receiverMemberID}]; ok {
+		copied := *dist
+		return &copied, nil
+	}
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, nil
+}
+
+func (s *notifyPendingDistributionRepoStub) FindByID(context.Context, senderkeydistribution.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return nil, senderkeydistribution.ErrNotFound
+}
+
+func (s *notifyPendingDistributionRepoStub) MarkConsumed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+func (s *notifyPendingDistributionRepoStub) MarkFailed(context.Context, senderkeydistribution.ID) error {
 	return nil
 }
 
@@ -127,12 +195,20 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 			ProviderMemberID:  providerMemberID,
 		}},
 	}
+	memberSenderKeyRepo := &notifyPendingMemberSenderKeyRepoStub{
+		latestByMember: map[chatmember.ID]*membersenderkey.MemberSenderKey{},
+	}
+	distributionRepo := &notifyPendingDistributionRepoStub{
+		latest: map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution{},
+	}
 	broadcaster := &senderKeyReqBroadcasterStub{}
 
 	uc := NewNotifyPendingSenderKeyRequestsUseCase(
 		participantRepo,
 		chatMemberRepo,
 		requestRepo,
+		memberSenderKeyRepo,
+		distributionRepo,
 		broadcaster,
 	)
 
@@ -161,4 +237,85 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 	assert.Equal(t, int64(providerMemberID), envelope.Payload.ProviderMemberID)
 	assert.Equal(t, int64(requesterMemberID), envelope.Payload.RequesterMemberID)
 	assert.Equal(t, requesterUserID, envelope.Payload.RequesterUserID)
+}
+
+func TestNotifyPendingSenderKeyRequests_NotifyForMemberMarksSatisfiedRequestFulfilled(t *testing.T) {
+	const (
+		providerUserID  = int64(51)
+		requesterUserID = int64(52)
+		roomID          = chatroom.ID(98)
+		senderVersion   = int64(1700000001234)
+	)
+
+	providerUID := shared.UserID(providerUserID)
+	requesterUID := shared.UserID(requesterUserID)
+	providerParticipantID := participant.ID(151)
+	requesterParticipantID := participant.ID(152)
+	providerMemberID := chatmember.ID(251)
+	requesterMemberID := chatmember.ID(252)
+
+	participantRepo := &senderKeyReqParticipantStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			providerUID:  {ID: providerParticipantID, Type: participant.UserType, UserID: &providerUID},
+			requesterUID: {ID: requesterParticipantID, Type: participant.UserType, UserID: &requesterUID},
+		},
+		byID: map[participant.ID]*participant.Participant{
+			providerParticipantID:  {ID: providerParticipantID, Type: participant.UserType, UserID: &providerUID},
+			requesterParticipantID: {ID: requesterParticipantID, Type: participant.UserType, UserID: &requesterUID},
+		},
+	}
+	chatMemberRepo := &notifyPendingChatMemberRepoStub{
+		byID: map[chatmember.ID]*chatmember.ChatMember{
+			providerMemberID:  {ID: providerMemberID, RoomID: roomID, ParticipantID: providerParticipantID},
+			requesterMemberID: {ID: requesterMemberID, RoomID: roomID, ParticipantID: requesterParticipantID},
+		},
+		byParticipant: map[participant.ID][]*chatmember.ChatMember{
+			providerParticipantID: {
+				{ID: providerMemberID, RoomID: roomID, ParticipantID: providerParticipantID},
+			},
+		},
+	}
+	requestRepo := &notifyPendingSenderKeyRequestRepoStub{
+		requests: []*senderkeyrequest.SenderKeyRequest{{
+			RequesterMemberID: requesterMemberID,
+			ProviderMemberID:  providerMemberID,
+		}},
+	}
+	memberSenderKeyRepo := &notifyPendingMemberSenderKeyRepoStub{
+		latestByMember: map[chatmember.ID]*membersenderkey.MemberSenderKey{
+			providerMemberID: {
+				ChatMemberID:     providerMemberID,
+				SenderKeyVersion: senderVersion,
+			},
+		},
+	}
+	distributionRepo := &notifyPendingDistributionRepoStub{
+		latest: map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution{
+			{providerMemberID, requesterMemberID}: {
+				SenderMemberID:   providerMemberID,
+				ReceiverMemberID: requesterMemberID,
+				SenderKeyVersion: senderVersion,
+				Status:           senderkeydistribution.StatusConsumed,
+			},
+		},
+	}
+	broadcaster := &senderKeyReqBroadcasterStub{}
+
+	uc := NewNotifyPendingSenderKeyRequestsUseCase(
+		participantRepo,
+		chatMemberRepo,
+		requestRepo,
+		memberSenderKeyRepo,
+		distributionRepo,
+		broadcaster,
+	)
+
+	uc.notifyForMember(context.Background(), &chatmember.ChatMember{
+		ID:            providerMemberID,
+		RoomID:        roomID,
+		ParticipantID: providerParticipantID,
+	}, "51")
+
+	assert.Equal(t, 0, broadcaster.callCount())
+	assert.Equal(t, [][2]chatmember.ID{{requesterMemberID, providerMemberID}}, requestRepo.marked)
 }

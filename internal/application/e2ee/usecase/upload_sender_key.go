@@ -9,6 +9,7 @@ import (
 
 	e2eePort "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
@@ -16,6 +17,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
+	"go.uber.org/zap"
 )
 
 type UploadSenderKeyInput struct {
@@ -110,7 +112,14 @@ func (u *UploadSenderKeyUseCase) Execute(
 		return nil, fmt.Errorf("upsert sender key distribution: %w", err)
 	}
 
-	_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, receiverMember.ID, senderMember.ID)
+	if err := u.senderKeyRequestRepo.MarkFulfilled(ctx, receiverMember.ID, senderMember.ID); err != nil {
+		logger.Log.Warn("mark sender key request fulfilled failed",
+			zap.Int64("room_id", int64(roomID)),
+			zap.Int64("sender_member_id", int64(senderMember.ID)),
+			zap.Int64("receiver_member_id", int64(receiverMember.ID)),
+			zap.Error(err),
+		)
+	}
 	go u.notifyReceiver(context.Background(), dist, int64(roomID))
 
 	return &UploadSenderKeyOutput{}, nil

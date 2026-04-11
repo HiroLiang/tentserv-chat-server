@@ -92,7 +92,7 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 	for _, m := range allMembers {
 		memberParticipantMap[m.ID] = m.ParticipantID
 	}
-	blockedSenders, _, err := blockedMembersForCaller(
+	blockedSenders, _, _, err := blockedMembersForCaller(
 		ctx,
 		uc.friendshipRepo,
 		uc.participantRepo,

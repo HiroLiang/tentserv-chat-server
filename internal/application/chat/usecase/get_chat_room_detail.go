@@ -50,6 +50,7 @@ type GetChatRoomDetailOutput struct {
 	Members       []ChatRoomMemberInfo
 	Messages      []ChatMessageInfo
 	BlockedByPeer bool
+	BlockedByMe   bool
 }
 
 type GetChatRoomDetailUseCase struct {
@@ -114,7 +115,7 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 	if err != nil {
 		return GetChatRoomDetailOutput{}, err
 	}
-	blockedSenders, blockedByPeer, err := blockedMembersForCaller(
+	blockedSenders, blockedByPeer, blockedByMe, err := blockedMembersForCaller(
 		ctx,
 		uc.friendshipRepo,
 		uc.participantRepo,
@@ -186,6 +187,7 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 		Members:       members,
 		Messages:      messages,
 		BlockedByPeer: room.Type == chatroom.Direct && blockedByPeer,
+		BlockedByMe:   room.Type == chatroom.Direct && blockedByMe,
 	}, nil
 }
 

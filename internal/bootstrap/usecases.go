@@ -254,6 +254,8 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.SenderKeyRequestRepo,
+			deps.MemberSenderKeyRepo,
+			deps.SenderKeyDistributionRepo,
 			deps.Hub,
 		),
 		GetSenderKeysUseCase: e2eeUseCase.NewGetSenderKeysUseCase(

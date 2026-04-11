@@ -116,7 +116,7 @@ func (uc *SendMessageUseCase) Execute(
 		if err != nil {
 			return SendMessageOutput{}, err
 		}
-		blockedSenders, _, err := blockedMembersForCaller(
+		blockedSenders, _, _, err := blockedMembersForCaller(
 			ctx,
 			uc.friendshipRepo,
 			uc.participantRepo,

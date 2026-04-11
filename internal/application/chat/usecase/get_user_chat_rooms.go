@@ -26,6 +26,7 @@ type ChatRoomSummary struct {
 	LatestMsgSenderID *int64
 	UnreadCount       int64
 	BlockedByPeer     bool
+	BlockedByMe       bool
 }
 
 type GetUserChatRoomsOutput struct {
@@ -108,7 +109,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		if err != nil {
 			return GetUserChatRoomsOutput{}, err
 		}
-		blockedSenders, blockedByPeer, err := blockedMembersForCaller(
+		blockedSenders, blockedByPeer, blockedByMe, err := blockedMembersForCaller(
 			ctx,
 			uc.friendshipRepo,
 			uc.participantRepo,
@@ -146,6 +147,7 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			LatestMsgSenderID: latestMsgSenderID,
 			UnreadCount:       unreadCount,
 			BlockedByPeer:     room.Type == chatroom.Direct && blockedByPeer,
+			BlockedByMe:       room.Type == chatroom.Direct && blockedByMe,
 		}
 
 		switch room.Type {

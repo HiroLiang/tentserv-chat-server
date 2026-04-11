@@ -3,11 +3,14 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 
 	e2eePort "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/port"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
@@ -19,6 +22,8 @@ type NotifyPendingSenderKeyRequestsUseCase struct {
 	participantRepo      participant.Repository
 	chatMemberRepo       chatmember.Repository
 	senderKeyRequestRepo senderkeyrequest.Repository
+	memberSenderKeyRepo  membersenderkey.Repository
+	distributionRepo     senderkeydistribution.Repository
 	broadcaster          e2eePort.Broadcaster
 }
 
@@ -26,12 +31,16 @@ func NewNotifyPendingSenderKeyRequestsUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
 	senderKeyRequestRepo senderkeyrequest.Repository,
+	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
 	broadcaster e2eePort.Broadcaster,
 ) *NotifyPendingSenderKeyRequestsUseCase {
 	return &NotifyPendingSenderKeyRequestsUseCase{
 		participantRepo:      participantRepo,
 		chatMemberRepo:       chatMemberRepo,
 		senderKeyRequestRepo: senderKeyRequestRepo,
+		memberSenderKeyRepo:  memberSenderKeyRepo,
+		distributionRepo:     distributionRepo,
 		broadcaster:          broadcaster,
 	}
 }
@@ -79,6 +88,10 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 		if err != nil || requesterMember.IsDeleted {
 			continue
 		}
+		if u.requestAlreadySatisfied(ctx, providerMember.ID, requesterMember.ID) {
+			_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, requesterMember.ID, providerMember.ID)
+			continue
+		}
 		requesterParticipant, err := u.participantRepo.FindByID(ctx, requesterMember.ParticipantID)
 		if err != nil || requesterParticipant.UserID == nil {
 			continue
@@ -102,4 +115,28 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 
 		u.broadcaster.SendToUser(providerUserIDStr, payload)
 	}
+}
+
+func (u *NotifyPendingSenderKeyRequestsUseCase) requestAlreadySatisfied(
+	ctx context.Context,
+	providerMemberID, requesterMemberID chatmember.ID,
+) bool {
+	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMemberID)
+	if err != nil {
+		return false
+	}
+
+	dist, err := u.distributionRepo.FindLatest(ctx, providerMemberID, requesterMemberID)
+	if err != nil {
+		if errors.Is(err, senderkeydistribution.ErrNotFound) {
+			return false
+		}
+		return false
+	}
+
+	if dist.SenderKeyVersion < latestKey.SenderKeyVersion {
+		return false
+	}
+
+	return dist.Status == senderkeydistribution.StatusAvailable || dist.Status == senderkeydistribution.StatusConsumed
 }

@@ -27,13 +27,14 @@ func blockedMembersForCaller(
 	callerUserID shared.UserID,
 	callerParticipantID participant.ID,
 	members []*chatmember.ChatMember,
-) (map[chatmember.ID]struct{}, bool, error) {
+) (map[chatmember.ID]struct{}, bool, bool, error) {
 	blocked := make(map[chatmember.ID]struct{})
 	if friendshipRepo == nil {
-		return blocked, false, nil
+		return blocked, false, false, nil
 	}
 
 	blockedByPeer := false
+	blockedByMe := false
 	for _, member := range members {
 		if member.IsDeleted || member.ParticipantID == callerParticipantID {
 			continue
@@ -47,7 +48,7 @@ func blockedMembersForCaller(
 			if errors.Is(err, friendship.ErrFriendshipNotFound) {
 				continue
 			}
-			return nil, false, err
+			return nil, false, false, err
 		}
 		for _, row := range rows {
 			if row.Status != friendship.StatusBlocked {
@@ -57,11 +58,14 @@ func blockedMembersForCaller(
 			if row.UserID == *p.UserID && row.FriendID == callerUserID {
 				blockedByPeer = true
 			}
+			if row.UserID == callerUserID && row.FriendID == *p.UserID {
+				blockedByMe = true
+			}
 			break
 		}
 	}
 
-	return blocked, blockedByPeer, nil
+	return blocked, blockedByPeer, blockedByMe, nil
 }
 
 func blockedSenderList(blocked map[chatmember.ID]struct{}) []chatmember.ID {

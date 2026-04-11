@@ -30,6 +30,7 @@ type roomSummaryResponse struct {
 	LatestMessageSender *int64  `json:"latest_message_sender_id"`
 	UnreadCount         int64   `json:"unread_count"`
 	BlockedByPeer       bool    `json:"blocked_by_peer"`
+	BlockedByMe         bool    `json:"blocked_by_me"`
 }
 
 type getUserRoomsResponse struct {
@@ -45,6 +46,7 @@ type chatMessageResponse struct {
 
 type getChatRoomDetailResponse struct {
 	BlockedByPeer bool                  `json:"blocked_by_peer"`
+	BlockedByMe   bool                  `json:"blocked_by_me"`
 	Messages      []chatMessageResponse `json:"messages"`
 }
 
@@ -64,6 +66,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the direct chat room has latest message "([^"]*)" from the logged in user$`, s.theDirectChatRoomHasLatestMessageFromTheLoggedInUser)
 	ctx.Step(`^the last chat room has latest message "([^"]*)" from user (\d+)$`, s.theLastChatRoomHasLatestMessageFromUser)
 	ctx.Step(`^user (\d+) has blocked the logged in chat user$`, s.userHasBlockedTheLoggedInChatUser)
+	ctx.Step(`^the logged in chat user has blocked user (\d+)$`, s.theLoggedInChatUserHasBlockedUser)
 	ctx.Step(`^the direct chat room is deleted$`, s.theDirectChatRoomIsDeleted)
 	ctx.Step(`^I request my chat rooms$`, s.iRequestMyChatRooms)
 	ctx.Step(`^I request chat room detail for the last direct room$`, s.iRequestChatRoomDetailForTheLastDirectRoom)
@@ -72,8 +75,10 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I send a text message "([^"]*)" to the last direct room$`, s.iSendATextMessageToTheLastDirectRoom)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", and latest message sender member id from user (\d+)$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by peer with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLatestMessage)
+	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by me with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByMeWithLatestMessage)
 	ctx.Step(`^the direct chat rooms response should not include "([^"]*)"$`, s.theDirectChatRoomsResponseShouldNotInclude)
 	ctx.Step(`^the chat room detail response should be marked blocked by peer$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByPeer)
+	ctx.Step(`^the chat room detail response should be marked blocked by me$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByMe)
 	ctx.Step(`^the chat room response should include message "([^"]*)"$`, s.theChatRoomResponseShouldIncludeMessage)
 	ctx.Step(`^the chat room response should not include message "([^"]*)"$`, s.theChatRoomResponseShouldNotIncludeMessage)
 }
@@ -197,6 +202,22 @@ func (s *steps) userHasBlockedTheLoggedInChatUser(userID int64) error {
 	fmt.Printf("Input: blocker_user_id=%d blocked_user_id=%d\n", userID, currentUserID)
 	fmt.Println("Action: seed blocked friendship relationship")
 	s.deps.SeedBlockedFriendship(shared.UserID(userID), currentUserID)
+	fmt.Println("Output: blocked_relationship_seeded=true")
+	fmt.Println("Mutation: friendship repository expanded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theLoggedInChatUserHasBlockedUser(userID int64) error {
+	s.start = time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	if currentUserID == 0 {
+		return fmt.Errorf("no logged in user available")
+	}
+	fmt.Println("Given: the logged in chat user has blocked a peer")
+	fmt.Printf("Input: blocker_user_id=%d blocked_user_id=%d\n", currentUserID, userID)
+	fmt.Println("Action: seed blocked friendship relationship")
+	s.deps.SeedBlockedFriendship(currentUserID, shared.UserID(userID))
 	fmt.Println("Output: blocked_relationship_seeded=true")
 	fmt.Println("Mutation: friendship repository expanded")
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
@@ -385,6 +406,33 @@ func (s *steps) theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLa
 	return fmt.Errorf("expected direct room response to include %s; body=%s", name, string(s.ResponseBody))
 }
 
+func (s *steps) theDirectChatRoomsResponseShouldIncludeMarkedBlockedByMeWithLatestMessage(name, latestMessage string) error {
+	start := time.Now()
+	fmt.Println("Given: direct room summary should stay visible and mark caller block state")
+	fmt.Printf("Input: expected_name=%s expected_message=%s\n", name, latestMessage)
+	fmt.Println("Action: decode chat rooms response")
+
+	var body getUserRoomsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, room := range body.Direct {
+		if room.DisplayName != name {
+			continue
+		}
+		messageMatches := room.LatestMessage != nil && *room.LatestMessage == latestMessage
+		fmt.Printf("Output: matched_room_id=%d blocked_by_me=%t message_matches=%t\n",
+			room.RoomID, room.BlockedByMe, messageMatches)
+		fmt.Println("Mutation: none")
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		if !room.BlockedByMe || !messageMatches {
+			return fmt.Errorf("expected direct room %s to be blocked_by_me with latest message %q, got %+v", name, latestMessage, room)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected direct room response to include %s; body=%s", name, string(s.ResponseBody))
+}
+
 func (s *steps) theDirectChatRoomsResponseShouldNotInclude(name string) error {
 	start := time.Now()
 	fmt.Println("Given: chat room response should hide deleted direct rooms")
@@ -422,6 +470,25 @@ func (s *steps) theChatRoomDetailResponseShouldBeMarkedBlockedByPeer() error {
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	if !body.BlockedByPeer {
 		return fmt.Errorf("expected room detail blocked_by_peer=true; body=%s", string(s.ResponseBody))
+	}
+	return nil
+}
+
+func (s *steps) theChatRoomDetailResponseShouldBeMarkedBlockedByMe() error {
+	start := time.Now()
+	fmt.Println("Given: room detail response should expose caller block state")
+	fmt.Println("Input: expected_blocked_by_me=true")
+	fmt.Println("Action: decode room detail response")
+
+	var body getChatRoomDetailResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	fmt.Printf("Output: blocked_by_me=%t\n", body.BlockedByMe)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if !body.BlockedByMe {
+		return fmt.Errorf("expected room detail blocked_by_me=true; body=%s", string(s.ResponseBody))
 	}
 	return nil
 }

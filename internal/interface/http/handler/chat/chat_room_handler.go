@@ -198,6 +198,7 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 				LatestMsgSenderID: s.LatestMsgSenderID,
 				UnreadCount:       s.UnreadCount,
 				BlockedByPeer:     s.BlockedByPeer,
+				BlockedByMe:       s.BlockedByMe,
 			})
 		}
 		return result
@@ -273,6 +274,7 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 		Members:       members,
 		Messages:      messages,
 		BlockedByPeer: out.BlockedByPeer,
+		BlockedByMe:   out.BlockedByMe,
 	})
 }
 
