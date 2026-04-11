@@ -86,32 +86,26 @@ jobs:
           GCP_ZONE="asia-east1-a"
           
           gcloud compute ssh "${GCP_VM_NAME}" \
-          --zone="$GCP_ZONE" \
-          --tunnel-through-iap \
-          --command "
-            sudo -iu hiroliang bash -lc '
-              set -e
-          
-              cd ${WORK_DIR}
-          
-              echo Stopping and removing old container...
-              podman stop ${GOAT_SERVER_NAME} || true
-              podman rm ${GOAT_SERVER_NAME} || true
-              podman rmi ${IMAGE_NAME}:${TAG} || true
-          
-              echo Pulling latest image...
-              podman pull docker.io/${IMAGE_NAME}:${TAG}
-          
-              echo Starting new container...
-              podman run -d \
-                --name ${GOAT_SERVER_NAME} \
-                --network ${NETWORK_NAME} \
-                -p ${GOAT_SERVER_PORT}:${GOAT_SERVER_PORT} \
-                -v ./config:/app/config:ro \
-                -v .env:/app/.env:ro \
-                -v ./uploads:/app/uploads:rw \
-                docker.io/${IMAGE_NAME}:${TAG}
-          
-              echo Done!
-            '
+            --zone="$GCP_ZONE" \
+            --tunnel-through-iap \
+            --command "
+              sudo -iu hiroliang bash <<- EOF
+                cd ${WORK_DIR}
+                echo 'Stopping and removing old container...'
+                podman stop ${GOAT_SERVER_NAME} || true
+                podman rm ${GOAT_SERVER_NAME} || true
+                podman rmi ${IMAGE_NAME}:${TAG} || true
+                echo 'Pulling latest image...'
+                podman pull docker.io/${IMAGE_NAME}:${TAG}
+                echo 'Starting new container...'
+                podman run -d \
+                  --name ${GOAT_SERVER_NAME} \
+                  --network ${NETWORK_NAME} \
+                  -p ${GOAT_SERVER_PORT}:${GOAT_SERVER_PORT} \
+                  -v ./config:/app/config:ro \
+                  -v .env:/app/.env:ro \
+                  -v ./uploads:/app/uploads:rw \
+                  docker.io/${IMAGE_NAME}:${TAG}
+                echo 'Done!'
+          EOF
           "
