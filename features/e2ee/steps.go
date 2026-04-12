@@ -104,6 +104,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^E2EE keys are bootstrapped for the logged in user$`, s.e2eeKeysAreBootstrappedForTheLoggedInUser)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with no existing sender key$`, s.roomMemberSetupSameRoomNoKey)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with an available latest distribution for the caller$`, s.roomMemberSetupSameRoomWithAvailableDistribution)
+	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) in the same room with an available latest distribution and a pending sender key request for the caller$`, s.roomMemberSetupSameRoomWithAvailableDistributionAndPendingRequest)
 	ctx.Step(`^a room member setup exists with room id (\d+), caller member id (\d+), and provider member id (\d+) where provider is in a different room$`, s.roomMemberSetupDifferentRoom)
 	ctx.Step(`^a room member setup exists with room id (\d+), provider member id (\d+) in that room, and the caller has no room membership$`, s.roomMemberSetupCallerNotInRoom)
 	ctx.Step(`^caller member (\d+) and provider member (\d+) are blocked from each other$`, s.callerAndProviderAreBlocked)
@@ -902,15 +903,19 @@ func (s *steps) e2eeKeysAreBootstrappedForTheLoggedInUser() error {
 }
 
 func (s *steps) roomMemberSetupSameRoomNoKey(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, false, false)
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, false, false, false)
 }
 
 func (s *steps) roomMemberSetupSameRoomWithAvailableDistribution(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, true, true)
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, true, true, false)
+}
+
+func (s *steps) roomMemberSetupSameRoomWithAvailableDistributionAndPendingRequest(roomID, callerMemberID, providerMemberID int64) error {
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID, true, true, true)
 }
 
 func (s *steps) roomMemberSetupDifferentRoom(roomID, callerMemberID, providerMemberID int64) error {
-	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID+100, false, false)
+	return s.roomMemberSetup(roomID, callerMemberID, providerMemberID, roomID+100, false, false, false)
 }
 
 func (s *steps) roomMemberSetupCallerNotInRoom(roomID, providerMemberID int64) error {
@@ -936,7 +941,12 @@ func (s *steps) roomMemberSetupCallerNotInRoom(roomID, providerMemberID int64) e
 	return nil
 }
 
-func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, providerRoomID int64, seedProviderKey bool, seedAvailableDistribution bool) error {
+func (s *steps) roomMemberSetup(
+	roomID, callerMemberID, providerMemberID, providerRoomID int64,
+	seedProviderKey bool,
+	seedAvailableDistribution bool,
+	seedPendingRequest bool,
+) error {
 	s.start = time.Now()
 	callerUserID := s.accountBDD.LastSessionUserID()
 	if callerUserID == 0 {
@@ -955,9 +965,12 @@ func (s *steps) roomMemberSetup(roomID, callerMemberID, providerMemberID, provid
 	if seedAvailableDistribution {
 		s.deps.SKR.SeedDistribution(roomID, chatmember.ID(providerMemberID), chatmember.ID(callerMemberID), 99, senderkeydistribution.StatusAvailable)
 	}
+	if seedPendingRequest {
+		s.deps.SKR.SeedPendingSKRRequest(chatmember.ID(callerMemberID), chatmember.ID(providerMemberID))
+	}
 	fmt.Println("Given: room member setup complete")
-	fmt.Printf("Input: room_id=%d caller_member=%d provider_member=%d provider_room=%d with_key=%t with_available_distribution=%t\n",
-		roomID, callerMemberID, providerMemberID, providerRoomID, seedProviderKey, seedAvailableDistribution)
+	fmt.Printf("Input: room_id=%d caller_member=%d provider_member=%d provider_room=%d with_key=%t with_available_distribution=%t with_pending_request=%t\n",
+		roomID, callerMemberID, providerMemberID, providerRoomID, seedProviderKey, seedAvailableDistribution, seedPendingRequest)
 	fmt.Println("Mutation: SKR participants and members seeded")
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
 	return nil

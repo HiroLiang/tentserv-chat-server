@@ -20,6 +20,12 @@ Feature: E2EE sender key request distribution
     Then the response status should be 204
     And no sender key request row should exist from member 203 to provider 204
 
+  Scenario: Sender key request self-heals a stale pending row when the caller already has the latest distribution
+    Given a room member setup exists with room id 7, caller member id 213, and provider member id 214 in the same room with an available latest distribution and a pending sender key request for the caller
+    When I create a sender key request for room 7 and provider member 214
+    Then the response status should be 204
+    And pending sender key request count from member 213 to provider 214 should be 0
+
   Scenario: Sender key request is rejected when provider member belongs to a different room
     Given a room member setup exists with room id 3, caller member id 205, and provider member id 206 where provider is in a different room
     When I create a sender key request for room 3 and provider member 206

@@ -96,6 +96,9 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		if distErr == nil &&
 			dist.SenderKeyVersion >= latestKey.SenderKeyVersion &&
 			(dist.Status == senderkeydistribution.StatusAvailable || dist.Status == senderkeydistribution.StatusConsumed) {
+			if fulfillErr := u.senderKeyRequestRepo.MarkFulfilled(ctx, callerMember.ID, providerMember.ID); fulfillErr != nil {
+				return nil, fmt.Errorf("create sender key request: mark stale request fulfilled: %w", fulfillErr)
+			}
 			return &CreateSenderKeyRequestOutput{}, nil
 		}
 	}

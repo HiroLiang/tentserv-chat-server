@@ -103,8 +103,9 @@ func (s *senderKeyReqChatMemberStub) Remove(context.Context, chatroom.ID, partic
 }
 
 type senderKeyReqSKRRepoStub struct {
-	records     map[string]*senderkeyrequest.SenderKeyRequest
-	upsertCount int
+	records        map[string]*senderkeyrequest.SenderKeyRequest
+	upsertCount    int
+	fulfilledCount int
 }
 
 func (s *senderKeyReqSKRRepoStub) Upsert(_ context.Context, req *senderkeyrequest.SenderKeyRequest) error {
@@ -121,7 +122,15 @@ func (s *senderKeyReqSKRRepoStub) FindPendingByProvider(context.Context, chatmem
 	return nil, nil
 }
 
-func (s *senderKeyReqSKRRepoStub) MarkFulfilled(context.Context, chatmember.ID, chatmember.ID) error {
+func (s *senderKeyReqSKRRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
+	if s.records == nil {
+		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
+	}
+	if req, ok := s.records[s.key(requesterMemberID, providerMemberID)]; ok {
+		now := time.Now()
+		req.FulfilledAt = &now
+	}
+	s.fulfilledCount++
 	return nil
 }
 
@@ -138,6 +147,16 @@ func (s *senderKeyReqSKRRepoStub) storedRequest(requesterMemberID, providerMembe
 
 func (s *senderKeyReqSKRRepoStub) storedCount() int {
 	return len(s.records)
+}
+
+func (s *senderKeyReqSKRRepoStub) seedPendingRequest(requesterMemberID, providerMemberID chatmember.ID) {
+	if s.records == nil {
+		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
+	}
+	s.records[s.key(requesterMemberID, providerMemberID)] = &senderkeyrequest.SenderKeyRequest{
+		RequesterMemberID: requesterMemberID,
+		ProviderMemberID:  providerMemberID,
+	}
 }
 
 type senderKeyReqMSKRepoStub struct {
@@ -442,6 +461,50 @@ func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailable(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Zero(t, skrStub.storedCount(), "no request should be stored when the latest distribution is already available")
+}
+
+func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailableMarksPendingRequestFulfilled(t *testing.T) {
+	const (
+		callerUID   = int64(15)
+		providerUID = int64(16)
+		roomID      = chatroom.ID(25)
+	)
+
+	pStub := makeParticipantStub(callerUID, providerUID)
+	cmStub, callerMemberID, providerMemberID := makeChatMemberStub(roomID, callerUID, providerUID, roomID)
+	skrStub := &senderKeyReqSKRRepoStub{}
+	skrStub.seedPendingRequest(callerMemberID, providerMemberID)
+	mskStub := &senderKeyReqMSKRepoStub{}
+	distStub := &senderKeyReqDistributionRepoStub{
+		latest: map[string]*senderkeydistribution.SenderKeyDistribution{
+			fmt.Sprintf("%d:%d", providerMemberID, callerMemberID): {
+				SenderMemberID:   providerMemberID,
+				ReceiverMemberID: callerMemberID,
+				SenderKeyVersion: 9,
+				Status:           senderkeydistribution.StatusConsumed,
+			},
+		},
+	}
+
+	uc := NewCreateSenderKeyRequestUseCase(
+		pStub,
+		cmStub,
+		skrStub,
+		mskStub,
+		distStub,
+		&senderKeyReqFriendshipStub{},
+		&senderKeyReqBroadcasterStub{},
+	)
+	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+
+	_, err := uc.Execute(context.Background(), input)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, skrStub.fulfilledCount)
+	stored := skrStub.storedRequest(callerMemberID, providerMemberID)
+	require.NotNil(t, stored)
+	require.NotNil(t, stored.FulfilledAt)
+	assert.Zero(t, skrStub.upsertCount)
 }
 
 func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {

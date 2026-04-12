@@ -214,6 +214,13 @@ func (d *SKRDeps) FulfilledSKRCount(requesterMemberID, providerMemberID chatmemb
 	return d.skrRepo.countFulfilled(requesterMemberID, providerMemberID)
 }
 
+func (d *SKRDeps) SeedPendingSKRRequest(requesterMemberID, providerMemberID chatmember.ID) {
+	_ = d.skrRepo.Upsert(context.Background(), &senderkeyrequest.SenderKeyRequest{
+		RequesterMemberID: requesterMemberID,
+		ProviderMemberID:  providerMemberID,
+	})
+}
+
 // ─── participant repo ─────────────────────────────────────────────────────────
 
 type skrParticipantRepo struct {
