@@ -23,18 +23,19 @@ type steps struct {
 }
 
 type roomSummaryResponse struct {
-	RoomID              int64      `json:"room_id"`
-	RoomType            string     `json:"room_type"`
-	DisplayName         string     `json:"display_name"`
-	AvatarURL           *string    `json:"avatar_url"`
-	PeerUserID          *int64     `json:"peer_user_id"`
-	PresenceStatus      *string    `json:"presence_status"`
-	LastSeenAt          *time.Time `json:"last_seen_at"`
-	LatestMessage       *string    `json:"latest_message"`
-	LatestMessageSender *int64     `json:"latest_message_sender_id"`
-	UnreadCount         int64      `json:"unread_count"`
-	BlockedByPeer       bool       `json:"blocked_by_peer"`
-	BlockedByMe         bool       `json:"blocked_by_me"`
+	RoomID                 int64      `json:"room_id"`
+	RoomType               string     `json:"room_type"`
+	DisplayName            string     `json:"display_name"`
+	AvatarURL              *string    `json:"avatar_url"`
+	PeerUserID             *int64     `json:"peer_user_id"`
+	PresenceStatus         *string    `json:"presence_status"`
+	LastSeenAt             *time.Time `json:"last_seen_at"`
+	LatestMessage          *string    `json:"latest_message"`
+	LatestMessageCreatedAt *time.Time `json:"latest_message_created_at"`
+	LatestMessageSender    *int64     `json:"latest_message_sender_id"`
+	UnreadCount            int64      `json:"unread_count"`
+	BlockedByPeer          bool       `json:"blocked_by_peer"`
+	BlockedByMe            bool       `json:"blocked_by_me"`
 }
 
 type getUserRoomsResponse struct {
@@ -79,7 +80,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request chat room messages for the last direct room$`, s.iRequestChatRoomMessagesForTheLastDirectRoom)
 	ctx.Step(`^I request chat room messages for the last chat room$`, s.iRequestChatRoomMessagesForTheLastChatRoom)
 	ctx.Step(`^I send a text message "([^"]*)" to the last direct room$`, s.iSendATextMessageToTheLastDirectRoom)
-	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", and latest message sender member id from user (\d+)$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
+	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", latest message sender member id from user (\d+), and latest message created_at$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+) and presence "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresence)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+), presence "([^"]*)", and last seen "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresenceWithLastSeen)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by peer with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLatestMessage)
@@ -389,7 +390,7 @@ func (s *steps) iSendATextMessageToTheLastDirectRoom(content string) error {
 func (s *steps) theDirectChatRoomsResponseShouldIncludeLatestMessageSender(name, avatar, latestMessage string, userID int64) error {
 	start := time.Now()
 	fmt.Println("Given: chat room response should expose direct room summary metadata")
-	fmt.Printf("Input: expected_name=%s expected_avatar=%s expected_message_present=%t sender_user_id=%d\n",
+	fmt.Printf("Input: expected_name=%s expected_avatar=%s expected_message_present=%t sender_user_id=%d latest_message_created_at_present=true\n",
 		name, avatar, latestMessage != "", userID)
 	fmt.Println("Action: decode chat rooms response")
 
@@ -403,13 +404,14 @@ func (s *steps) theDirectChatRoomsResponseShouldIncludeLatestMessageSender(name,
 			continue
 		}
 		messageMatches := room.LatestMessage != nil && *room.LatestMessage == latestMessage
+		createdAtMatches := room.LatestMessageCreatedAt != nil
 		senderMatches := room.LatestMessageSender != nil && *room.LatestMessageSender == expectedMemberID
-		fmt.Printf("Output: matched_room_id=%d message_matches=%t sender_matches=%t expected_sender_member_id=%d\n",
-			room.RoomID, messageMatches, senderMatches, expectedMemberID)
+		fmt.Printf("Output: matched_room_id=%d message_matches=%t created_at_matches=%t sender_matches=%t expected_sender_member_id=%d\n",
+			room.RoomID, messageMatches, createdAtMatches, senderMatches, expectedMemberID)
 		fmt.Println("Mutation: none")
 		fmt.Printf("Duration: %s\n", time.Since(start))
-		if !messageMatches || !senderMatches {
-			return fmt.Errorf("expected latest message %q and sender member id %d, got %+v", latestMessage, expectedMemberID, room)
+		if !messageMatches || !createdAtMatches || !senderMatches {
+			return fmt.Errorf("expected latest message %q, created_at, and sender member id %d, got %+v", latestMessage, expectedMemberID, room)
 		}
 		return nil
 	}

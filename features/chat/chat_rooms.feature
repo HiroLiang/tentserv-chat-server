@@ -15,7 +15,7 @@ Feature: Chat room summaries
     And the direct chat room has latest message "e2ee:v1:ciphertext" from user 701
     When I request my chat rooms
     Then the response status should be 200
-    And the direct chat rooms response should include "Luna" with avatar "avatars/luna.png", latest message "e2ee:v1:ciphertext", and latest message sender member id from user 701
+    And the direct chat rooms response should include "Luna" with avatar "avatars/luna.png", latest message "e2ee:v1:ciphertext", latest message sender member id from user 701, and latest message created_at
 
   Scenario: Direct room summary includes online presence for the peer
     Given login state is clean

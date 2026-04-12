@@ -21,18 +21,19 @@ import (
 )
 
 type ChatRoomSummary struct {
-	RoomID            int64
-	RoomType          string
-	DisplayName       string
-	AvatarURL         *string
-	PeerUserID        *int64
-	PresenceStatus    *string
-	LastSeenAt        *time.Time
-	LatestMsg         *string
-	LatestMsgSenderID *int64
-	UnreadCount       int64
-	BlockedByPeer     bool
-	BlockedByMe       bool
+	RoomID             int64
+	RoomType           string
+	DisplayName        string
+	AvatarURL          *string
+	PeerUserID         *int64
+	PresenceStatus     *string
+	LastSeenAt         *time.Time
+	LatestMsg          *string
+	LatestMsgCreatedAt *time.Time
+	LatestMsgSenderID  *int64
+	UnreadCount        int64
+	BlockedByPeer      bool
+	BlockedByMe        bool
 }
 
 type GetUserChatRoomsOutput struct {
@@ -127,9 +128,12 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		}
 
 		var latestMsg *string
+		var latestMsgCreatedAt *time.Time
 		var latestMsgSenderID *int64
 		if msg, err := findLatestByRoomExcludingSenders(ctx, uc.chatMessageRepo, room.ID, blockedSenders); err == nil {
 			latestMsg = &msg.Content
+			createdAt := msg.CreatedAt
+			latestMsgCreatedAt = &createdAt
 			senderID := int64(msg.SenderID)
 			latestMsgSenderID = &senderID
 		}
@@ -144,16 +148,17 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		}
 
 		summary := ChatRoomSummary{
-			RoomID:            int64(room.ID),
-			RoomType:          string(room.Type),
-			DisplayName:       displayName,
-			AvatarURL:         avatarURL,
-			PeerUserID:        peerUserID,
-			LatestMsg:         latestMsg,
-			LatestMsgSenderID: latestMsgSenderID,
-			UnreadCount:       unreadCount,
-			BlockedByPeer:     room.Type == chatroom.Direct && blockedByPeer,
-			BlockedByMe:       room.Type == chatroom.Direct && blockedByMe,
+			RoomID:             int64(room.ID),
+			RoomType:           string(room.Type),
+			DisplayName:        displayName,
+			AvatarURL:          avatarURL,
+			PeerUserID:         peerUserID,
+			LatestMsg:          latestMsg,
+			LatestMsgCreatedAt: latestMsgCreatedAt,
+			LatestMsgSenderID:  latestMsgSenderID,
+			UnreadCount:        unreadCount,
+			BlockedByPeer:      room.Type == chatroom.Direct && blockedByPeer,
+			BlockedByMe:        room.Type == chatroom.Direct && blockedByMe,
 		}
 		if room.Type == chatroom.Direct && peerUserID != nil && uc.presenceReader != nil {
 			summary.applyPresence(uc.presenceReader.GetPresence(formatPresenceUserID(*peerUserID)))

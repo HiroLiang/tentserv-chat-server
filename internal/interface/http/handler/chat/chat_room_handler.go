@@ -190,18 +190,19 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 		result := make([]ChatRoomSummaryResponse, 0, len(summaries))
 		for _, s := range summaries {
 			result = append(result, ChatRoomSummaryResponse{
-				RoomID:            s.RoomID,
-				RoomType:          s.RoomType,
-				DisplayName:       s.DisplayName,
-				AvatarURL:         s.AvatarURL,
-				PeerUserID:        s.PeerUserID,
-				PresenceStatus:    s.PresenceStatus,
-				LastSeenAt:        s.LastSeenAt,
-				LatestMsg:         s.LatestMsg,
-				LatestMsgSenderID: s.LatestMsgSenderID,
-				UnreadCount:       s.UnreadCount,
-				BlockedByPeer:     s.BlockedByPeer,
-				BlockedByMe:       s.BlockedByMe,
+				RoomID:             s.RoomID,
+				RoomType:           s.RoomType,
+				DisplayName:        s.DisplayName,
+				AvatarURL:          s.AvatarURL,
+				PeerUserID:         s.PeerUserID,
+				PresenceStatus:     s.PresenceStatus,
+				LastSeenAt:         s.LastSeenAt,
+				LatestMsg:          s.LatestMsg,
+				LatestMsgCreatedAt: s.LatestMsgCreatedAt,
+				LatestMsgSenderID:  s.LatestMsgSenderID,
+				UnreadCount:        s.UnreadCount,
+				BlockedByPeer:      s.BlockedByPeer,
+				BlockedByMe:        s.BlockedByMe,
 			})
 		}
 		return result

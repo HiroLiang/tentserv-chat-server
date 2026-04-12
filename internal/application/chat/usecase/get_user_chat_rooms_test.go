@@ -110,16 +110,19 @@ func TestGetUserChatRoomsUseCase_IncludesLatestMessageSenderAndDirectAvatar(t *t
 
 	direct := out.Direct[0]
 	require.NotNil(t, direct.LatestMsg)
+	require.NotNil(t, direct.LatestMsgCreatedAt)
 	require.NotNil(t, direct.LatestMsgSenderID)
 	assert.Equal(t, "Luna", direct.DisplayName)
 	assert.Equal(t, "avatars/luna.png", *direct.AvatarURL)
 	assert.Equal(t, "e2ee:v1:ciphertext", *direct.LatestMsg)
+	assert.WithinDuration(t, now, *direct.LatestMsgCreatedAt, time.Second)
 	assert.Equal(t, int64(otherMemberID), *direct.LatestMsgSenderID)
 	assert.Equal(t, int64(1), direct.UnreadCount)
 
 	group := out.Group[0]
 	assert.Equal(t, "Launch Crew", group.DisplayName)
 	assert.Nil(t, group.LatestMsg)
+	assert.Nil(t, group.LatestMsgCreatedAt)
 	assert.Nil(t, group.LatestMsgSenderID)
 }
 
