@@ -39,6 +39,29 @@ func TestSenderKeyRepository_AddUses64BitChainIDMirror(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSenderKeyRepository_UpsertLatestUsesConflictKeyOnMemberAndVersion(t *testing.T) {
+	db, mock := testutil.SetupDB(t)
+	repo := NewSenderKeyRepository(sqlx.NewDb(db, "postgres"))
+	const senderKeyVersion = int64(1776018315645)
+	now := time.Now()
+
+	mock.ExpectQuery(`(?s)INSERT INTO public\.member_sender_keys \(chat_member_id,chain_id,sender_key_version,key_fingerprint\) VALUES \(\$1,\$2,\$3,\$4\) ON CONFLICT \(chat_member_id, sender_key_version\) DO UPDATE SET.*RETURNING id, created_at`).
+		WithArgs(int64(chatmember.ID(302)), membersenderkey.ChainID(senderKeyVersion), senderKeyVersion, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(2, now))
+
+	sk := &membersenderkey.MemberSenderKey{
+		ChatMemberID:     chatmember.ID(302),
+		SenderKeyVersion: senderKeyVersion,
+	}
+
+	err := repo.UpsertLatest(context.Background(), sk)
+
+	require.NoError(t, err)
+	assert.Equal(t, membersenderkey.ID(2), sk.ID)
+	assert.WithinDuration(t, now, sk.CreatedAt, time.Second)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSenderKeyDistributionRepository_UpsertAvailableWrites64BitChainIDMirror(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewSenderKeyDistributionRepository(sqlx.NewDb(db, "postgres"))

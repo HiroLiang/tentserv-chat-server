@@ -9,6 +9,8 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/logger"
+	"go.uber.org/zap"
 )
 
 type wsSenderKeyDistributionAvailablePayload struct {
@@ -27,6 +29,16 @@ func notifySenderKeyDistributionAvailable(
 	dist *senderkeydistribution.SenderKeyDistribution,
 	roomID int64,
 ) {
+	if roomID <= 0 {
+		logger.Log.Warn("skip sender key distribution available broadcast for invalid room id",
+			zap.Int64("room_id", roomID),
+			zap.Int64("distribution_id", int64(dist.ID)),
+			zap.Int64("sender_member_id", int64(dist.SenderMemberID)),
+			zap.Int64("receiver_member_id", int64(dist.ReceiverMemberID)),
+		)
+		return
+	}
+
 	receiverMember, err := chatMemberRepo.FindByID(ctx, dist.ReceiverMemberID)
 	if err != nil || receiverMember.IsDeleted {
 		return
@@ -52,25 +64,5 @@ func notifySenderKeyDistributionAvailable(
 	})
 	if err == nil {
 		broadcaster.SendToUser(userIDStr, payload)
-	}
-
-	legacyPayload, err := json.Marshal(struct {
-		Type    string `json:"type"`
-		Payload struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		} `json:"payload"`
-	}{
-		Type: "e2ee.direct_key_ready",
-		Payload: struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		}{
-			RoomID:           roomID,
-			ProviderMemberID: int64(dist.SenderMemberID),
-		},
-	})
-	if err == nil {
-		broadcaster.SendToUser(userIDStr, legacyPayload)
 	}
 }

@@ -27,6 +27,16 @@ Feature: E2EE sender key distribution lifecycle
     Then the response status should be 200
     And pending sender key distributions should include sender member 304, receiver member 303, and version 77
 
+  Scenario: Repeated upload of the same sender key version stays idempotent
+    Given a sender key provider setup exists with room id 15, provider member id 309, and receiver member id 310 in the same room
+    When I provide a sender key distribution for room 15 to receiver member 310 with sender key version 1776018315645
+    Then the response status should be 204
+    When I provide a sender key distribution for room 15 to receiver member 310 with sender key version 1776018315645
+    Then the response status should be 204
+    When I request sender key distribution status for room 15
+    Then the response status should be 200
+    And sender key distribution status should list available receiver member 310
+
   Scenario: Receiver consumes an available sender key distribution
     Given a sender key receiver setup exists with room id 13, sender member id 306, and receiver member id 305 with available distribution version 88
     When I list pending sender key distributions for room 13

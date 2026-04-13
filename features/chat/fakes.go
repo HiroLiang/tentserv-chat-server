@@ -630,7 +630,20 @@ func (r *bddChatMemberRepo) FindByParticipant(_ context.Context, participantID p
 	return out, nil
 }
 
-func (r *bddChatMemberRepo) Update(context.Context, *chatmember.ChatMember) error {
+func (r *bddChatMemberRepo) Update(_ context.Context, member *chatmember.ChatMember) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	existing, ok := r.byID[member.ID]
+	if !ok {
+		return chatmember.ErrNotFound
+	}
+	copied := *member
+	if copied.UpdatedAt.IsZero() {
+		copied.UpdatedAt = time.Now()
+	}
+	r.byID[member.ID] = &copied
+	existing = r.byID[member.ID]
+	*member = *existing
 	return nil
 }
 

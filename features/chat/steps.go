@@ -59,6 +59,15 @@ type getChatRoomMessagesResponse struct {
 	Messages []chatMessageResponse `json:"messages"`
 }
 
+type memberStatusInfoResponse struct {
+	MemberID   int64      `json:"member_id"`
+	LastReadAt *time.Time `json:"last_read_at"`
+}
+
+type updateMemberStatusResponse struct {
+	Members []memberStatusInfoResponse `json:"members"`
+}
+
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, accountBDD *accountfeatures.Deps) {
 	s := &steps{APITestContext: apiCtx, deps: deps, accountBDD: accountBDD}
 
@@ -79,13 +88,16 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request chat room detail for the last direct room$`, s.iRequestChatRoomDetailForTheLastDirectRoom)
 	ctx.Step(`^I request chat room messages for the last direct room$`, s.iRequestChatRoomMessagesForTheLastDirectRoom)
 	ctx.Step(`^I request chat room messages for the last chat room$`, s.iRequestChatRoomMessagesForTheLastChatRoom)
+	ctx.Step(`^I mark the last direct room as read$`, s.iMarkTheLastDirectRoomAsRead)
 	ctx.Step(`^I send a text message "([^"]*)" to the last direct room$`, s.iSendATextMessageToTheLastDirectRoom)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with avatar "([^"]*)", latest message "([^"]*)", latest message sender member id from user (\d+), and latest message created_at$`, s.theDirectChatRoomsResponseShouldIncludeLatestMessageSender)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+) and presence "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresence)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with peer user id (\d+), presence "([^"]*)", and last seen "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludePresenceWithLastSeen)
+	ctx.Step(`^the direct chat rooms response should include "([^"]*)" with unread count (\d+)$`, s.theDirectChatRoomsResponseShouldIncludeUnreadCount)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by peer with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByPeerWithLatestMessage)
 	ctx.Step(`^the direct chat rooms response should include "([^"]*)" marked blocked by me with latest message "([^"]*)"$`, s.theDirectChatRoomsResponseShouldIncludeMarkedBlockedByMeWithLatestMessage)
 	ctx.Step(`^the direct chat rooms response should not include "([^"]*)"$`, s.theDirectChatRoomsResponseShouldNotInclude)
+	ctx.Step(`^the member status response should include the logged in member with last_read_at$`, s.theMemberStatusResponseShouldIncludeTheLoggedInMemberWithLastReadAt)
 	ctx.Step(`^the chat room detail response should be marked blocked by peer$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByPeer)
 	ctx.Step(`^the chat room detail response should be marked blocked by me$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByMe)
 	ctx.Step(`^the chat room response should include message "([^"]*)"$`, s.theChatRoomResponseShouldIncludeMessage)
@@ -357,6 +369,32 @@ func (s *steps) iRequestChatRoomMessagesForTheLastChatRoom() error {
 	return s.iRequestChatRoomMessagesForTheLastDirectRoom()
 }
 
+func (s *steps) iMarkTheLastDirectRoomAsRead() error {
+	s.start = time.Now()
+	if s.lastDirectRoomID == 0 {
+		return fmt.Errorf("no direct room available")
+	}
+	token := s.accountBDD.LastAccessToken()
+	deviceID := s.accountBDD.LastSessionDeviceID().String()
+	if token == "" {
+		return fmt.Errorf("no login access token available")
+	}
+	fmt.Println("Given: an authenticated user marks the direct room as read")
+	fmt.Printf("Input: token_present=%t device_id=%s room_id=%d\n", token != "", deviceID, s.lastDirectRoomID)
+	fmt.Println("Action: PATCH /api/chat/room/{room_id}/member/status")
+	err := s.DoRequestWithHeaders(http.MethodPatch, fmt.Sprintf("/api/chat/room/%d/member/status", s.lastDirectRoomID), map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+		"X-Device-ID":   deviceID,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: member last_read_at should update for the caller")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
 func (s *steps) iSendATextMessageToTheLastDirectRoom(content string) error {
 	s.start = time.Now()
 	if s.lastDirectRoomID == 0 {
@@ -417,6 +455,64 @@ func (s *steps) theDirectChatRoomsResponseShouldIncludeLatestMessageSender(name,
 	}
 
 	return fmt.Errorf("expected direct room response to include %s with avatar %s; body=%s", name, avatar, string(s.ResponseBody))
+}
+
+func (s *steps) theDirectChatRoomsResponseShouldIncludeUnreadCount(name string, unreadCount int64) error {
+	start := time.Now()
+	fmt.Println("Given: chat room response should expose the authoritative unread count")
+	fmt.Printf("Input: expected_name=%s expected_unread_count=%d\n", name, unreadCount)
+	fmt.Println("Action: decode chat rooms response")
+
+	var body getUserRoomsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, room := range body.Direct {
+		if room.DisplayName != name {
+			continue
+		}
+		fmt.Printf("Output: matched_room_id=%d unread_count=%d\n", room.RoomID, room.UnreadCount)
+		fmt.Println("Mutation: none")
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		if room.UnreadCount != unreadCount {
+			return fmt.Errorf("expected direct room %s unread_count=%d, got %+v", name, unreadCount, room)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected direct room response to include %s; body=%s", name, string(s.ResponseBody))
+}
+
+func (s *steps) theMemberStatusResponseShouldIncludeTheLoggedInMemberWithLastReadAt() error {
+	start := time.Now()
+	currentUserID := s.accountBDD.LastSessionUserID()
+	if currentUserID == 0 {
+		return fmt.Errorf("no logged in user available")
+	}
+	expectedMemberID := int64(s.deps.MemberIDForUser(s.lastDirectRoomID, currentUserID))
+	if expectedMemberID == 0 {
+		return fmt.Errorf("no member id found for logged in user %d", currentUserID)
+	}
+	fmt.Println("Given: update member status response should include the caller member")
+	fmt.Printf("Input: expected_member_id=%d\n", expectedMemberID)
+	fmt.Println("Action: decode update member status response")
+
+	var body updateMemberStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, member := range body.Members {
+		if member.MemberID != expectedMemberID {
+			continue
+		}
+		fmt.Printf("Output: matched_member_id=%d last_read_at_present=%t\n", member.MemberID, member.LastReadAt != nil)
+		fmt.Println("Mutation: none")
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		if member.LastReadAt == nil {
+			return fmt.Errorf("expected last_read_at for member %d, got %+v", expectedMemberID, member)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected member status response to include member %d; body=%s", expectedMemberID, string(s.ResponseBody))
 }
 
 func (s *steps) theDirectChatRoomsResponseShouldIncludePresence(name string, peerUserID int64, status string) error {

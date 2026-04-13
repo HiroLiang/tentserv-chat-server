@@ -142,7 +142,9 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		if member.LastReadAt != nil {
 			since = *member.LastReadAt
 		}
-		unreadCount, err := countByRoomAfterExcludingSenders(ctx, uc.chatMessageRepo, room.ID, since, blockedSenders)
+		unreadExcludedSenders := cloneBlockedSenders(blockedSenders)
+		unreadExcludedSenders[member.ID] = struct{}{}
+		unreadCount, err := countByRoomAfterExcludingSenders(ctx, uc.chatMessageRepo, room.ID, since, unreadExcludedSenders)
 		if err != nil {
 			logger.Log.Warn("CountByRoomAfter failed", zap.Int64("room_id", int64(room.ID)), zap.Error(err))
 		}
@@ -177,6 +179,14 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 	}
 
 	return out, nil
+}
+
+func cloneBlockedSenders(blocked map[chatmember.ID]struct{}) map[chatmember.ID]struct{} {
+	cloned := make(map[chatmember.ID]struct{}, len(blocked)+1)
+	for senderID := range blocked {
+		cloned[senderID] = struct{}{}
+	}
+	return cloned
 }
 
 func (uc *GetUserChatRoomsUseCase) findOtherParticipant(

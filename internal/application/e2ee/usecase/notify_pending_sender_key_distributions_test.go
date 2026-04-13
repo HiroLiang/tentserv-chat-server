@@ -70,7 +70,7 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 	uc.Execute(context.Background(), "51")
 
 	require.Eventually(t, func() bool {
-		return broadcaster.callCount() == 2
+		return broadcaster.callCount() == 1
 	}, time.Second, 10*time.Millisecond)
 	calls := broadcaster.snapshotCalls()
 
@@ -86,16 +86,62 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 	assert.Equal(t, int64(senderMemberID), available.Payload.SenderMemberID)
 	assert.Equal(t, int64(receiverMemberID), available.Payload.ReceiverMemberID)
 	assert.Equal(t, version, available.Payload.SenderKeyVersion)
+}
 
-	var legacy struct {
-		Type    string `json:"type"`
-		Payload struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		} `json:"payload"`
+func TestNotifyPendingSenderKeyDistributions_SkipsInvalidRoomIDs(t *testing.T) {
+	const (
+		receiverUserID   = int64(52)
+		roomID           = chatroom.ID(0)
+		senderMemberID   = chatmember.ID(351)
+		receiverMemberID = chatmember.ID(352)
+		distributionID   = senderkeydistribution.ID(902)
+		version          = int64(1775880002000)
+	)
+
+	receiverUID := shared.UserID(receiverUserID)
+	receiverParticipantID := participant.ID(252)
+
+	participantRepo := &senderKeyReqParticipantStub{
+		byUserID: map[shared.UserID]*participant.Participant{
+			receiverUID: {ID: receiverParticipantID, Type: participant.UserType, UserID: &receiverUID},
+		},
+		byID: map[participant.ID]*participant.Participant{
+			receiverParticipantID: {ID: receiverParticipantID, Type: participant.UserType, UserID: &receiverUID},
+		},
 	}
-	require.NoError(t, json.Unmarshal(calls[1].msg, &legacy))
-	assert.Equal(t, "e2ee.direct_key_ready", legacy.Type)
-	assert.Equal(t, int64(roomID), legacy.Payload.RoomID)
-	assert.Equal(t, int64(senderMemberID), legacy.Payload.ProviderMemberID)
+	chatMemberRepo := &notifyPendingChatMemberRepoStub{
+		byID: map[chatmember.ID]*chatmember.ChatMember{
+			receiverMemberID: {ID: receiverMemberID, RoomID: roomID, ParticipantID: receiverParticipantID},
+		},
+		byParticipant: map[participant.ID][]*chatmember.ChatMember{
+			receiverParticipantID: {
+				{ID: receiverMemberID, RoomID: roomID, ParticipantID: receiverParticipantID},
+			},
+		},
+	}
+	distributionRepo := &notifyPendingDistributionRepoStub{
+		latest: map[[2]chatmember.ID]*senderkeydistribution.SenderKeyDistribution{},
+		availableByRoomMember: map[[2]int64][]*senderkeydistribution.SenderKeyDistribution{
+			{int64(roomID), int64(receiverMemberID)}: {{
+				ID:               distributionID,
+				SenderMemberID:   senderMemberID,
+				ReceiverMemberID: receiverMemberID,
+				RoomID:           int64(roomID),
+				SenderKeyVersion: version,
+			}},
+		},
+	}
+	broadcaster := &senderKeyReqBroadcasterStub{}
+
+	uc := NewNotifyPendingSenderKeyDistributionsUseCase(
+		participantRepo,
+		chatMemberRepo,
+		distributionRepo,
+		broadcaster,
+	)
+
+	uc.Execute(context.Background(), "52")
+
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 0, broadcaster.callCount())
 }

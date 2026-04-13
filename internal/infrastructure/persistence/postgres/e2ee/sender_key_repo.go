@@ -115,5 +115,30 @@ func (r *SenderKeyRepository) Add(ctx context.Context, sk *membersenderkey.Membe
 }
 
 func (r *SenderKeyRepository) UpsertLatest(ctx context.Context, sk *membersenderkey.MemberSenderKey) error {
-	return r.Add(ctx, sk)
+	rec := toSenderKeyRecord(sk)
+	if rec.ChainID == 0 {
+		rec.ChainID = membersenderkey.ChainID(rec.SenderKeyVersion)
+	}
+	if rec.SenderKeyVersion == 0 {
+		rec.SenderKeyVersion = int64(rec.ChainID)
+	}
+
+	query, args, err := senderKeyTable.Insert().
+		Columns("chat_member_id", "chain_id", "sender_key_version", "key_fingerprint").
+		Values(rec.ChatMemberID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
+		Suffix(`ON CONFLICT (chat_member_id, sender_key_version) DO UPDATE
+SET chain_id = EXCLUDED.chain_id,
+    key_fingerprint = COALESCE(EXCLUDED.key_fingerprint, public.member_sender_keys.key_fingerprint)
+RETURNING id, created_at`).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build upsert sender key: %w", err)
+	}
+
+	db := r.GetDB(ctx)
+	row := db.QueryRowxContext(ctx, query, args...)
+	if err := row.Scan(&sk.ID, &sk.CreatedAt); err != nil {
+		return fmt.Errorf("upsert sender key: %w", err)
+	}
+	return nil
 }

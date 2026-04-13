@@ -179,7 +179,7 @@ func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) 
 	assert.Equal(t, senderkeydistribution.StatusAvailable, distributionRepo.upserted[0].Status)
 
 	require.Eventually(t, func() bool {
-		return broadcaster.callCount() == 2 && len(requestRepo.markFulfilledFor) == 1
+		return broadcaster.callCount() == 1 && len(requestRepo.markFulfilledFor) == 1
 	}, time.Second, 10*time.Millisecond)
 
 	assert.Equal(t, [2]chatmember.ID{requesterMemberID, providerMemberID}, requestRepo.markFulfilledFor[0])
@@ -187,9 +187,8 @@ func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) 
 	broadcaster.mu.Lock()
 	calls := append([]senderKeyReqBroadcastCall(nil), broadcaster.calls...)
 	broadcaster.mu.Unlock()
-	require.Len(t, calls, 2)
+	require.Len(t, calls, 1)
 	assert.Equal(t, fmt.Sprint(requesterUID), calls[0].userID)
-	assert.Equal(t, fmt.Sprint(requesterUID), calls[1].userID)
 
 	var availableMsg struct {
 		Type    string `json:"type"`
@@ -209,17 +208,6 @@ func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) 
 	assert.Equal(t, int64(requesterMemberID), availableMsg.Payload.ReceiverMemberID)
 	assert.Equal(t, senderKeyVersion, availableMsg.Payload.SenderKeyVersion)
 
-	var legacyMsg struct {
-		Type    string `json:"type"`
-		Payload struct {
-			RoomID           int64 `json:"room_id"`
-			ProviderMemberID int64 `json:"provider_member_id"`
-		} `json:"payload"`
-	}
-	require.NoError(t, json.Unmarshal(calls[1].msg, &legacyMsg))
-	assert.Equal(t, "e2ee.direct_key_ready", legacyMsg.Type)
-	assert.Equal(t, int64(roomID), legacyMsg.Payload.RoomID)
-	assert.Equal(t, int64(providerMemberID), legacyMsg.Payload.ProviderMemberID)
 }
 
 func TestUploadSenderKey_InvalidDistributionMessage(t *testing.T) {
@@ -252,6 +240,46 @@ func TestUploadSenderKey_InvalidDistributionMessage(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidSignature), "expected ErrInvalidSignature, got %v", err)
+}
+
+func TestUploadSenderKey_SameVersionRemainsIdempotent(t *testing.T) {
+	const (
+		providerUID  = int64(61)
+		requesterUID = int64(62)
+		roomID       = chatroom.ID(610)
+		version      = int64(1776018315645)
+	)
+
+	participantRepo := makeParticipantStub(providerUID, requesterUID)
+	chatMemberRepo, _, requesterMemberID := makeChatMemberStub(roomID, providerUID, requesterUID, roomID)
+	memberSenderKeyRepo := &uploadSenderKeyMemberSenderKeyRepoStub{}
+	distributionRepo := &uploadSenderKeyDistributionRepoStub{}
+	requestRepo := &uploadSenderKeyRequestRepoStub{}
+	broadcaster := &senderKeyReqBroadcasterStub{}
+
+	uc := NewUploadSenderKeyUseCase(
+		participantRepo,
+		chatMemberRepo,
+		memberSenderKeyRepo,
+		distributionRepo,
+		requestRepo,
+		&senderKeyReqFriendshipStub{},
+		broadcaster,
+	)
+
+	input := makeUploadSenderKeyInput(
+		providerUID,
+		int64(roomID),
+		int64(requesterMemberID),
+		version,
+		encodeB64([]byte(`{"ciphertext":"stable"}`)),
+	)
+
+	_, firstErr := uc.Execute(context.Background(), input)
+	_, secondErr := uc.Execute(context.Background(), input)
+
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
 }
 
 func TestUploadSenderKey_CallerNotInRoom(t *testing.T) {

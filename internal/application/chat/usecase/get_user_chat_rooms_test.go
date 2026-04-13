@@ -200,6 +200,70 @@ func TestGetUserChatRoomsUseCase_IncludesDirectPeerPresence(t *testing.T) {
 	assert.True(t, out.Direct[0].LastSeenAt.Equal(now))
 }
 
+func TestGetUserChatRoomsUseCase_ExcludesCallerMessagesFromUnreadCount(t *testing.T) {
+	now := time.Now()
+	callerUserID := shared.UserID(10)
+	otherUserID := shared.UserID(20)
+	callerParticipantID := participant.ID(1)
+	otherParticipantID := participant.ID(2)
+	directRoomID := chatroom.ID(7)
+	callerMemberID := chatmember.ID(100)
+
+	participantRepo := &getRoomsParticipantRepoStub{
+		byUser: map[shared.UserID]*participant.Participant{
+			callerUserID: {ID: callerParticipantID, Type: participant.UserType, UserID: &callerUserID},
+			otherUserID:  {ID: otherParticipantID, Type: participant.UserType, UserID: &otherUserID},
+		},
+		byID: map[participant.ID]*participant.Participant{
+			callerParticipantID: {ID: callerParticipantID, Type: participant.UserType, UserID: &callerUserID},
+			otherParticipantID:  {ID: otherParticipantID, Type: participant.UserType, UserID: &otherUserID},
+		},
+	}
+	memberRepo := &getRoomsChatMemberRepoStub{
+		byParticipant: map[participant.ID][]*chatmember.ChatMember{
+			callerParticipantID: {
+				{ID: callerMemberID, RoomID: directRoomID, ParticipantID: callerParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+			},
+		},
+		byRoom: map[chatroom.ID][]*chatmember.ChatMember{
+			directRoomID: {
+				{ID: callerMemberID, RoomID: directRoomID, ParticipantID: callerParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+				{ID: 101, RoomID: directRoomID, ParticipantID: otherParticipantID, Role: chatmember.Owner, JoinedAt: now.Add(-time.Hour)},
+			},
+		},
+	}
+	messageRepo := &getRoomsChatMessageRepoStub{
+		unreadByRoom: map[chatroom.ID]int64{
+			directRoomID: 2,
+		},
+	}
+	uc := NewGetUserChatRoomsUseCase(
+		participantRepo,
+		memberRepo,
+		&getRoomsChatRoomRepoStub{
+			rooms: map[chatroom.ID]*chatroom.ChatRoom{
+				directRoomID: {ID: directRoomID, Name: "Direct", Type: chatroom.Direct},
+			},
+		},
+		messageRepo,
+		&getRoomsUserRepoStub{
+			byID: map[shared.UserID]*domainuser.User{
+				otherUserID: {ID: otherUserID, Name: "Luna"},
+			},
+		},
+		&getRoomsAgentRepoStub{},
+		nil,
+		nil,
+	)
+
+	_, err := uc.Execute(context.Background(), appShared.UseCaseInput[struct{}]{
+		Base: appShared.BaseContext{Auth: &appShared.AuthContext{UserID: callerUserID}},
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, messageRepo.lastExcludedSenderIDs, callerMemberID)
+}
+
 type getRoomsParticipantRepoStub struct {
 	byUser map[shared.UserID]*participant.Participant
 	byID   map[participant.ID]*participant.Participant
@@ -322,8 +386,9 @@ func (s *getRoomsChatRoomRepoStub) SoftDelete(context.Context, chatroom.ID) erro
 }
 
 type getRoomsChatMessageRepoStub struct {
-	latestByRoom map[chatroom.ID]*chatmessage.ChatMessage
-	unreadByRoom map[chatroom.ID]int64
+	latestByRoom          map[chatroom.ID]*chatmessage.ChatMessage
+	unreadByRoom          map[chatroom.ID]int64
+	lastExcludedSenderIDs []chatmember.ID
 }
 
 func (s *getRoomsChatMessageRepoStub) FindByID(context.Context, chatmessage.ID) (*chatmessage.ChatMessage, error) {
@@ -347,6 +412,23 @@ func (s *getRoomsChatMessageRepoStub) FindLatestByRoom(_ context.Context, roomID
 }
 
 func (s *getRoomsChatMessageRepoStub) CountByRoomAfter(_ context.Context, roomID chatroom.ID, _ time.Time) (int64, error) {
+	return s.unreadByRoom[roomID], nil
+}
+
+func (s *getRoomsChatMessageRepoStub) FindByRoomExcludingSenders(_ context.Context, roomID chatroom.ID, _ []chatmember.ID, _ uint64, _ uint64) ([]*chatmessage.ChatMessage, error) {
+	return s.FindByRoom(context.Background(), roomID, 0, 0)
+}
+
+func (s *getRoomsChatMessageRepoStub) FindByRoomBeforeExcludingSenders(_ context.Context, roomID chatroom.ID, _ chatmessage.ID, _ []chatmember.ID, _ uint64) ([]*chatmessage.ChatMessage, error) {
+	return s.FindByRoom(context.Background(), roomID, 0, 0)
+}
+
+func (s *getRoomsChatMessageRepoStub) FindLatestByRoomExcludingSenders(_ context.Context, roomID chatroom.ID, _ []chatmember.ID) (*chatmessage.ChatMessage, error) {
+	return s.FindLatestByRoom(context.Background(), roomID)
+}
+
+func (s *getRoomsChatMessageRepoStub) CountByRoomAfterExcludingSenders(_ context.Context, roomID chatroom.ID, _ time.Time, excludedSenderIDs []chatmember.ID) (int64, error) {
+	s.lastExcludedSenderIDs = append([]chatmember.ID(nil), excludedSenderIDs...)
 	return s.unreadByRoom[roomID], nil
 }
 

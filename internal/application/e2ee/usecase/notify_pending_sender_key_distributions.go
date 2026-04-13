@@ -61,6 +61,9 @@ func (u *NotifyPendingSenderKeyDistributionsUseCase) Execute(ctx context.Context
 			continue
 		}
 		for _, dist := range distributions {
+			if dist.RoomID <= 0 {
+				continue
+			}
 			distCopy := *dist
 			go notifySenderKeyDistributionAvailable(
 				context.Background(),
