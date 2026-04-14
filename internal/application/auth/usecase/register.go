@@ -20,10 +20,11 @@ import (
 )
 
 type RegisterInput struct {
-	Name     string
-	Account  string
-	Email    string
-	Password string
+	Name            string
+	Account         string
+	Email           string
+	Password        string
+	ConfirmPassword string
 }
 
 type RegisterOutput struct {
@@ -83,6 +84,10 @@ func (uc *RegisterUseCase) Execute(
 	// Reject emails that exceed RFC 5321 maximum length
 	if len(input.Data.Email) > 254 {
 		return RegisterOutput{}, ErrInvalidEmail
+	}
+
+	if input.Data.Password != input.Data.ConfirmPassword {
+		return RegisterOutput{}, ErrPasswordConfirmMismatch
 	}
 
 	// Validate email

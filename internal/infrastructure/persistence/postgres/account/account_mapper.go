@@ -31,6 +31,7 @@ func ToAccountDevice(record *AccountDeviceRecord) *account.AccountDevice {
 	return &account.AccountDevice{
 		AccountID:  shared.AccountID(record.AccountID),
 		DeviceID:   shared.DeviceID(record.DeviceID),
+		Status:     account.DeviceStatus(record.Status),
 		LastIP:     net.ParseIP(record.LastIP),
 		LastSeenAt: record.LastSeenAt,
 	}

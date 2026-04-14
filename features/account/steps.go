@@ -37,6 +37,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^an applying account exists with email "([^"]*)", account "([^"]*)", and display name "([^"]*)"$`, s.anApplyingAccountExists)
 	ctx.Step(`^the applying account has an expired verification session$`, s.theApplyingAccountHasAnExpiredVerificationSession)
 	ctx.Step(`^I register an account with email "([^"]*)", account "([^"]*)", display name "([^"]*)", and password "([^"]*)"$`, s.iRegisterAnAccount)
+	ctx.Step(`^I register an account with email "([^"]*)", account "([^"]*)", display name "([^"]*)", password "([^"]*)", and confirm password "([^"]*)"$`, s.iRegisterAnAccountWithConfirmPassword)
 	ctx.Step(`^the register response should include a verification token and expiry timestamp$`, s.theRegisterResponseShouldIncludeVerificationTokenAndExpiryTimestamp)
 	ctx.Step(`^I verify the registered email$`, s.iVerifyTheRegisteredEmail)
 	ctx.Step(`^I verify the registered email with the correct code$`, s.iVerifyTheRegisteredEmail)
@@ -144,16 +145,21 @@ func (a *steps) anApplyingAccountExists(email, accountName, displayName string) 
 }
 
 func (a *steps) iRegisterAnAccount(email, accountName, displayName, password string) error {
+	return a.iRegisterAnAccountWithConfirmPassword(email, accountName, displayName, password, password)
+}
+
+func (a *steps) iRegisterAnAccountWithConfirmPassword(email, accountName, displayName, password, confirmPassword string) error {
 	a.start = time.Now()
 	fmt.Println("Given: account registration HTTP endpoint is available")
-	fmt.Printf("Input: email=%s account=%s display_name=%q password_present=%t\n", email, accountName, displayName, password != "")
+	fmt.Printf("Input: email=%s account=%s display_name=%q password_present=%t confirm_password_present=%t\n", email, accountName, displayName, password != "", confirmPassword != "")
 	fmt.Println("Action: POST /api/auth/register")
 
 	payload := map[string]string{
-		"email":    email,
-		"account":  accountName,
-		"name":     displayName,
-		"password": password,
+		"email":            email,
+		"account":          accountName,
+		"name":             displayName,
+		"password":         password,
+		"confirm_password": confirmPassword,
 	}
 	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/register", payload); err != nil {
 		return err

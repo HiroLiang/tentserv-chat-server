@@ -50,8 +50,11 @@ type ChatRoomSummaryResponse struct {
 	PresenceStatus     *string    `json:"presence_status,omitempty"`
 	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
 	LatestMsg          *string    `json:"latest_message"`
+	LatestMsgID        *int64     `json:"latest_message_id,omitempty"`
 	LatestMsgCreatedAt *time.Time `json:"latest_message_created_at,omitempty"`
 	LatestMsgSenderID  *int64     `json:"latest_message_sender_id,omitempty"`
+	LatestMsgSenderDeviceID *string `json:"latest_message_sender_device_id,omitempty"`
+	LatestMsgSenderKeyVersion *int64 `json:"latest_message_sender_key_version,omitempty"`
 	UnreadCount        int64      `json:"unread_count"`
 	BlockedByPeer      bool       `json:"blocked_by_peer,omitempty"`
 	BlockedByMe        bool       `json:"blocked_by_me,omitempty"`
@@ -69,13 +72,15 @@ type ChatRoomMemberInfoResponse struct {
 }
 
 type ChatMessageInfoResponse struct {
-	MessageID int64     `json:"message_id"`
-	SenderID  int64     `json:"sender_id"`
-	Content   string    `json:"content"`
-	Type      string    `json:"type"`
-	ReplyToID *int64    `json:"reply_to_id,omitempty"`
-	IsEdited  bool      `json:"is_edited"`
-	CreatedAt time.Time `json:"created_at"`
+	MessageID        int64     `json:"message_id"`
+	SenderID         int64     `json:"sender_id"`
+	SenderDeviceID   string    `json:"sender_device_id"`
+	SenderKeyVersion int64     `json:"sender_key_version"`
+	Content          string    `json:"content"`
+	Type             string    `json:"type"`
+	ReplyToID        *int64    `json:"reply_to_id,omitempty"`
+	IsEdited         bool      `json:"is_edited"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type GetChatRoomDetailResponse struct {
@@ -117,18 +122,21 @@ type GetUserChatRoomsResponse struct {
 }
 
 type SendMessageRequest struct {
-	Content   string `json:"content"   binding:"required"`
-	Type      string `json:"type"      binding:"required,oneof=text image file"`
-	ReplyToID *int64 `json:"reply_to_id,omitempty"`
+	Content          string `json:"content"   binding:"required"`
+	Type             string `json:"type"      binding:"required,oneof=text image file"`
+	ReplyToID        *int64 `json:"reply_to_id,omitempty"`
+	SenderKeyVersion int64  `json:"sender_key_version" binding:"required"`
 }
 
 type SendMessageResponse struct {
-	MessageID int64     `json:"message_id"`
-	SenderID  int64     `json:"sender_id"`
-	Content   string    `json:"content"`
-	Type      string    `json:"type"`
-	ReplyToID *int64    `json:"reply_to_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	MessageID        int64     `json:"message_id"`
+	SenderID         int64     `json:"sender_id"`
+	SenderDeviceID   string    `json:"sender_device_id"`
+	SenderKeyVersion int64     `json:"sender_key_version"`
+	Content          string    `json:"content"`
+	Type             string    `json:"type"`
+	ReplyToID        *int64    `json:"reply_to_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type UploadRoomMediaResponse struct {

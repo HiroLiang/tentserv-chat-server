@@ -17,9 +17,19 @@ const (
 	Deleted  Status = "deleted"
 )
 
+type DeviceStatus string
+
+const (
+	DeviceStatusPendingVerification DeviceStatus = "pending_verification"
+	DeviceStatusPendingSync         DeviceStatus = "pending_sync"
+	DeviceStatusSyncing             DeviceStatus = "syncing"
+	DeviceStatusReady               DeviceStatus = "ready"
+)
+
 type AccountDevice struct {
 	AccountID  shared.AccountID
 	DeviceID   shared.DeviceID
+	Status     DeviceStatus
 	LastIP     net.IP
 	LastSeenAt time.Time
 }

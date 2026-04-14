@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	e2eePort "github.com/HiroLiang/tentserv-chat-server/internal/application/e2ee/port"
 	appShared "github.com/HiroLiang/tentserv-chat-server/internal/application/shared"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/friendship"
@@ -17,7 +19,9 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	sharedDomain "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
+	domainuser "github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,15 +30,73 @@ type uploadSenderKeyRequestRepoStub struct {
 	markFulfilledFor [][2]chatmember.ID
 }
 
+type uploadSenderKeyAccountRepoStub struct{}
+
+func (*uploadSenderKeyAccountRepoStub) FindByID(context.Context, sharedDomain.AccountID) (*account.Account, error) {
+	deviceID, _ := sharedDomain.ParseDeviceID("22222222-2222-2222-2222-222222222222")
+	return &account.Account{
+		ID: 1,
+		Devices: []account.AccountDevice{{
+			AccountID: 1,
+			DeviceID:  deviceID,
+			Status:    account.DeviceStatusReady,
+		}},
+	}, nil
+}
+func (*uploadSenderKeyAccountRepoStub) FindByAccountName(context.Context, string) (*account.Account, error) {
+	return nil, account.ErrAccountNotFound
+}
+func (*uploadSenderKeyAccountRepoStub) FindByEmail(context.Context, sharedDomain.EmailAddress) (*account.Account, error) {
+	return nil, account.ErrAccountNotFound
+}
+func (*uploadSenderKeyAccountRepoStub) Create(context.Context, *account.Account) (sharedDomain.AccountID, error) {
+	return 0, nil
+}
+func (*uploadSenderKeyAccountRepoStub) Update(context.Context, *account.Account) error { return nil }
+func (*uploadSenderKeyAccountRepoStub) RegisterDevice(context.Context, *account.AccountDevice) error {
+	return nil
+}
+func (*uploadSenderKeyAccountRepoStub) UpdateDeviceStatus(context.Context, sharedDomain.AccountID, sharedDomain.DeviceID, account.DeviceStatus) error {
+	return nil
+}
+func (*uploadSenderKeyAccountRepoStub) RecordLoginEvent(context.Context, *account.AccountLoginEvent) error {
+	return nil
+}
+func (*uploadSenderKeyAccountRepoStub) ReplaceDevices(context.Context, sharedDomain.AccountID, []account.AccountDevice) error {
+	return nil
+}
+
+type uploadSenderKeyUserRepoStub struct{}
+
+func (*uploadSenderKeyUserRepoStub) Create(context.Context, *domainuser.User) (sharedDomain.UserID, error) {
+	return 0, nil
+}
+func (*uploadSenderKeyUserRepoStub) FindByID(context.Context, sharedDomain.UserID) (*domainuser.User, error) {
+	return &domainuser.User{ID: 1, AccountID: 1}, nil
+}
+func (*uploadSenderKeyUserRepoStub) FindByAccountID(context.Context, sharedDomain.AccountID) (*[]domainuser.User, error) {
+	return nil, nil
+}
+func (*uploadSenderKeyUserRepoStub) Update(context.Context, *domainuser.User) error { return nil }
+func (*uploadSenderKeyUserRepoStub) SearchByName(context.Context, string, int, int) ([]*domainuser.UserSearchResult, error) {
+	return nil, nil
+}
+func (*uploadSenderKeyUserRepoStub) FindByAccountName(context.Context, string, int, int) ([]*domainuser.UserSearchResult, error) {
+	return nil, nil
+}
+func (*uploadSenderKeyUserRepoStub) FindByPublicID(context.Context, string, int, int) ([]*domainuser.UserSearchResult, error) {
+	return nil, nil
+}
+
 func (s *uploadSenderKeyRequestRepoStub) Upsert(context.Context, *senderkeyrequest.SenderKeyRequest) error {
 	return nil
 }
 
-func (s *uploadSenderKeyRequestRepoStub) FindPendingByProvider(context.Context, chatmember.ID) ([]*senderkeyrequest.SenderKeyRequest, error) {
+func (s *uploadSenderKeyRequestRepoStub) FindPendingByProvider(context.Context, chatmember.ID, sharedDomain.DeviceID) ([]*senderkeyrequest.SenderKeyRequest, error) {
 	return nil, nil
 }
 
-func (s *uploadSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
+func (s *uploadSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID chatmember.ID, _ sharedDomain.DeviceID, providerMemberID chatmember.ID, _ sharedDomain.DeviceID) error {
 	s.markFulfilledFor = append(s.markFulfilledFor, [2]chatmember.ID{requesterMemberID, providerMemberID})
 	return nil
 }
@@ -44,7 +106,12 @@ type uploadSenderKeyMemberSenderKeyRepoStub struct {
 	upserted  []*membersenderkey.MemberSenderKey
 }
 
-func (s *uploadSenderKeyMemberSenderKeyRepoStub) FindLatest(context.Context, chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
+func (s *uploadSenderKeyMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID, deviceID sharedDomain.DeviceID) (*membersenderkey.MemberSenderKey, error) {
+	return nil, membersenderkey.ErrNotFound
+}
+
+func (s *uploadSenderKeyMemberSenderKeyRepoStub) FindLatestForMember(_ context.Context, memberID chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
+	_ = memberID
 	return nil, membersenderkey.ErrNotFound
 }
 
@@ -74,7 +141,7 @@ func (s *uploadSenderKeyDistributionRepoStub) UpsertBatch(context.Context, []*se
 	return nil
 }
 
-func (s *uploadSenderKeyDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
+func (s *uploadSenderKeyDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, sharedDomain.DeviceID, int64) ([]chatmember.ID, error) {
 	return nil, nil
 }
 
@@ -90,11 +157,11 @@ func (s *uploadSenderKeyDistributionRepoStub) UpsertAvailable(_ context.Context,
 	return nil
 }
 
-func (s *uploadSenderKeyDistributionRepoStub) FindLatest(context.Context, chatmember.ID, chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *uploadSenderKeyDistributionRepoStub) FindLatest(context.Context, chatmember.ID, sharedDomain.DeviceID, chatmember.ID, sharedDomain.DeviceID) (*senderkeydistribution.SenderKeyDistribution, error) {
 	return nil, senderkeydistribution.ErrNotFound
 }
 
-func (s *uploadSenderKeyDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *uploadSenderKeyDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID, sharedDomain.DeviceID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
 	return nil, nil
 }
 
@@ -113,8 +180,9 @@ func (s *uploadSenderKeyDistributionRepoStub) MarkFailed(context.Context, sender
 func makeUploadSenderKeyInput(callerUserID int64, roomID int64, receiverMemberID int64, senderKeyVersion int64, distributionMessage string) appShared.UseCaseInput[UploadSenderKeyInput] {
 	uid := sharedDomain.UserID(callerUserID)
 	auth := appShared.AuthContext{UserID: uid}
+	deviceID, _ := sharedDomain.ParseDeviceID("11111111-1111-1111-1111-111111111111")
 	return appShared.UseCaseInput[UploadSenderKeyInput]{
-		Base: appShared.BaseContext{Auth: &auth},
+		Base: appShared.BaseContext{Auth: &auth, Request: appShared.RequestContext{DeviceID: deviceID}},
 		Data: UploadSenderKeyInput{
 			RoomID:              roomID,
 			ReceiverMemberID:    receiverMemberID,
@@ -126,6 +194,35 @@ func makeUploadSenderKeyInput(callerUserID int64, roomID int64, receiverMemberID
 
 func encodeB64(bytes []byte) string {
 	return base64.StdEncoding.EncodeToString(bytes)
+}
+
+func newUploadSenderKeyUseCaseForTest(
+	participantRepo participant.Repository,
+	chatMemberRepo chatmember.Repository,
+	accountRepo account.Repository,
+	userRepo domainuser.Repository,
+	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
+	requestRepo senderkeyrequest.Repository,
+	selfSyncRepo selfsenderkeysync.Repository,
+	friendshipRepo friendship.Repository,
+	broadcaster e2eePort.Broadcaster,
+) *UploadSenderKeyUseCase {
+	if selfSyncRepo == nil {
+		selfSyncRepo = &senderKeyReqSelfSyncRepoStub{}
+	}
+	return NewUploadSenderKeyUseCase(
+		participantRepo,
+		chatMemberRepo,
+		accountRepo,
+		userRepo,
+		memberSenderKeyRepo,
+		distributionRepo,
+		requestRepo,
+		selfSyncRepo,
+		friendshipRepo,
+		broadcaster,
+	)
 }
 
 func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) {
@@ -142,12 +239,15 @@ func TestUploadSenderKey_SuccessNotifiesAndMarksReceiverFulfilled(t *testing.T) 
 	requestRepo := &uploadSenderKeyRequestRepoStub{}
 	broadcaster := &senderKeyReqBroadcasterStub{}
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		memberSenderKeyRepo,
 		distributionRepo,
 		requestRepo,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		broadcaster,
 	)
@@ -220,12 +320,15 @@ func TestUploadSenderKey_InvalidDistributionMessage(t *testing.T) {
 	chatMemberRepo, providerMemberID, _ := makeChatMemberStub(roomID, providerUID, 32, roomID)
 	_ = providerMemberID
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		&uploadSenderKeyMemberSenderKeyRepoStub{},
 		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -257,12 +360,15 @@ func TestUploadSenderKey_SameVersionRemainsIdempotent(t *testing.T) {
 	requestRepo := &uploadSenderKeyRequestRepoStub{}
 	broadcaster := &senderKeyReqBroadcasterStub{}
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		memberSenderKeyRepo,
 		distributionRepo,
 		requestRepo,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		broadcaster,
 	)
@@ -294,12 +400,15 @@ func TestUploadSenderKey_CallerNotInRoom(t *testing.T) {
 		byRoomAndParticipant: map[chatroom.ID]map[participant.ID]*chatmember.ChatMember{},
 	}
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		&uploadSenderKeyMemberSenderKeyRepoStub{},
 		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -329,12 +438,15 @@ func TestUploadSenderKey_BlockedRelationship(t *testing.T) {
 	participantRepo := makeParticipantStub(providerUID, requesterUID)
 	chatMemberRepo, _, requesterMemberID := makeChatMemberStub(roomID, providerUID, requesterUID, roomID)
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		&uploadSenderKeyMemberSenderKeyRepoStub{},
 		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		nil,
 		&senderKeyReqFriendshipStub{
 			rows: []*friendship.Friendship{{
 				Status:   friendship.StatusBlocked,
@@ -367,12 +479,15 @@ func TestUploadSenderKey_UpsertMetadataError(t *testing.T) {
 	chatMemberRepo, _, _ := makeChatMemberStub(roomID, providerUID, 62, roomID)
 	memberSenderKeyRepo := &uploadSenderKeyMemberSenderKeyRepoStub{upsertErr: errors.New("add failed")}
 
-	uc := NewUploadSenderKeyUseCase(
+	uc := newUploadSenderKeyUseCaseForTest(
 		participantRepo,
 		chatMemberRepo,
+		&uploadSenderKeyAccountRepoStub{},
+		&uploadSenderKeyUserRepoStub{},
 		memberSenderKeyRepo,
 		&uploadSenderKeyDistributionRepoStub{},
 		&uploadSenderKeyRequestRepoStub{},
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)

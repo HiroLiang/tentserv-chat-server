@@ -67,7 +67,7 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 		broadcaster,
 	)
 
-	uc.Execute(context.Background(), "51")
+	uc.Execute(context.Background(), "51", senderKeyReqRequesterDeviceID)
 
 	require.Eventually(t, func() bool {
 		return broadcaster.callCount() == 1
@@ -140,7 +140,7 @@ func TestNotifyPendingSenderKeyDistributions_SkipsInvalidRoomIDs(t *testing.T) {
 		broadcaster,
 	)
 
-	uc.Execute(context.Background(), "52")
+	uc.Execute(context.Background(), "52", senderKeyReqRequesterDeviceID)
 
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 0, broadcaster.callCount())

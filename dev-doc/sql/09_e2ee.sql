@@ -155,63 +155,88 @@ CREATE TABLE IF NOT EXISTS public.member_sender_keys
 (
     id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     chat_member_id       BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    sender_device_id     UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     chain_id             BIGINT    NOT NULL DEFAULT 1, -- mirrors sender_key_version for legacy compatibility
     sender_key_version   BIGINT    NOT NULL,           -- latest sender key version created by Rust
     key_fingerprint      TEXT,                         -- optional future debug / auditing metadata
     created_at           TIMESTAMP NOT NULL DEFAULT now(),
-    UNIQUE (chat_member_id, sender_key_version)
+    UNIQUE (chat_member_id, sender_device_id, sender_key_version)
 );
 
 -- Index for member-key lookup | 成員金鑰查詢索引 | メンバーキー検索インデックス
 CREATE INDEX IF NOT EXISTS idx_member_sender_keys_member
-    ON public.member_sender_keys (chat_member_id);
+    ON public.member_sender_keys (chat_member_id, sender_device_id);
 
 
 -- ============================================================
--- SECTION 5: SENDER KEY DISTRIBUTION ACKNOWLEDGEMENTS
--- [EN] Records the latest chain_id of sender_member_id's key that
---      receiver_member_id has fetched. Written by GET /api/e2ee/sender-keys.
---      Answers:
---        "Who has already received my latest key?" → pending_receivers
---        "Whose key haven't I fetched yet?" → pending_from_members
--- [中] 記錄 sender_member_id 的最新 chain_id 已被 receiver_member_id 取得。
---      由 GET /api/e2ee/sender-keys 寫入。
---      回答：
---        「誰已收到我最新的金鑰？」→ pending_receivers
---        「我尚未取得誰的金鑰？」→ pending_from_members
--- [日] sender_member_id の最新 chain_id を receiver_member_id が取得したことを記録する。
---      GET /api/e2ee/sender-keys によって書き込まれる。
---      回答：
---        「誰がすでに自分の最新鍵を受け取ったか？」→ pending_receivers
---        「自分はまだ誰の鍵を取得していないか？」→ pending_from_members
+-- SECTION 5: SENDER KEY RECEIPTS
+-- [EN] Canonical receiver-side possession state for sender keys.
+--      This is the authoritative answer for whether a receiver device
+--      already holds a sender member/device's latest sender_key_version.
+-- [中] sender key 接收端持有狀態的唯一權威來源。
+--      用來判斷某個 receiver device 是否已持有某個 sender member/device
+--      的最新 sender_key_version。
+-- [日] sender key を受信側がすでに保有しているかを示す単一の正準状態。
 -- ============================================================
 
--- Sender key distributions | 發送方金鑰分發 | 送信者鍵配布
-CREATE TABLE IF NOT EXISTS public.sender_key_distributions
+CREATE TABLE IF NOT EXISTS public.sender_key_receipts
 (
     id                 BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     sender_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    sender_device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     receiver_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    receiver_device_id UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     sender_key_version BIGINT    NOT NULL,
-    distribution_message BYTEA   NOT NULL,
-    status             TEXT      NOT NULL DEFAULT 'available',
-    chain_id           BIGINT    NOT NULL DEFAULT 1, -- legacy compatibility; mirrors sender_key_version
-    distributed_at     TIMESTAMP NOT NULL DEFAULT now(),
-    consumed_at        TIMESTAMP,
-    failed_at          TIMESTAMP,
-    UNIQUE (sender_member_id, receiver_member_id)
+    source             TEXT      NOT NULL,
+    updated_at         TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sender_key_receipts_sender
+    ON public.sender_key_receipts (sender_member_id, sender_device_id);
+
+CREATE INDEX IF NOT EXISTS idx_sender_key_receipts_receiver
+    ON public.sender_key_receipts (receiver_member_id, receiver_device_id);
+
+
+-- ============================================================
+-- SECTION 6: SENDER KEY DISTRIBUTIONS
+-- [EN] Transport queue for sender-key copies.
+--      This table tracks delivery state only; possession is derived
+--      from sender_key_receipts after the receiver consumes a copy.
+-- [中] sender key 的傳輸佇列，只代表投遞狀態；
+--      真正是否已持有由 sender_key_receipts 判斷。
+-- [日] sender key の配送キュー。受信側が実際に保有済みかどうかは
+--      sender_key_receipts で判断する。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.sender_key_distributions
+(
+    id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    sender_member_id     BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    sender_device_id     UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    receiver_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    receiver_device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    sender_key_version   BIGINT    NOT NULL,
+    distribution_message BYTEA     NOT NULL,
+    status               TEXT      NOT NULL DEFAULT 'available',
+    chain_id             BIGINT    NOT NULL DEFAULT 1, -- legacy compatibility; mirrors sender_key_version
+    distributed_at       TIMESTAMP NOT NULL DEFAULT now(),
+    consumed_at          TIMESTAMP,
+    failed_at            TIMESTAMP,
+    UNIQUE (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
 );
 
 -- Index for "who has received my key" | 「誰已收到我的金鑰」索引 | 「誰が自分の鍵を受け取ったか」インデックス
 CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_sender
-    ON public.sender_key_distributions (sender_member_id);
+    ON public.sender_key_distributions (sender_member_id, sender_device_id);
 -- Index for "whose key have I received" | 「我已收到誰的金鑰」索引 | 「誰の鍵を受け取ったか」インデックス
 CREATE INDEX IF NOT EXISTS idx_sender_key_distributions_receiver
-    ON public.sender_key_distributions (receiver_member_id);
+    ON public.sender_key_distributions (receiver_member_id, receiver_device_id);
 
 
 -- ============================================================
--- SECTION 6: SENDER KEY REQUESTS
+-- SECTION 7: SENDER KEY REQUESTS
 -- [EN] Records that requester_member_id needs provider_member_id
 --      to upload their sender key.
 --      Created when a member enters a room and pending_from_members ≠ ∅.
@@ -236,15 +261,67 @@ CREATE TABLE IF NOT EXISTS public.sender_key_requests
 (
     id                  BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     requester_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    requester_device_id UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     provider_member_id  BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    provider_device_id  UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     created_at          TIMESTAMP NOT NULL DEFAULT now(),
     fulfilled_at        TIMESTAMP,
-    UNIQUE (requester_member_id, provider_member_id)
+    UNIQUE (requester_member_id, requester_device_id, provider_member_id, provider_device_id)
 );
 
 -- Partial index: only unfulfilled requests (fulfilled_at IS NULL = provider still needs to act)
 -- 部分索引：僅未完成的請求（fulfilled_at IS NULL = provider 尚需動作）
 -- 部分インデックス：未完了リクエストのみ（fulfilled_at IS NULL = プロバイダーがまだ対応が必要）
 CREATE INDEX IF NOT EXISTS idx_sender_key_requests_provider
-    ON public.sender_key_requests (provider_member_id)
+    ON public.sender_key_requests (provider_member_id, provider_device_id)
     WHERE fulfilled_at IS NULL;
+
+-- ============================================================
+-- SECTION 8: SELF SENDER KEY SYNC
+-- [EN] Tracks the one active self sender-key bootstrap flow for a participant.
+-- [中] 追蹤單一 participant 當前唯一一輪自有 sender key 補同步流程。
+-- [日] participant ごとに同時 1 件だけ許可される自己 sender key 同期を追跡する。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.participant_self_sender_key_syncs
+(
+    id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    participant_id       BIGINT    NOT NULL REFERENCES public.participants (id) ON DELETE CASCADE,
+    requester_device_id  UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    provider_device_id   UUID      REFERENCES public.devices (id) ON DELETE SET NULL,
+    status               TEXT      NOT NULL,
+    requested_at         TIMESTAMP NOT NULL DEFAULT now(),
+    provider_claimed_at  TIMESTAMP,
+    uploaded_at          TIMESTAMP,
+    completed_at         TIMESTAMP,
+    failed_at            TIMESTAMP,
+    last_error           TEXT,
+    updated_at           TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_participant_self_sender_key_syncs_status
+    ON public.participant_self_sender_key_syncs (status);
+
+CREATE INDEX IF NOT EXISTS idx_participant_self_sender_key_syncs_participant
+    ON public.participant_self_sender_key_syncs (participant_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS public.self_sender_key_sync_distributions
+(
+    id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    self_sender_key_sync_id BIGINT NOT NULL REFERENCES public.participant_self_sender_key_syncs (id) ON DELETE CASCADE,
+    participant_id       BIGINT    NOT NULL REFERENCES public.participants (id) ON DELETE CASCADE,
+    requester_device_id  UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    provider_device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    sender_member_id     BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    sender_device_id     UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    sender_key_version   BIGINT    NOT NULL,
+    distribution_message BYTEA     NOT NULL,
+    status               TEXT      NOT NULL DEFAULT 'available',
+    created_at           TIMESTAMP NOT NULL DEFAULT now(),
+    consumed_at          TIMESTAMP,
+    failed_at            TIMESTAMP,
+    UNIQUE (self_sender_key_sync_id, participant_id, requester_device_id, provider_device_id, sender_member_id, sender_device_id, sender_key_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_self_sender_key_sync_distributions_requester
+    ON public.self_sender_key_sync_distributions (self_sender_key_sync_id, participant_id, requester_device_id, provider_device_id, status);

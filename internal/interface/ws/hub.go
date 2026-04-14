@@ -41,7 +41,7 @@ type Hub struct {
 	presenceTTL     time.Duration
 	cleanupInterval time.Duration
 
-	onConnect         func(userID string)
+	onConnect         func(userID string, deviceID string)
 	onPresenceChanged func(userID string, snapshot chatPort.PresenceSnapshot)
 }
 
@@ -176,7 +176,7 @@ func (h *Hub) ResolveAck(deliveryID int64) {
 	}
 }
 
-func (h *Hub) SetOnConnect(fn func(userID string)) {
+func (h *Hub) SetOnConnect(fn func(userID string, deviceID string)) {
 	h.onConnect = fn
 }
 
@@ -225,7 +225,7 @@ func (h *Hub) registerClient(client *Client) {
 	h.clients[client] = true
 
 	var becameOnline bool
-	var onConnect func(string)
+	var onConnect func(string, string)
 	var onPresenceChanged func(string, chatPort.PresenceSnapshot)
 
 	if client.UserID != "" {
@@ -240,7 +240,7 @@ func (h *Hub) registerClient(client *Client) {
 	}
 
 	if onConnect != nil && client.UserID != "" {
-		go onConnect(client.UserID)
+		go onConnect(client.UserID, client.DeviceID)
 	}
 	if becameOnline && onPresenceChanged != nil {
 		go onPresenceChanged(client.UserID, chatPort.PresenceSnapshot{Status: chatPort.PresenceStatusOnline})

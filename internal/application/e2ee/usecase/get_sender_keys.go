@@ -9,7 +9,8 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
-	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 type GetSenderKeysInput struct {
@@ -18,6 +19,7 @@ type GetSenderKeysInput struct {
 
 type SenderKeyItem struct {
 	ChatMemberID     int64
+	SenderDeviceID   string
 	SenderKeyVersion int64
 }
 
@@ -29,20 +31,20 @@ type GetSenderKeysUseCase struct {
 	participantRepo     participant.Repository
 	chatMemberRepo      chatmember.Repository
 	memberSenderKeyRepo membersenderkey.Repository
-	distributionRepo    senderkeydistribution.Repository
+	receiptRepo         senderkeyreceipt.Repository
 }
 
 func NewGetSenderKeysUseCase(
 	participantRepo participant.Repository,
 	chatMemberRepo chatmember.Repository,
 	memberSenderKeyRepo membersenderkey.Repository,
-	distributionRepo senderkeydistribution.Repository,
+	receiptRepo senderkeyreceipt.Repository,
 ) *GetSenderKeysUseCase {
 	return &GetSenderKeysUseCase{
 		participantRepo:     participantRepo,
 		chatMemberRepo:      chatMemberRepo,
 		memberSenderKeyRepo: memberSenderKeyRepo,
-		distributionRepo:    distributionRepo,
+		receiptRepo:         receiptRepo,
 	}
 }
 
@@ -80,39 +82,39 @@ func (u *GetSenderKeysUseCase) Execute(
 	for _, sk := range senderKeys {
 		items = append(items, SenderKeyItem{
 			ChatMemberID:     int64(sk.ChatMemberID),
+			SenderDeviceID:   sk.SenderDeviceID.String(),
 			SenderKeyVersion: sk.SenderKeyVersion,
 		})
 	}
 
 	// Record ACK: caller has fetched each sender's key at its current sender-key version.
 	// Fire best-effort; do not fail the response if this write fails.
-	go u.recordDistributions(context.Background(), callerMember.ID, senderKeys)
+	go u.recordReceipts(context.Background(), callerMember.ID, input.Base.Request.DeviceID, senderKeys)
 
 	return &GetSenderKeysOutput{Keys: items}, nil
 }
 
-func (u *GetSenderKeysUseCase) recordDistributions(
+func (u *GetSenderKeysUseCase) recordReceipts(
 	ctx context.Context,
 	receiverMemberID chatmember.ID,
+	receiverDeviceID shared.DeviceID,
 	keys []*membersenderkey.MemberSenderKey,
 ) {
 	if len(keys) == 0 {
 		return
 	}
 
-	dists := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(keys))
 	for _, sk := range keys {
 		if sk.ChatMemberID == receiverMemberID {
 			continue // do not record self-fetching own key
 		}
-		dists = append(dists, &senderkeydistribution.SenderKeyDistribution{
-			SenderMemberID:      sk.ChatMemberID,
-			ReceiverMemberID:    receiverMemberID,
-			SenderKeyVersion:    sk.SenderKeyVersion,
-			ChainID:             int64(sk.ChainID),
-			DistributionMessage: []byte{},
+		_ = u.receiptRepo.Upsert(ctx, &senderkeyreceipt.SenderKeyReceipt{
+			SenderMemberID:   sk.ChatMemberID,
+			SenderDeviceID:   sk.SenderDeviceID,
+			ReceiverMemberID: receiverMemberID,
+			ReceiverDeviceID: receiverDeviceID,
+			SenderKeyVersion: sk.SenderKeyVersion,
+			Source:           senderkeyreceipt.SourceSenderKeys,
 		})
 	}
-
-	_ = u.distributionRepo.UpsertBatch(ctx, dists)
 }

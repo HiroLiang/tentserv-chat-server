@@ -1,8 +1,10 @@
 package chat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -50,6 +52,7 @@ type chatMessageResponse struct {
 }
 
 type getChatRoomDetailResponse struct {
+	Name          string                `json:"name"`
 	BlockedByPeer bool                  `json:"blocked_by_peer"`
 	BlockedByMe   bool                  `json:"blocked_by_me"`
 	Messages      []chatMessageResponse `json:"messages"`
@@ -100,6 +103,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^the member status response should include the logged in member with last_read_at$`, s.theMemberStatusResponseShouldIncludeTheLoggedInMemberWithLastReadAt)
 	ctx.Step(`^the chat room detail response should be marked blocked by peer$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByPeer)
 	ctx.Step(`^the chat room detail response should be marked blocked by me$`, s.theChatRoomDetailResponseShouldBeMarkedBlockedByMe)
+	ctx.Step(`^the chat room detail response should have name "([^"]*)"$`, s.theChatRoomDetailResponseShouldHaveName)
 	ctx.Step(`^the chat room response should include message "([^"]*)"$`, s.theChatRoomResponseShouldIncludeMessage)
 	ctx.Step(`^the chat room response should not include message "([^"]*)"$`, s.theChatRoomResponseShouldNotIncludeMessage)
 }
@@ -409,16 +413,28 @@ func (s *steps) iSendATextMessageToTheLastDirectRoom(content string) error {
 	fmt.Printf("Input: token_present=%t device_id=%s room_id=%d content_present=%t\n",
 		token != "", deviceID, s.lastDirectRoomID, content != "")
 	fmt.Println("Action: POST /api/chat/room/{room_id}/messages")
-	err := s.DoJSONRequestWithHeaders(http.MethodPost, fmt.Sprintf("/api/chat/room/%d/messages", s.lastDirectRoomID), map[string]string{
-		"content": content,
-		"type":    "text",
-	}, map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", token),
-		"X-Device-ID":   deviceID,
+	body, err := json.Marshal(map[string]any{
+		"content":            content,
+		"type":               "text",
+		"sender_key_version": 1,
 	})
 	if err != nil {
 		return err
 	}
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/chat/room/%d/messages", s.BaseURL, s.lastDirectRoomID), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("X-Device-ID", deviceID)
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	s.Response = resp
+	s.ResponseBody, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
 	fmt.Println("Mutation: no message created for deleted room")
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
@@ -686,6 +702,26 @@ func (s *steps) theChatRoomDetailResponseShouldBeMarkedBlockedByMe() error {
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	if !body.BlockedByMe {
 		return fmt.Errorf("expected room detail blocked_by_me=true; body=%s", string(s.ResponseBody))
+	}
+	return nil
+}
+
+func (s *steps) theChatRoomDetailResponseShouldHaveName(expected string) error {
+	start := time.Now()
+	fmt.Println("Given: chat room detail response should expose a display name")
+	fmt.Printf("Input: expected_name=%s\n", expected)
+	fmt.Println("Action: decode chat room detail response")
+
+	var body getChatRoomDetailResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: actual_name=%s\n", body.Name)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if body.Name != expected {
+		return fmt.Errorf("expected chat room detail name %q, got %q", expected, body.Name)
 	}
 	return nil
 }

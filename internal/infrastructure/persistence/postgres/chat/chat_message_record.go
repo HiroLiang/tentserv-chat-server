@@ -9,14 +9,16 @@ import (
 )
 
 type ChatMessageRecord struct {
-	ID        chatmessage.ID          `db:"id"`
-	RoomID    chatroom.ID             `db:"room_id"`
-	SenderID  chatmember.ID           `db:"sender_id"`
-	Content   string                  `db:"content"`
-	Type      chatmessage.MessageType `db:"message_type"`
-	ReplyToID *chatmessage.ID         `db:"reply_to_id"`
-	IsEdited  bool                    `db:"is_edited"`
-	IsDeleted bool                    `db:"is_deleted"`
-	CreatedAt time.Time               `db:"created_at"`
-	UpdatedAt time.Time               `db:"updated_at"`
+	ID               chatmessage.ID          `db:"id"`
+	RoomID           chatroom.ID             `db:"room_id"`
+	SenderID         chatmember.ID           `db:"sender_id"`
+	SenderDeviceID   string                  `db:"sender_device_id"`
+	SenderKeyVersion int64                   `db:"sender_key_version"`
+	Content          string                  `db:"content"`
+	Type             chatmessage.MessageType `db:"message_type"`
+	ReplyToID        *chatmessage.ID         `db:"reply_to_id"`
+	IsEdited         bool                    `db:"is_edited"`
+	IsDeleted        bool                    `db:"is_deleted"`
+	CreatedAt        time.Time               `db:"created_at"`
+	UpdatedAt        time.Time               `db:"updated_at"`
 }

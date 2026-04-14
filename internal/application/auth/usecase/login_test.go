@@ -294,13 +294,18 @@ func newLoginUseCaseFixture(t *testing.T) (*LoginUseCase, *authRegisterUOWStub, 
 		hasher,
 		loginLimiter,
 		sessionManager,
+		nil,
 		accountRepo,
 		userRepo,
 		roleRepo,
 		deviceRepo,
 		participantRepo,
+		nil,
 		emailService,
 		factory.factory,
+		func(string, string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return factory.factory("", "", "", "", "", time.Now())
+		},
 	)
 	return uc, uow, hasher, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, sessionManager, loginLimiter, factory
 }
@@ -691,7 +696,24 @@ func TestLoginUseCase_NonDevSendsLoginEmailWithDeviceNameHasStructuredLog(t *tes
 	factory := &loginMailFactoryCapture{}
 	deviceRepo.seed(parseLoginDeviceID(t), "Hiro's Mac")
 	seedLoginAccount(accountRepo, "login@example.com", account.Active, 777)
-	uc := NewLoginUseCase(uow, hasher, loginLimiter, sessionManager, accountRepo, userRepo, roleRepo, deviceRepo, participantRepo, emailService, factory.factory)
+	uc := NewLoginUseCase(
+		uow,
+		hasher,
+		loginLimiter,
+		sessionManager,
+		nil,
+		accountRepo,
+		userRepo,
+		roleRepo,
+		deviceRepo,
+		participantRepo,
+		nil,
+		emailService,
+		factory.factory,
+		func(string, string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return factory.factory("", "", "", "", "", time.Now())
+		},
+	)
 	input := loginInput("login@example.com", "redacted-password", loginDeviceID)
 
 	t.Log("Given: production login succeeds and email service is available")

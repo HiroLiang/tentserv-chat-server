@@ -53,6 +53,13 @@ Feature: Account registration
     And the response error code should be "INVALID_REQUEST"
     And the account registration mutation should stop before account creation
 
+  Scenario: Reject mismatched confirm password
+    Given account registration state is clean
+    When I register an account with email "new@example.com", account "new_account", display name "New Display", password "redacted-password", and confirm password "different-password"
+    Then the response status should be 400
+    And the response error code should be "PASSWORD_CONFIRM_MISMATCH"
+    And the account registration mutation should stop before account creation
+
   Scenario: Reject common password
     Given account registration state is clean
     When I register an account with email "new@example.com", account "new_account", display name "New Display", and password "password"

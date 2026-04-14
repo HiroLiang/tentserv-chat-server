@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
 
 // SenderKeyDistribution records the latest sender key distribution state for a sender/receiver pair.
@@ -11,7 +12,9 @@ import (
 type SenderKeyDistribution struct {
 	ID                  ID
 	SenderMemberID      chatmember.ID
+	SenderDeviceID      shared.DeviceID
 	ReceiverMemberID    chatmember.ID
+	ReceiverDeviceID    shared.DeviceID
 	RoomID              int64
 	SenderKeyVersion    int64
 	DistributionMessage []byte

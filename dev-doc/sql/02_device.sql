@@ -28,6 +28,7 @@
 -- ============================================================
 
 CREATE TYPE device_platform AS ENUM ('android', 'ios', 'windows', 'macos', 'linux', 'browser', 'unknown');
+CREATE TYPE account_device_status AS ENUM ('pending_verification', 'pending_sync', 'syncing', 'ready');
 
 
 -- ============================================================
@@ -58,6 +59,7 @@ CREATE TABLE accounts_devices
 (
     account_id   BIGINT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     device_id    UUID   NOT NULL REFERENCES devices (id) ON DELETE CASCADE,
+    status       account_device_status NOT NULL DEFAULT 'ready',
     last_ip      INET,
     last_seen_at TIMESTAMP,
     PRIMARY KEY (account_id, device_id)

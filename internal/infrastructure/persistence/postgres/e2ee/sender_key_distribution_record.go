@@ -5,7 +5,9 @@ import "time"
 type SenderKeyDistributionRecord struct {
 	ID                  int64      `db:"id"`
 	SenderMemberID      int64      `db:"sender_member_id"`
+	SenderDeviceID      string     `db:"sender_device_id"`
 	ReceiverMemberID    int64      `db:"receiver_member_id"`
+	ReceiverDeviceID    string     `db:"receiver_device_id"`
 	SenderKeyVersion    int64      `db:"sender_key_version"`
 	ChainID             int64      `db:"chain_id"`
 	DistributionMessage []byte     `db:"distribution_message"`

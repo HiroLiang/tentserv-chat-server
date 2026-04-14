@@ -29,8 +29,11 @@ type ChatRoomSummary struct {
 	PresenceStatus     *string
 	LastSeenAt         *time.Time
 	LatestMsg          *string
+	LatestMsgID        *int64
 	LatestMsgCreatedAt *time.Time
 	LatestMsgSenderID  *int64
+	LatestMsgSenderDeviceID *string
+	LatestMsgSenderKeyVersion *int64
 	UnreadCount        int64
 	BlockedByPeer      bool
 	BlockedByMe        bool
@@ -128,14 +131,23 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 		}
 
 		var latestMsg *string
+		var latestMsgID *int64
 		var latestMsgCreatedAt *time.Time
 		var latestMsgSenderID *int64
+		var latestMsgSenderDeviceID *string
+		var latestMsgSenderKeyVersion *int64
 		if msg, err := findLatestByRoomExcludingSenders(ctx, uc.chatMessageRepo, room.ID, blockedSenders); err == nil {
 			latestMsg = &msg.Content
+			messageID := int64(msg.ID)
+			latestMsgID = &messageID
 			createdAt := msg.CreatedAt
 			latestMsgCreatedAt = &createdAt
 			senderID := int64(msg.SenderID)
 			latestMsgSenderID = &senderID
+			senderDeviceID := msg.SenderDeviceID.String()
+			latestMsgSenderDeviceID = &senderDeviceID
+			senderKeyVersion := msg.SenderKeyVersion
+			latestMsgSenderKeyVersion = &senderKeyVersion
 		}
 
 		since := member.JoinedAt
@@ -156,8 +168,11 @@ func (uc *GetUserChatRoomsUseCase) Execute(
 			AvatarURL:          avatarURL,
 			PeerUserID:         peerUserID,
 			LatestMsg:          latestMsg,
+			LatestMsgID:        latestMsgID,
 			LatestMsgCreatedAt: latestMsgCreatedAt,
 			LatestMsgSenderID:  latestMsgSenderID,
+			LatestMsgSenderDeviceID: latestMsgSenderDeviceID,
+			LatestMsgSenderKeyVersion: latestMsgSenderKeyVersion,
 			UnreadCount:        unreadCount,
 			BlockedByPeer:      room.Type == chatroom.Direct && blockedByPeer,
 			BlockedByMe:        room.Type == chatroom.Direct && blockedByMe,

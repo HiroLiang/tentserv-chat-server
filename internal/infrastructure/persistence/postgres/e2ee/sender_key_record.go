@@ -10,6 +10,7 @@ import (
 type SenderKeyRecord struct {
 	ID               membersenderkey.ID      `db:"id"`
 	ChatMemberID     chatmember.ID           `db:"chat_member_id"`
+	SenderDeviceID   string                  `db:"sender_device_id"`
 	ChainID          membersenderkey.ChainID `db:"chain_id"`
 	SenderKeyVersion int64                   `db:"sender_key_version"`
 	KeyFingerprint   *string                 `db:"key_fingerprint"`

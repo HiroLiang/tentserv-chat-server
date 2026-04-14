@@ -52,6 +52,22 @@ func HandleError(c *gin.Context, err error) {
 		})
 		return
 
+	case errors.Is(err, usecase.ErrSelfSenderKeySyncIncomplete):
+		logger.Log.Warn(err.Error())
+		c.JSON(http.StatusConflict, response.ErrorResponse{
+			Code:    "SELF_SENDER_KEY_SYNC_INCOMPLETE",
+			Message: "self sender key sync is not ready to complete",
+		})
+		return
+
+	case errors.Is(err, usecase.ErrSelfSenderKeySyncInProgress):
+		logger.Log.Warn(err.Error())
+		c.JSON(http.StatusConflict, response.ErrorResponse{
+			Code:    "SELF_SENDER_KEY_SYNC_IN_PROGRESS",
+			Message: "self sender key sync is already in progress",
+		})
+		return
+
 	default:
 		_ = c.Error(err)
 		return

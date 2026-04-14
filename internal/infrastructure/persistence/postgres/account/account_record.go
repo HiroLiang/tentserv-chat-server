@@ -21,6 +21,7 @@ type AccountRecord struct {
 type AccountDeviceRecord struct {
 	AccountID  int64     `db:"account_id"`
 	DeviceID   uuid.UUID `db:"device_id"`
+	Status     string    `db:"status"`
 	LastIP     string    `db:"last_ip"`
 	LastSeenAt time.Time `db:"last_seen_at"`
 }

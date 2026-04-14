@@ -53,6 +53,8 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.GetAccountProfileUseCase,
 		useCases.VerifyEmailUseCase,
 		useCases.ResendVerifyEmailUseCase,
+		useCases.VerifyLoginDeviceUseCase,
+		useCases.ResendLoginDeviceVerificationUseCase,
 		dependencies.RegisterRateLimiter)
 	authHandler.RegisterAuthRoutes(group.Group("/auth"))
 
@@ -133,6 +135,11 @@ func RegisterRestRoutes(group *gin.RouterGroup, useCases *UseCases, dependencies
 		useCases.GetPendingSenderKeyDistributionsUseCase,
 		useCases.ConsumeSenderKeyDistributionUseCase,
 		useCases.CreateSenderKeyRequestUseCase,
+		useCases.UploadSelfSenderKeySyncDistributionsUseCase,
+		useCases.GetPendingSelfSenderKeySyncDistributionsUseCase,
+		useCases.ConsumeSelfSenderKeySyncDistributionUseCase,
+		useCases.GetSelfSenderKeySyncUseCase,
+		useCases.SelfSenderKeySyncMutationUseCase,
 	).RegisterE2EERoutes(e2eeGroup)
 
 	// Future: admin-only participant routes

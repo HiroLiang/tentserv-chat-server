@@ -57,10 +57,10 @@ func TestVerificationStore_StoreUsesCacheTTLWhenRetentionIsLonger(t *testing.T) 
 		t.Fatalf("store session: %v", err)
 	}
 
-	if got := cache.ttls[tokenCacheKey("active-token")]; got != 24*time.Hour {
+	if got := cache.ttls[store.tokenCacheKey("active-token")]; got != 24*time.Hour {
 		t.Fatalf("expected token cache ttl=24h, got %s", got)
 	}
-	if got := cache.ttls[accountCacheKey(session.AccountID)]; got != 24*time.Hour {
+	if got := cache.ttls[store.accountCacheKey(session.AccountID)]; got != 24*time.Hour {
 		t.Fatalf("expected account cache ttl=24h, got %s", got)
 	}
 }
@@ -112,10 +112,10 @@ func TestVerificationStore_FindTokenByAccountIDTreatsExpiredSessionAsMissing(t *
 	if ok || token != "" {
 		t.Fatalf("expected expired session lookup to be treated as missing, got token=%q ok=%t", token, ok)
 	}
-	if _, ok := cache.values[tokenCacheKey("expired-token")]; ok {
+	if _, ok := cache.values[store.tokenCacheKey("expired-token")]; ok {
 		t.Fatalf("expected expired token payload to be cleaned up")
 	}
-	if _, ok := cache.values[accountCacheKey(session.AccountID)]; ok {
+	if _, ok := cache.values[store.accountCacheKey(session.AccountID)]; ok {
 		t.Fatalf("expected expired account mapping to be cleaned up")
 	}
 }

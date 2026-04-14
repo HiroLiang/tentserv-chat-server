@@ -16,6 +16,7 @@ Feature: E2EE sender key distribution lifecycle
     Then the response status should be 200
     And sender key distribution status should show own key exists as true
     And sender key distribution status should list available receiver member 302
+    And sender key distribution status should list available receiver member 302 device "00000000-0000-0000-0000-000000002302"
 
   Scenario: Receiver sees an available sender key distribution in room summary and pending list
     Given a sender key receiver setup exists with room id 12, sender member id 304, and receiver member id 303 with available distribution version 77
@@ -23,9 +24,11 @@ Feature: E2EE sender key distribution lifecycle
     Then the response status should be 200
     And sender key distribution status should show own key exists as false
     And sender key distribution status should list available sender member 304
+    And sender key distribution status should list available sender member 304 device "00000000-0000-0000-0000-000000002304"
     When I list pending sender key distributions for room 12
     Then the response status should be 200
     And pending sender key distributions should include sender member 304, receiver member 303, and version 77
+    And pending sender key distributions should include sender member 304 device "00000000-0000-0000-0000-000000002304", receiver member 303 device "33333333-3333-3333-3333-333333333333", and version 77
 
   Scenario: Repeated upload of the same sender key version stays idempotent
     Given a sender key provider setup exists with room id 15, provider member id 309, and receiver member id 310 in the same room
@@ -36,6 +39,7 @@ Feature: E2EE sender key distribution lifecycle
     When I request sender key distribution status for room 15
     Then the response status should be 200
     And sender key distribution status should list available receiver member 310
+    And sender key distribution status should list available receiver member 310 device "00000000-0000-0000-0000-000000002310"
 
   Scenario: Receiver consumes an available sender key distribution
     Given a sender key receiver setup exists with room id 13, sender member id 306, and receiver member id 305 with available distribution version 88

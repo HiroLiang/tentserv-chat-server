@@ -47,7 +47,7 @@ func NewNotifyPendingSenderKeyRequestsUseCase(
 
 // Execute looks up pending requests for this user (as provider) and pushes notifications.
 // userID is a string representation of the user's integer user ID.
-func (u *NotifyPendingSenderKeyRequestsUseCase) Execute(ctx context.Context, userIDStr string) {
+func (u *NotifyPendingSenderKeyRequestsUseCase) Execute(ctx context.Context, userIDStr string, providerDeviceID shared.DeviceID) {
 	userIDInt, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
 		return
@@ -69,16 +69,17 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) Execute(ctx context.Context, use
 		if m.IsDeleted {
 			continue
 		}
-		u.notifyForMember(ctx, m, userIDStr)
+		u.notifyForMember(ctx, m, providerDeviceID, userIDStr)
 	}
 }
 
 func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 	ctx context.Context,
 	providerMember *chatmember.ChatMember,
+	providerDeviceID shared.DeviceID,
 	providerUserIDStr string,
 ) {
-	requests, err := u.senderKeyRequestRepo.FindPendingByProvider(ctx, providerMember.ID)
+	requests, err := u.senderKeyRequestRepo.FindPendingByProvider(ctx, providerMember.ID, providerDeviceID)
 	if err != nil || len(requests) == 0 {
 		return
 	}
@@ -88,8 +89,8 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 		if err != nil || requesterMember.IsDeleted {
 			continue
 		}
-		if u.requestAlreadySatisfied(ctx, providerMember.ID, requesterMember.ID) {
-			_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, requesterMember.ID, providerMember.ID)
+		if u.requestAlreadySatisfied(ctx, providerMember.ID, providerDeviceID, requesterMember.ID, req.RequesterDeviceID) {
+			_ = u.senderKeyRequestRepo.MarkFulfilled(ctx, requesterMember.ID, req.RequesterDeviceID, providerMember.ID, providerDeviceID)
 			continue
 		}
 		requesterParticipant, err := u.participantRepo.FindByID(ctx, requesterMember.ParticipantID)
@@ -105,8 +106,10 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 			Payload: wsSenderKeyNeededPayload{
 				RoomID:            int64(requesterMember.RoomID),
 				ProviderMemberID:  int64(providerMember.ID),
+				ProviderDeviceID:  providerDeviceID.String(),
 				RequesterMemberID: int64(requesterMember.ID),
 				RequesterUserID:   int64(*requesterParticipant.UserID),
+				RequesterDeviceID: req.RequesterDeviceID.String(),
 			},
 		})
 		if err != nil {
@@ -119,14 +122,17 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 
 func (u *NotifyPendingSenderKeyRequestsUseCase) requestAlreadySatisfied(
 	ctx context.Context,
-	providerMemberID, requesterMemberID chatmember.ID,
+	providerMemberID chatmember.ID,
+	providerDeviceID shared.DeviceID,
+	requesterMemberID chatmember.ID,
+	requesterDeviceID shared.DeviceID,
 ) bool {
-	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMemberID)
+	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMemberID, providerDeviceID)
 	if err != nil {
 		return false
 	}
 
-	dist, err := u.distributionRepo.FindLatest(ctx, providerMemberID, requesterMemberID)
+	dist, err := u.distributionRepo.FindLatest(ctx, providerMemberID, providerDeviceID, requesterMemberID, requesterDeviceID)
 	if err != nil {
 		if errors.Is(err, senderkeydistribution.ErrNotFound) {
 			return false

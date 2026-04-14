@@ -25,8 +25,8 @@ func TestChatMessageRepository_FindLatestByRoomExcludingSendersAddsNotInFilter(t
 	t.Log("Action: execute FindLatestByRoomExcludingSenders")
 
 	rows := sqlmock.NewRows(chatMessageRowColumns()).
-		AddRow(31, 77, 14, "ciphertext", string(chatmessage.Text), nil, false, false, now, now)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, room_id, sender_id, content, message_type, reply_to_id, is_edited, is_deleted, created_at, updated_at FROM public.chat_records WHERE (is_deleted = $1 AND room_id = $2 AND sender_id NOT IN ($3,$4)) ORDER BY id DESC LIMIT 1`)).
+		AddRow(31, 77, 14, "11111111-1111-1111-1111-111111111111", 1776095192099, "ciphertext", string(chatmessage.Text), nil, false, false, now, now)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, room_id, sender_id, sender_device_id, sender_key_version, content, message_type, reply_to_id, is_edited, is_deleted, created_at, updated_at FROM public.chat_records WHERE (is_deleted = $1 AND room_id = $2 AND sender_id NOT IN ($3,$4)) ORDER BY id DESC LIMIT 1`)).
 		WithArgs(false, chatroom.ID(77), int64(12), int64(13)).
 		WillReturnRows(rows)
 
@@ -48,6 +48,8 @@ func chatMessageRowColumns() []string {
 		"id",
 		"room_id",
 		"sender_id",
+		"sender_device_id",
+		"sender_key_version",
 		"content",
 		"message_type",
 		"reply_to_id",

@@ -158,13 +158,18 @@ func (d *Deps) LoginUseCases(
 		hasher,
 		d.loginLimiter,
 		d.sessionManager,
+		d.store,
 		d.accountRepo,
 		d.userRepo,
 		d.roleRepo,
 		d.deviceRepo,
 		d.participantRepo,
+		nil,
 		d.email,
 		func(string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return bddEmailBuilder{}
+		},
+		func(string, string, string, string, string, string, time.Time) appEmail.EmailBuilder {
 			return bddEmailBuilder{}
 		},
 	)
@@ -323,6 +328,22 @@ func (r *bddAccountRepo) RegisterDevice(_ context.Context, device *domainaccount
 	r.registerDeviceCalls++
 	copied := *device
 	r.lastRegisteredDevice = &copied
+	return nil
+}
+
+func (r *bddAccountRepo) UpdateDeviceStatus(_ context.Context, accountID shared.AccountID, deviceID shared.DeviceID, status domainaccount.DeviceStatus) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	acc, ok := r.accountsByID[accountID]
+	if !ok {
+		return domainaccount.ErrAccountNotFound
+	}
+	for i := range acc.Devices {
+		if acc.Devices[i].DeviceID == deviceID {
+			acc.Devices[i].Status = status
+		}
+	}
 	return nil
 }
 

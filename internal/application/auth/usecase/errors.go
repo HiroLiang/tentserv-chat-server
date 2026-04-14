@@ -13,6 +13,7 @@ var (
 	ErrInvalidEmail    = errors.New("invalid email")
 	ErrInvalidAccount  = errors.New("invalid account name")
 	ErrWeakPassword    = errors.New("password is too common or weak")
+	ErrPasswordConfirmMismatch = errors.New("password confirmation does not match")
 
 	ErrEmailExist = errors.New("email exist")
 
@@ -26,8 +27,9 @@ var (
 
 	ErrPasswordError = errors.New("password error")
 
-	ErrTokenInvalid                  = errors.New("invalid or expired verification token")
-	ErrVerificationPending           = errors.New("verification is already pending for this account")
-	ErrVerificationCodeInvalid       = errors.New("verification code is incorrect")
-	ErrVerificationAttemptsExceeded  = errors.New("verification attempts exceeded")
+	ErrTokenInvalid                 = errors.New("invalid or expired verification token")
+	ErrVerificationPending          = errors.New("verification is already pending for this account")
+	ErrVerificationCodeInvalid      = errors.New("verification code is incorrect")
+	ErrVerificationAttemptsExceeded = errors.New("verification attempts exceeded")
+	ErrSelfSenderKeySyncInProgress  = errors.New("self sender key sync is already in progress")
 )

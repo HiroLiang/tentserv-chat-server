@@ -133,6 +133,8 @@ func (uc *GetChatRoomMessagesUseCase) Execute(
 		messages = append(messages, ChatMessageInfo{
 			MessageID:           int64(msg.ID),
 			SenderID:            int64(msg.SenderID),
+			SenderDeviceID:      msg.SenderDeviceID.String(),
+			SenderKeyVersion:    msg.SenderKeyVersion,
 			SenderParticipantID: int64(memberParticipantMap[msg.SenderID]),
 			Content:             msg.Content,
 			Type:                string(msg.Type),

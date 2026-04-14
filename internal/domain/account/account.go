@@ -76,3 +76,16 @@ func (a *Account) GetDevice(deviceID shared.DeviceID) *AccountDevice {
 	}
 	return nil
 }
+
+func (a *Account) CountReadyDevicesExcluding(deviceID shared.DeviceID) int {
+	count := 0
+	for _, device := range a.Devices {
+		if device.DeviceID == deviceID {
+			continue
+		}
+		if device.Status == DeviceStatusReady {
+			count++
+		}
+	}
+	return count
+}

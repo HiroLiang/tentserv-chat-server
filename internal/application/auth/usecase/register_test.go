@@ -222,6 +222,10 @@ func (s *authAccountRepoStub) RegisterDevice(_ context.Context, device *account.
 	return nil
 }
 
+func (s *authAccountRepoStub) UpdateDeviceStatus(context.Context, shared.AccountID, shared.DeviceID, account.DeviceStatus) error {
+	return nil
+}
+
 func (s *authAccountRepoStub) RecordLoginEvent(_ context.Context, event *account.AccountLoginEvent) error {
 	s.recordLoginEventCalls++
 	if s.recordLoginEventErr != nil {
@@ -470,10 +474,11 @@ func newAuthRegisterUseCase(
 func authRegisterInput(email, accountName, displayName, password string) appShared.UseCaseInput[RegisterInput] {
 	return appShared.UseCaseInput[RegisterInput]{
 		Data: RegisterInput{
-			Email:    email,
-			Account:  accountName,
-			Name:     displayName,
-			Password: password,
+			Email:           email,
+			Account:         accountName,
+			Name:            displayName,
+			Password:        password,
+			ConfirmPassword: password,
 		},
 	}
 }

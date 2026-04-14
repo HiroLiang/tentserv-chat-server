@@ -2,10 +2,11 @@ package account
 
 // RegisterRequest represents the payload required for user registration.
 type RegisterRequest struct {
-	Name     string `json:"name" binding:"required,max=100"`
-	Account  string `json:"account" binding:"required,max=50"`
-	Email    string `json:"email" binding:"required,email,max=254"`
-	Password string `json:"password" binding:"required,min=6"`
+	Name            string `json:"name" binding:"required,max=100"`
+	Account         string `json:"account" binding:"required,max=50"`
+	Email           string `json:"email" binding:"required,email,max=254"`
+	Password        string `json:"password" binding:"required,min=6"`
+	ConfirmPassword string `json:"confirm_password" binding:"required,min=6"`
 }
 
 // RegisterResponse User register response
@@ -21,6 +22,9 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
+	LoginStatus             string `json:"login_status"`
+	VerificationToken       string `json:"verification_token,omitempty"`
+	VerificationExpiresAtMS int64  `json:"verification_expires_at_ms,omitempty"`
 }
 
 type GetProfileResponse struct {
@@ -46,6 +50,24 @@ type VerifyEmailRequest struct {
 }
 
 type VerifyEmailResponse struct{}
+
+type VerifyLoginDeviceRequest struct {
+	Token string `json:"token" binding:"required"`
+	Code  string `json:"code" binding:"required,len=6,numeric"`
+}
+
+type VerifyLoginDeviceResponse struct {
+	LoginStatus string `json:"login_status"`
+}
+
+type ResendLoginDeviceVerificationRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+type ResendLoginDeviceVerificationResponse struct {
+	VerificationToken       string `json:"verification_token"`
+	VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
+}
 
 type ResendVerifyEmailRequest struct {
 	Token string `json:"token" binding:"required"`

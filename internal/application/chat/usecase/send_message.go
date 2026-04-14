@@ -24,20 +24,23 @@ import (
 )
 
 type SendMessageInput struct {
-	RoomID    int64
-	Content   string
-	Type      string
-	ReplyToID *int64
+	RoomID           int64
+	Content          string
+	Type             string
+	ReplyToID        *int64
+	SenderKeyVersion int64
 }
 
 type SendMessageOutput struct {
-	MessageID int64
-	RoomID    int64
-	SenderID  int64
-	Content   string
-	Type      string
-	ReplyToID *int64
-	CreatedAt time.Time
+	MessageID        int64
+	RoomID           int64
+	SenderID         int64
+	SenderDeviceID   string
+	SenderKeyVersion int64
+	Content          string
+	Type             string
+	ReplyToID        *int64
+	CreatedAt        time.Time
 }
 
 type SendMessageUseCase struct {
@@ -163,11 +166,13 @@ func (uc *SendMessageUseCase) Execute(
 	}
 
 	msg := &chatmessage.ChatMessage{
-		RoomID:    roomID,
-		SenderID:  callerMember.ID,
-		Content:   input.Data.Content,
-		Type:      msgType,
-		ReplyToID: replyToID,
+		RoomID:           roomID,
+		SenderID:         callerMember.ID,
+		SenderDeviceID:   input.Base.Request.DeviceID,
+		SenderKeyVersion: input.Data.SenderKeyVersion,
+		Content:          input.Data.Content,
+		Type:             msgType,
+		ReplyToID:        replyToID,
 	}
 
 	if err := uc.chatMessageRepo.Create(ctx, msg); err != nil {
@@ -175,12 +180,14 @@ func (uc *SendMessageUseCase) Execute(
 	}
 
 	out := SendMessageOutput{
-		MessageID: int64(msg.ID),
-		RoomID:    int64(msg.RoomID),
-		SenderID:  int64(msg.SenderID),
-		Content:   msg.Content,
-		Type:      string(msg.Type),
-		CreatedAt: msg.CreatedAt,
+		MessageID:        int64(msg.ID),
+		RoomID:           int64(msg.RoomID),
+		SenderID:         int64(msg.SenderID),
+		SenderDeviceID:   msg.SenderDeviceID.String(),
+		SenderKeyVersion: msg.SenderKeyVersion,
+		Content:          msg.Content,
+		Type:             string(msg.Type),
+		CreatedAt:        msg.CreatedAt,
 	}
 	if msg.ReplyToID != nil {
 		v := int64(*msg.ReplyToID)
@@ -193,13 +200,15 @@ func (uc *SendMessageUseCase) Execute(
 }
 
 type wsMessagePayload struct {
-	MessageID int64     `json:"message_id"`
-	RoomID    int64     `json:"room_id"`
-	SenderID  int64     `json:"sender_id"`
-	Content   string    `json:"content"`
-	Type      string    `json:"type"`
-	ReplyToID *int64    `json:"reply_to_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	MessageID        int64     `json:"message_id"`
+	RoomID           int64     `json:"room_id"`
+	SenderID         int64     `json:"sender_id"`
+	SenderDeviceID   string    `json:"sender_device_id"`
+	SenderKeyVersion int64     `json:"sender_key_version"`
+	Content          string    `json:"content"`
+	Type             string    `json:"type"`
+	ReplyToID        *int64    `json:"reply_to_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type wsEnvelope struct {
@@ -237,13 +246,15 @@ func (uc *SendMessageUseCase) fanOut(out SendMessageOutput) {
 	payload, err := json.Marshal(wsEnvelope{
 		Type: "chat.message",
 		Payload: wsMessagePayload{
-			MessageID: out.MessageID,
-			RoomID:    out.RoomID,
-			SenderID:  out.SenderID,
-			Content:   out.Content,
-			Type:      out.Type,
-			ReplyToID: out.ReplyToID,
-			CreatedAt: out.CreatedAt,
+			MessageID:        out.MessageID,
+			RoomID:           out.RoomID,
+			SenderID:         out.SenderID,
+			SenderDeviceID:   out.SenderDeviceID,
+			SenderKeyVersion: out.SenderKeyVersion,
+			Content:          out.Content,
+			Type:             out.Type,
+			ReplyToID:        out.ReplyToID,
+			CreatedAt:        out.CreatedAt,
 		},
 	})
 	if err != nil {

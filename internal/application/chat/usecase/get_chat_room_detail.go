@@ -33,6 +33,8 @@ type ChatRoomMemberInfo struct {
 type ChatMessageInfo struct {
 	MessageID           int64
 	SenderID            int64
+	SenderDeviceID      string
+	SenderKeyVersion    int64
 	SenderParticipantID int64
 	Content             string
 	Type                string
@@ -161,6 +163,8 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 		messages = append(messages, ChatMessageInfo{
 			MessageID:           int64(msg.ID),
 			SenderID:            int64(msg.SenderID),
+			SenderDeviceID:      msg.SenderDeviceID.String(),
+			SenderKeyVersion:    msg.SenderKeyVersion,
 			SenderParticipantID: int64(memberParticipantMap[msg.SenderID]),
 			Content:             msg.Content,
 			Type:                string(msg.Type),
@@ -177,11 +181,12 @@ func (uc *GetChatRoomDetailUseCase) Execute(
 	}
 
 	avatarURL := uc.resolveRoomAvatarURL(ctx, room, callerParticipant.ID, allMembers)
+	name := uc.resolveRoomName(ctx, room, callerParticipant.ID, allMembers)
 
 	return GetChatRoomDetailOutput{
 		RoomID:        int64(room.ID),
 		RoomType:      string(room.Type),
-		Name:          room.Name,
+		Name:          name,
 		Description:   description,
 		AvatarURL:     avatarURL,
 		Members:       members,
@@ -268,4 +273,47 @@ func (uc *GetChatRoomDetailUseCase) resolveRoomAvatarURL(
 	}
 
 	return nil
+}
+
+func (uc *GetChatRoomDetailUseCase) resolveRoomName(
+	ctx context.Context,
+	room *chatroom.ChatRoom,
+	callerParticipantID participant.ID,
+	allMembers []*chatmember.ChatMember,
+) string {
+	switch room.Type {
+	case chatroom.Group, chatroom.Channel:
+		return room.Name
+	case chatroom.Direct, chatroom.Bot:
+		for _, m := range allMembers {
+			if m.IsDeleted || m.ParticipantID == callerParticipantID {
+				continue
+			}
+			p, err := uc.participantRepo.FindByID(ctx, m.ParticipantID)
+			if err != nil {
+				return room.Name
+			}
+			if room.Type == chatroom.Direct && p.UserID != nil {
+				u, err := uc.userRepo.FindByID(ctx, *p.UserID)
+				if err != nil {
+					return room.Name
+				}
+				if u.Name != "" {
+					return u.Name
+				}
+				return room.Name
+			}
+			if room.Type == chatroom.Bot && p.AgentID != nil {
+				a, err := uc.agentRepo.FindByID(ctx, agent.ID(*p.AgentID))
+				if err != nil {
+					return room.Name
+				}
+				if a.Name != "" {
+					return a.Name
+				}
+			}
+			return room.Name
+		}
+	}
+	return room.Name
 }

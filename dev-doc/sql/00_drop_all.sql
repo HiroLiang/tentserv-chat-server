@@ -50,10 +50,17 @@ DROP TRIGGER IF EXISTS trg_limit_user ON public.users;
 
 -- E2EE: sender_key_requests | 發送方金鑰請求 | 送信者鍵リクエスト
 DROP INDEX IF EXISTS idx_sender_key_requests_provider;
+DROP INDEX IF EXISTS idx_self_sender_key_sync_distributions_requester;
+DROP INDEX IF EXISTS idx_participant_self_sender_key_syncs_participant;
+DROP INDEX IF EXISTS idx_sender_key_receipts_sender;
+DROP INDEX IF EXISTS idx_sender_key_receipts_receiver;
 
 -- E2EE: sender_key_distributions | 發送方金鑰分發確認 | 送信者鍵配布確認
 DROP INDEX IF EXISTS idx_sender_key_distributions_sender;
 DROP INDEX IF EXISTS idx_sender_key_distributions_receiver;
+
+-- E2EE: participant_self_sender_key_syncs | 自有送信者鍵同步 | 自己送信者鍵同期
+DROP INDEX IF EXISTS idx_participant_self_sender_key_syncs_status;
 
 -- E2EE: member_sender_keys | 成員發送方金鑰 | メンバー送信者鍵
 DROP INDEX IF EXISTS idx_member_sender_keys_member;
@@ -101,12 +108,15 @@ DROP INDEX IF EXISTS idx_user_friendships_friend_id;
 -- ============================================================
 
 -- E2EE: sender key layer | 發送方金鑰層 | 送信者鍵レイヤー
-DROP TABLE IF EXISTS public.sender_key_requests     CASCADE;
+DROP TABLE IF EXISTS public.sender_key_requests CASCADE;
 DROP TABLE IF EXISTS public.sender_key_distributions CASCADE;
-DROP TABLE IF EXISTS public.member_sender_keys       CASCADE;
-DROP TABLE IF EXISTS public.user_one_time_pre_keys   CASCADE;
-DROP TABLE IF EXISTS public.user_signed_pre_keys     CASCADE;
-DROP TABLE IF EXISTS public.user_identity_keys       CASCADE;
+DROP TABLE IF EXISTS public.sender_key_receipts CASCADE;
+DROP TABLE IF EXISTS public.self_sender_key_sync_distributions CASCADE;
+DROP TABLE IF EXISTS public.participant_self_sender_key_syncs CASCADE;
+DROP TABLE IF EXISTS public.member_sender_keys CASCADE;
+DROP TABLE IF EXISTS public.user_one_time_pre_keys CASCADE;
+DROP TABLE IF EXISTS public.user_signed_pre_keys CASCADE;
+DROP TABLE IF EXISTS public.user_identity_keys CASCADE;
 
 -- Delivery queue | 投遞佇列 | 配信キュー
 DROP TABLE IF EXISTS public.delivery_queue CASCADE;
@@ -117,13 +127,13 @@ DROP TABLE IF EXISTS public.chat_invitations CASCADE;
 -- Chat core | 聊天核心 | チャットコア
 DROP TABLE IF EXISTS public.chat_records CASCADE;
 DROP TABLE IF EXISTS public.chat_members CASCADE;
-DROP TABLE IF EXISTS public.chat_rooms   CASCADE;
+DROP TABLE IF EXISTS public.chat_rooms CASCADE;
 
 -- Participant subtypes | 參與者子類型 | 参加者サブタイプ
-DROP TABLE IF EXISTS public.participant_systems      CASCADE;
-DROP TABLE IF EXISTS public.participant_agents       CASCADE;
-DROP TABLE IF EXISTS public.participant_users        CASCADE;
-DROP TABLE IF EXISTS public.participants             CASCADE;
+DROP TABLE IF EXISTS public.participant_systems CASCADE;
+DROP TABLE IF EXISTS public.participant_agents CASCADE;
+DROP TABLE IF EXISTS public.participant_users CASCADE;
+DROP TABLE IF EXISTS public.participants CASCADE;
 DROP TABLE IF EXISTS public.participant_system_types CASCADE;
 
 -- Friendships | 好友關係 | フレンドシップ
@@ -137,15 +147,15 @@ DROP TABLE IF EXISTS public.email_logs CASCADE;
 
 -- Device & session layer | 設備與會話層 | デバイス・セッション層
 DROP TABLE IF EXISTS public.account_login_events CASCADE;
-DROP TABLE IF EXISTS public.account_sessions     CASCADE;
-DROP TABLE IF EXISTS public.accounts_devices     CASCADE;
-DROP TABLE IF EXISTS public.devices              CASCADE;
+DROP TABLE IF EXISTS public.account_sessions CASCADE;
+DROP TABLE IF EXISTS public.accounts_devices CASCADE;
+DROP TABLE IF EXISTS public.devices CASCADE;
 
 -- Account & user core | 帳號與使用者核心 | アカウント・ユーザーコア
 DROP TABLE IF EXISTS public.users_roles CASCADE;
-DROP TABLE IF EXISTS public.roles       CASCADE;
-DROP TABLE IF EXISTS public.users       CASCADE;
-DROP TABLE IF EXISTS public.accounts    CASCADE;
+DROP TABLE IF EXISTS public.roles CASCADE;
+DROP TABLE IF EXISTS public.users CASCADE;
+DROP TABLE IF EXISTS public.accounts CASCADE;
 
 
 -- ============================================================
@@ -194,6 +204,7 @@ DROP TYPE IF EXISTS email_status;
 
 -- Device enum | 設備列舉 | デバイス列挙
 DROP TYPE IF EXISTS device_platform;
+DROP TYPE IF EXISTS account_device_status;
 
 -- Account enum | 帳號列舉 | アカウント列挙
 DROP TYPE IF EXISTS account_status;

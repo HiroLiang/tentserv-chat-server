@@ -20,6 +20,8 @@ var ChatMessageTable = postgres.Table{
 		"id",
 		"room_id",
 		"sender_id",
+		"sender_device_id",
+		"sender_key_version",
 		"content",
 		"message_type",
 		"reply_to_id",
@@ -341,8 +343,8 @@ func (r *ChatMessageRepository) Create(ctx context.Context, msg *chatmessage.Cha
 	rec := toChatMessageRecord(msg)
 
 	query, args, err := ChatMessageTable.Insert().
-		Columns("room_id", "sender_id", "content", "message_type", "reply_to_id").
-		Values(rec.RoomID, rec.SenderID, rec.Content, rec.Type, rec.ReplyToID).
+		Columns("room_id", "sender_id", "sender_device_id", "sender_key_version", "content", "message_type", "reply_to_id").
+		Values(rec.RoomID, rec.SenderID, rec.SenderDeviceID, rec.SenderKeyVersion, rec.Content, rec.Type, rec.ReplyToID).
 		Suffix("RETURNING id, created_at").
 		ToSql()
 	if err != nil {

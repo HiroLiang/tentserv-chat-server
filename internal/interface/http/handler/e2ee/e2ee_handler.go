@@ -23,6 +23,11 @@ type E2EEHandler struct {
 	getPendingSenderKeyDistributions *usecase.GetPendingSenderKeyDistributionsUseCase
 	consumeSenderKeyDistribution     *usecase.ConsumeSenderKeyDistributionUseCase
 	createSenderKeyRequest           *usecase.CreateSenderKeyRequestUseCase
+	uploadSelfSenderKeySyncDistributions *usecase.UploadSelfSenderKeySyncDistributionsUseCase
+	getPendingSelfSenderKeySyncDistributions *usecase.GetPendingSelfSenderKeySyncDistributionsUseCase
+	consumeSelfSenderKeySyncDistribution *usecase.ConsumeSelfSenderKeySyncDistributionUseCase
+	getSelfSenderKeySync             *usecase.GetSelfSenderKeySyncUseCase
+	selfSenderKeySyncMutation        *usecase.SelfSenderKeySyncMutationUseCase
 }
 
 func NewE2EEHandler(
@@ -39,6 +44,11 @@ func NewE2EEHandler(
 	getPendingSenderKeyDistributions *usecase.GetPendingSenderKeyDistributionsUseCase,
 	consumeSenderKeyDistribution *usecase.ConsumeSenderKeyDistributionUseCase,
 	createSenderKeyRequest *usecase.CreateSenderKeyRequestUseCase,
+	uploadSelfSenderKeySyncDistributions *usecase.UploadSelfSenderKeySyncDistributionsUseCase,
+	getPendingSelfSenderKeySyncDistributions *usecase.GetPendingSelfSenderKeySyncDistributionsUseCase,
+	consumeSelfSenderKeySyncDistribution *usecase.ConsumeSelfSenderKeySyncDistributionUseCase,
+	getSelfSenderKeySync *usecase.GetSelfSenderKeySyncUseCase,
+	selfSenderKeySyncMutation *usecase.SelfSenderKeySyncMutationUseCase,
 ) *E2EEHandler {
 	return &E2EEHandler{
 		uploadIdentityKey:                uploadIdentityKey,
@@ -54,6 +64,11 @@ func NewE2EEHandler(
 		getPendingSenderKeyDistributions: getPendingSenderKeyDistributions,
 		consumeSenderKeyDistribution:     consumeSenderKeyDistribution,
 		createSenderKeyRequest:           createSenderKeyRequest,
+		uploadSelfSenderKeySyncDistributions: uploadSelfSenderKeySyncDistributions,
+		getPendingSelfSenderKeySyncDistributions: getPendingSelfSenderKeySyncDistributions,
+		consumeSelfSenderKeySyncDistribution: consumeSelfSenderKeySyncDistribution,
+		getSelfSenderKeySync:             getSelfSenderKeySync,
+		selfSenderKeySyncMutation:        selfSenderKeySyncMutation,
 	}
 }
 
@@ -71,6 +86,14 @@ func (h *E2EEHandler) RegisterE2EERoutes(r *gin.RouterGroup) {
 	r.GET("/sender-key-distributions/:room_id/pending", h.getPendingSenderKeyDistributions_)
 	r.POST("/sender-key-distributions/:distribution_id/consume", h.consumeSenderKeyDistribution_)
 	r.POST("/sender-key-request", h.createSenderKeyRequest_)
+	r.POST("/self-sender-key-sync/distributions/bulk", h.bulkSelfSenderKeySyncDistributions_)
+	r.GET("/self-sender-key-sync/distributions/pending", h.getPendingSelfSenderKeySyncDistributions_)
+	r.POST("/self-sender-key-sync/distributions/:distribution_id/consume", h.consumeSelfSenderKeySyncDistribution_)
+	r.GET("/self-sender-key-sync", h.getSelfSenderKeySync_)
+	r.POST("/self-sender-key-sync/accept", h.acceptSelfSenderKeySync_)
+	r.POST("/self-sender-key-sync/uploaded", h.markSelfSenderKeySyncUploaded_)
+	r.POST("/self-sender-key-sync/complete", h.completeSelfSenderKeySync_)
+	r.POST("/self-sender-key-sync/fail", h.failSelfSenderKeySync_)
 }
 
 // @Summary Upload identity key
@@ -310,6 +333,7 @@ func (h *E2EEHandler) uploadSenderKey_(c *gin.Context) {
 	input := adapter.BuildInput(c, usecase.UploadSenderKeyInput{
 		RoomID:              req.RoomID,
 		ReceiverMemberID:    req.ReceiverMemberID,
+		ReceiverDeviceID:    req.ReceiverDeviceID,
 		SenderKeyVersion:    req.SenderKeyVersion,
 		DistributionMessage: req.DistributionMessage,
 	})
@@ -350,6 +374,7 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 	for i, k := range out.Keys {
 		items[i] = SenderKeyItemResponse{
 			ChatMemberID:     k.ChatMemberID,
+			SenderDeviceID:   k.SenderDeviceID,
 			SenderKeyVersion: k.SenderKeyVersion,
 		}
 	}
@@ -389,12 +414,12 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
-		OwnSenderKeyExists:     out.OwnSenderKeyExists,
-		RequestableMemberIDs:   normalizeMemberIDs(out.RequestableMemberIDs),
-		AvailableFromMemberIDs: normalizeMemberIDs(out.AvailableFromMemberIDs),
-		AvailableToMemberIDs:   normalizeMemberIDs(out.AvailableToMemberIDs),
-		PendingReceivers:       normalizeMemberIDs(out.PendingReceivers),
-		PendingFromMembers:     normalizeMemberIDs(out.PendingFromMembers),
+		OwnDeviceSenderKeyExists: out.OwnDeviceSenderKeyExists,
+		RequestableSources:       normalizeDeviceRefs(out.RequestableSources),
+		AvailableFromSources:     normalizeDeviceRefs(out.AvailableFromSources),
+		AvailableToTargets:       normalizeDeviceRefs(out.AvailableToTargets),
+		PendingReceivers:         normalizeDeviceRefs(out.PendingReceivers),
+		PendingFromSources:       normalizeDeviceRefs(out.PendingFromSources),
 	})
 }
 
@@ -429,7 +454,9 @@ func (h *E2EEHandler) getPendingSenderKeyDistributions_(c *gin.Context) {
 		items = append(items, PendingSenderKeyDistributionItemResponse{
 			DistributionID:      dist.DistributionID,
 			SenderMemberID:      dist.SenderMemberID,
+			SenderDeviceID:      dist.SenderDeviceID,
 			ReceiverMemberID:    dist.ReceiverMemberID,
+			ReceiverDeviceID:    dist.ReceiverDeviceID,
 			SenderKeyVersion:    dist.SenderKeyVersion,
 			DistributionMessage: dist.DistributionMessage,
 		})
@@ -498,8 +525,10 @@ func (h *E2EEHandler) createSenderKeyRequest_(c *gin.Context) {
 		return
 	}
 	input := adapter.BuildInput(c, usecase.CreateSenderKeyRequestInput{
-		RoomID:           req.RoomID,
-		ProviderMemberID: req.ProviderMemberID,
+		RoomID:            req.RoomID,
+		ProviderMemberID:  req.ProviderMemberID,
+		ProviderDeviceID:  req.ProviderDeviceID,
+		RequesterDeviceID: req.RequesterDeviceID,
 	})
 	if _, err := h.createSenderKeyRequest.Execute(c.Request.Context(), input); err != nil {
 		HandleError(c, err)
@@ -508,9 +537,172 @@ func (h *E2EEHandler) createSenderKeyRequest_(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func normalizeMemberIDs(ids []int64) []int64 {
-	if ids == nil {
-		return []int64{}
+func normalizeDeviceRefs(refs []usecase.SenderKeyDeviceRef) []SenderKeyDeviceRefResponse {
+	if refs == nil {
+		return []SenderKeyDeviceRefResponse{}
 	}
-	return ids
+	items := make([]SenderKeyDeviceRefResponse, len(refs))
+	for i, ref := range refs {
+		items[i] = SenderKeyDeviceRefResponse{
+			MemberID: ref.MemberID,
+			DeviceID: ref.DeviceID,
+		}
+	}
+	return items
+}
+
+func (h *E2EEHandler) getSelfSenderKeySync_(c *gin.Context) {
+	input := adapter.BuildInput(c, usecase.GetSelfSenderKeySyncInput{})
+	out, err := h.getSelfSenderKeySync.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSelfSenderKeySyncResponse(out))
+}
+
+func (h *E2EEHandler) bulkSelfSenderKeySyncDistributions_(c *gin.Context) {
+	var req BulkSelfSenderKeySyncDistributionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
+	}
+	items := make([]usecase.SelfSenderKeySyncDistributionUploadItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		items = append(items, usecase.SelfSenderKeySyncDistributionUploadItem{
+			SenderMemberID:      item.SenderMemberID,
+			SenderDeviceID:      item.SenderDeviceID,
+			SenderKeyVersion:    item.SenderKeyVersion,
+			DistributionMessage: item.DistributionMessage,
+		})
+	}
+	out, err := h.uploadSelfSenderKeySyncDistributions.Execute(c.Request.Context(), adapter.BuildInput(c, usecase.BulkSelfSenderKeySyncDistributionsInput{
+		Items: items,
+	}))
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, BulkSelfSenderKeySyncDistributionsResponse{Count: out.Count})
+}
+
+func (h *E2EEHandler) getPendingSelfSenderKeySyncDistributions_(c *gin.Context) {
+	out, err := h.getPendingSelfSenderKeySyncDistributions.Execute(c.Request.Context(), adapter.BuildInput(c, usecase.GetPendingSelfSenderKeySyncDistributionsInput{}))
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	items := make([]PendingSelfSenderKeySyncDistributionItemResponse, 0, len(out.Distributions))
+	for _, item := range out.Distributions {
+		items = append(items, PendingSelfSenderKeySyncDistributionItemResponse{
+			DistributionID:      item.DistributionID,
+			SenderMemberID:      item.SenderMemberID,
+			SenderDeviceID:      item.SenderDeviceID,
+			SenderKeyVersion:    item.SenderKeyVersion,
+			DistributionMessage: item.DistributionMessage,
+		})
+	}
+	c.JSON(http.StatusOK, GetPendingSelfSenderKeySyncDistributionsResponse{Distributions: items})
+}
+
+func (h *E2EEHandler) consumeSelfSenderKeySyncDistribution_(c *gin.Context) {
+	distributionID, err := strconv.ParseInt(c.Param("distribution_id"), 10, 64)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	var req ConsumeSelfSenderKeySyncDistributionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
+	}
+	if _, err := h.consumeSelfSenderKeySyncDistribution.Execute(c.Request.Context(), adapter.BuildInput(c, usecase.ConsumeSelfSenderKeySyncDistributionInput{
+		DistributionID: distributionID,
+		Status:         req.Status,
+	})); err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *E2EEHandler) acceptSelfSenderKeySync_(c *gin.Context) {
+	input := adapter.BuildInput(c, usecase.AcceptSelfSenderKeySyncInput{})
+	out, err := h.selfSenderKeySyncMutation.Accept(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSelfSenderKeySyncResponse(out))
+}
+
+func (h *E2EEHandler) markSelfSenderKeySyncUploaded_(c *gin.Context) {
+	input := adapter.BuildInput(c, usecase.MarkSelfSenderKeySyncUploadedInput{})
+	out, err := h.selfSenderKeySyncMutation.MarkUploaded(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSelfSenderKeySyncResponse(out))
+}
+
+func (h *E2EEHandler) completeSelfSenderKeySync_(c *gin.Context) {
+	input := adapter.BuildInput(c, usecase.CompleteSelfSenderKeySyncInput{})
+	out, err := h.selfSenderKeySyncMutation.Complete(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSelfSenderKeySyncResponse(out))
+}
+
+func (h *E2EEHandler) failSelfSenderKeySync_(c *gin.Context) {
+	var req FailSelfSenderKeySyncRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		HandleError(c, err)
+		return
+	}
+	input := adapter.BuildInput(c, usecase.FailSelfSenderKeySyncInput{
+		LastError: req.LastError,
+		Retryable: req.Retryable,
+	})
+	out, err := h.selfSenderKeySyncMutation.Fail(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSelfSenderKeySyncResponse(out))
+}
+
+func toSelfSenderKeySyncResponse(snapshot *usecase.SelfSenderKeySyncSnapshot) GetSelfSenderKeySyncResponse {
+	if snapshot == nil {
+		return GetSelfSenderKeySyncResponse{Exists: false, Status: "idle"}
+	}
+	return GetSelfSenderKeySyncResponse{
+		Exists:                 snapshot.Exists,
+		Status:                 snapshot.Status,
+		RequesterDevice:        toSelfSenderKeyDevice(snapshot.RequesterDevice),
+		ProviderDevice:         toSelfSenderKeyDevice(snapshot.ProviderDevice),
+		RequesterCurrentDevice: snapshot.RequesterCurrentDevice,
+		ProviderCurrentDevice:  snapshot.ProviderCurrentDevice,
+		LastError:              snapshot.LastError,
+		RequestedAtMS:          snapshot.RequestedAtMS,
+		ProviderClaimedAtMS:    snapshot.ProviderClaimedAtMS,
+		UploadedAtMS:           snapshot.UploadedAtMS,
+		CompletedAtMS:          snapshot.CompletedAtMS,
+		FailedAtMS:             snapshot.FailedAtMS,
+	}
+}
+
+func toSelfSenderKeyDevice(device *usecase.SelfSenderKeySyncDeviceSnapshot) *SelfSenderKeyDevice {
+	if device == nil {
+		return nil
+	}
+	return &SelfSenderKeyDevice{
+		DeviceID:      device.DeviceID,
+		DeviceName:    device.DeviceName,
+		Platform:      device.Platform,
+		LastIP:        device.LastIP,
+		BindingStatus: device.BindingStatus,
+	}
 }

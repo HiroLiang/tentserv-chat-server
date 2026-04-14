@@ -16,6 +16,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	domainSecurity "github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -29,21 +30,27 @@ type LoginInput struct {
 }
 
 type LoginOutput struct {
-	TokenPair auth.TokenPair
+	LoginStatus             string
+	TokenPair               auth.TokenPair
+	VerificationToken       string
+	VerificationExpiresAtMS int64
 }
 
 type LoginUseCase struct {
-	uow                transaction.UnitOfWork
-	hasher             security.Hasher
-	loginLimiter       security.LoginRateLimiter
-	sessionManager     port.SessionManager
-	accountRepo        account.Repository
-	userRepo           user.Repository
-	userRoleRepo       userrole.Repository
-	deviceRepo         device.Repository
-	participantRepo    participant.Repository
-	emailService       appEmail.EmailService
-	mailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
+	uow                            transaction.UnitOfWork
+	hasher                         security.Hasher
+	loginLimiter                   security.LoginRateLimiter
+	sessionManager                 port.SessionManager
+	verificationStore              port.VerificationStore
+	accountRepo                    account.Repository
+	userRepo                       user.Repository
+	userRoleRepo                   userrole.Repository
+	deviceRepo                     device.Repository
+	participantRepo                participant.Repository
+	selfSyncRepo                   selfsenderkeysync.Repository
+	emailService                   appEmail.EmailService
+	loginMailBuilderFactory        func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder
+	verificationMailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode string, loginTime time.Time) appEmail.EmailBuilder
 }
 
 func NewLoginUseCase(
@@ -51,26 +58,32 @@ func NewLoginUseCase(
 	hasher security.Hasher,
 	loginLimiter security.LoginRateLimiter,
 	sessionManager port.SessionManager,
+	verificationStore port.VerificationStore,
 	accountRepo account.Repository,
 	userRepo user.Repository,
 	userRoleRepo userrole.Repository,
 	deviceRepo device.Repository,
 	participantRepo participant.Repository,
+	selfSyncRepo selfsenderkeysync.Repository,
 	emailService appEmail.EmailService,
-	mailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
+	loginMailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder,
+	verificationMailBuilderFactory func(recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode string, loginTime time.Time) appEmail.EmailBuilder,
 ) *LoginUseCase {
 	return &LoginUseCase{
-		uow:                uow,
-		hasher:             hasher,
-		loginLimiter:       loginLimiter,
-		sessionManager:     sessionManager,
-		accountRepo:        accountRepo,
-		userRepo:           userRepo,
-		userRoleRepo:       userRoleRepo,
-		deviceRepo:         deviceRepo,
-		participantRepo:    participantRepo,
-		emailService:       emailService,
-		mailBuilderFactory: mailBuilderFactory,
+		uow:                            uow,
+		hasher:                         hasher,
+		loginLimiter:                   loginLimiter,
+		sessionManager:                 sessionManager,
+		verificationStore:              verificationStore,
+		accountRepo:                    accountRepo,
+		userRepo:                       userRepo,
+		userRoleRepo:                   userRoleRepo,
+		deviceRepo:                     deviceRepo,
+		participantRepo:                participantRepo,
+		selfSyncRepo:                   selfSyncRepo,
+		emailService:                   emailService,
+		loginMailBuilderFactory:        loginMailBuilderFactory,
+		verificationMailBuilderFactory: verificationMailBuilderFactory,
 	}
 }
 
@@ -127,29 +140,68 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		return LoginOutput{}, ErrLoginFailed
 	}
 
-	// Create a user if not exists
-	var primaryUserID shared.UserID
+	existingDevice := accountData.GetDevice(deviceID)
+	readyOtherDevices := accountData.CountReadyDevicesExcluding(deviceID)
+	if readyOtherDevices > 0 {
+		if err := uc.ensureNoActiveSelfSync(ctx, accountData, deviceID); err != nil {
+			return LoginOutput{}, err
+		}
+	}
 
-	if len(accountData.UserIDs) == 0 {
-		newUser := user.NewUser(accountData.ID, accountData.AccountName)
-		userID, err := uc.userRepo.Create(ctx, newUser)
+	if uc.requiresDeviceVerification(existingDevice, readyOtherDevices) {
+		if err := uc.accountRepo.RegisterDevice(ctx, &account.AccountDevice{
+			AccountID:  accountData.ID,
+			DeviceID:   deviceID,
+			Status:     account.DeviceStatusPendingVerification,
+			LastIP:     input.Base.Request.IP,
+			LastSeenAt: time.Now(),
+		}); err != nil {
+			return LoginOutput{}, ErrLoginFailed
+		}
+		if err := tx.Commit(); err != nil {
+			return LoginOutput{}, ErrLoginFailed
+		}
+		committed = true
+
+		conf := config.App()
+		token, session, err := newVerificationSession(int64(accountData.ID), conf.Email.VerifyTTL)
 		if err != nil {
 			return LoginOutput{}, ErrLoginFailed
 		}
+		session.DeviceID = deviceID.String()
+		session.DeviceName = deviceData.Name
+		session.IP = input.Base.Request.IP.String()
+		session.UserAgent = input.Base.Request.UserAgent
 
-		// persist default roles
-		for _, code := range newUser.RoleCodes {
-			if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
-				return LoginOutput{}, ErrLoginFailed
-			}
+		if err := uc.verificationStore.Store(ctx, token, session, conf.Email.VerifyTTL); err != nil {
+			return LoginOutput{}, ErrLoginFailed
 		}
 
-		// add user to account
-		accountData.AddUser(userID)
+		builder := uc.verificationMailBuilderFactory(
+			string(accountData.Email),
+			accountData.AccountName,
+			deviceData.Name,
+			deviceID.String(),
+			input.Base.Request.IP.String(),
+			session.Code,
+			time.Now(),
+		)
+		if err := uc.emailService.Send(ctx, builder); err != nil {
+			_ = uc.verificationStore.Delete(ctx, token)
+			return LoginOutput{}, ErrLoginFailed
+		}
 
-		primaryUserID = userID
-	} else {
-		primaryUserID = accountData.UserIDs[0]
+		return LoginOutput{
+			LoginStatus:             "device_verification_required",
+			VerificationToken:       token,
+			VerificationExpiresAtMS: session.ExpiresAtMS,
+		}, nil
+	}
+
+	// Create a user if not exists
+	primaryUserID, err := uc.ensurePrimaryUser(ctx, accountData)
+	if err != nil {
+		return LoginOutput{}, ErrLoginFailed
 	}
 
 	if err := uc.ensureParticipant(ctx, primaryUserID); err != nil {
@@ -160,6 +212,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	accountDevice := account.AccountDevice{
 		AccountID:  accountData.ID,
 		DeviceID:   deviceID,
+		Status:     uc.directLoginDeviceStatus(existingDevice),
 		LastIP:     input.Base.Request.IP,
 		LastSeenAt: time.Now(),
 	}
@@ -207,7 +260,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 	if config.Env("APP_ENV", "dev") != "dev" {
 		go func() {
 			bgCtx := context.Background()
-			builder := uc.mailBuilderFactory(
+			builder := uc.loginMailBuilderFactory(
 				string(accountData.Email),
 				accountData.AccountName,
 				deviceData.Name,
@@ -219,7 +272,10 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input *appShared.UseCaseInp
 		}()
 	}
 
-	return LoginOutput{TokenPair: tokenPair}, nil
+	return LoginOutput{
+		LoginStatus: "authenticated",
+		TokenPair:   tokenPair,
+	}, nil
 }
 
 func (uc *LoginUseCase) findAccount(ctx context.Context, identifier string) (*account.Account, error) {
@@ -303,6 +359,72 @@ func (uc *LoginUseCase) castStatusError(status account.Status) error {
 	default:
 		return ErrLoginFailed
 	}
+}
+
+func (uc *LoginUseCase) ensurePrimaryUser(ctx context.Context, accountData *account.Account) (shared.UserID, error) {
+	if len(accountData.UserIDs) > 0 {
+		return accountData.UserIDs[0], nil
+	}
+
+	newUser := user.NewUser(accountData.ID, accountData.AccountName)
+	userID, err := uc.userRepo.Create(ctx, newUser)
+	if err != nil {
+		return 0, err
+	}
+	for _, code := range newUser.RoleCodes {
+		if err := uc.userRoleRepo.Assign(ctx, userID, code); err != nil {
+			return 0, err
+		}
+	}
+	accountData.AddUser(userID)
+	return userID, nil
+}
+
+func (uc *LoginUseCase) requiresDeviceVerification(existingDevice *account.AccountDevice, readyOtherDevices int) bool {
+	if readyOtherDevices == 0 {
+		return false
+	}
+	if existingDevice == nil {
+		return true
+	}
+	return existingDevice.Status == account.DeviceStatusPendingVerification
+}
+
+func (uc *LoginUseCase) directLoginDeviceStatus(existingDevice *account.AccountDevice) account.DeviceStatus {
+	if existingDevice == nil {
+		return account.DeviceStatusReady
+	}
+	switch existingDevice.Status {
+	case account.DeviceStatusPendingSync, account.DeviceStatusSyncing:
+		return existingDevice.Status
+	default:
+		return account.DeviceStatusReady
+	}
+}
+
+func (uc *LoginUseCase) ensureNoActiveSelfSync(ctx context.Context, accountData *account.Account, currentDeviceID shared.DeviceID) error {
+	if len(accountData.UserIDs) == 0 || uc.selfSyncRepo == nil {
+		return nil
+	}
+
+	p, err := uc.participantRepo.FindByUserID(ctx, accountData.UserIDs[0])
+	if err != nil {
+		if errors.Is(err, participant.ErrNotFound) {
+			return nil
+		}
+		return ErrLoginFailed
+	}
+	syncState, err := uc.selfSyncRepo.FindByParticipantID(ctx, p.ID)
+	if err != nil {
+		if errors.Is(err, selfsenderkeysync.ErrNotFound) {
+			return nil
+		}
+		return ErrLoginFailed
+	}
+	if syncState.IsActive() && syncState.RequesterDeviceID != currentDeviceID {
+		return ErrSelfSenderKeySyncInProgress
+	}
+	return nil
 }
 
 func normalizeLoginIdentifier(identifier string) string {

@@ -14,11 +14,13 @@ import (
 )
 
 type wsSenderKeyDistributionAvailablePayload struct {
-	RoomID           int64 `json:"room_id"`
-	DistributionID   int64 `json:"distribution_id"`
-	SenderMemberID   int64 `json:"sender_member_id"`
-	ReceiverMemberID int64 `json:"receiver_member_id"`
-	SenderKeyVersion int64 `json:"sender_key_version"`
+	RoomID           int64  `json:"room_id"`
+	DistributionID   int64  `json:"distribution_id"`
+	SenderMemberID   int64  `json:"sender_member_id"`
+	SenderDeviceID   string `json:"sender_device_id"`
+	ReceiverMemberID int64  `json:"receiver_member_id"`
+	ReceiverDeviceID string `json:"receiver_device_id,omitempty"`
+	SenderKeyVersion int64  `json:"sender_key_version"`
 }
 
 func notifySenderKeyDistributionAvailable(
@@ -58,7 +60,9 @@ func notifySenderKeyDistributionAvailable(
 			RoomID:           roomID,
 			DistributionID:   int64(dist.ID),
 			SenderMemberID:   int64(dist.SenderMemberID),
+			SenderDeviceID:   dist.SenderDeviceID.String(),
 			ReceiverMemberID: int64(dist.ReceiverMemberID),
+			ReceiverDeviceID: dist.ReceiverDeviceID.String(),
 			SenderKeyVersion: dist.SenderKeyVersion,
 		},
 	})

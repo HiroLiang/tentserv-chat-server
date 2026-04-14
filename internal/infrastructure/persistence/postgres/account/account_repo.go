@@ -94,20 +94,48 @@ func (r *AccountRepo) Update(ctx context.Context, account *account.Account) erro
 }
 
 func (r *AccountRepo) RegisterDevice(ctx context.Context, accountDevice *account.AccountDevice) error {
+	status := accountDevice.Status
+	if status == "" {
+		status = account.DeviceStatusReady
+	}
+
 	query, args, err := JoinTable.Insert().
-		Columns("account_id", "device_id", "last_ip", "last_seen_at").
+		Columns("account_id", "device_id", "status", "last_ip", "last_seen_at").
 		Values(
 			accountDevice.AccountID,
 			accountDevice.DeviceID,
+			status,
 			accountDevice.LastIP.String(),
 			squirrel.Expr("NOW()"),
 		).
 		Suffix(`
             ON CONFLICT (account_id, device_id)
             DO UPDATE SET
+                status = EXCLUDED.status,
                 last_ip = EXCLUDED.last_ip,
                 last_seen_at = EXCLUDED.last_seen_at
         `).
+		ToSql()
+	if err != nil {
+		return err
+	}
+
+	return postgres.Exec(ctx, r.GetDB(ctx), query, args...)
+}
+
+func (r *AccountRepo) UpdateDeviceStatus(
+	ctx context.Context,
+	accountID shared.AccountID,
+	deviceID shared.DeviceID,
+	status account.DeviceStatus,
+) error {
+	query, args, err := JoinTable.Update().
+		Set("status", status).
+		Set("last_seen_at", squirrel.Expr("COALESCE(last_seen_at, NOW())")).
+		Where(squirrel.Eq{
+			"account_id": accountID,
+			"device_id":  deviceID.String(),
+		}).
 		ToSql()
 	if err != nil {
 		return err
@@ -160,12 +188,17 @@ func (r *AccountRepo) ReplaceDevices(
 
 	// Insert new
 	builder := JoinTable.Insert().
-		Columns("account_id", "device_id", "last_ip", "last_seen_at")
+		Columns("account_id", "device_id", "status", "last_ip", "last_seen_at")
 
 	for _, d := range devices {
+		status := d.Status
+		if status == "" {
+			status = account.DeviceStatusReady
+		}
 		builder = builder.Values(
 			accountID,
 			d.DeviceID,
+			status,
 			d.LastIP.String(),
 			d.LastSeenAt,
 		)
@@ -282,6 +315,7 @@ var JoinTable = postgres.Table{
 	Columns: []string{
 		"account_id",
 		"device_id",
+		"status",
 		"last_ip",
 		"last_seen_at",
 	},

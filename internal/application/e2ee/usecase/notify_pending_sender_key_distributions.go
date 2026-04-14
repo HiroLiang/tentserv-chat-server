@@ -35,7 +35,7 @@ func NewNotifyPendingSenderKeyDistributionsUseCase(
 	}
 }
 
-func (u *NotifyPendingSenderKeyDistributionsUseCase) Execute(ctx context.Context, userIDStr string) {
+func (u *NotifyPendingSenderKeyDistributionsUseCase) Execute(ctx context.Context, userIDStr string, receiverDeviceID shared.DeviceID) {
 	userIDInt, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
 		return
@@ -56,7 +56,7 @@ func (u *NotifyPendingSenderKeyDistributionsUseCase) Execute(ctx context.Context
 		if member.IsDeleted {
 			continue
 		}
-		distributions, err := u.distributionRepo.FindAvailableByRoomAndReceiver(ctx, member.RoomID, member.ID)
+		distributions, err := u.distributionRepo.FindAvailableByRoomAndReceiver(ctx, member.RoomID, member.ID, receiverDeviceID)
 		if err != nil {
 			continue
 		}

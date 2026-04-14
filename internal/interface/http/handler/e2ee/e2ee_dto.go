@@ -72,12 +72,14 @@ type GetKeyPolicyResponse struct {
 type UploadSenderKeyRequest struct {
 	RoomID              int64  `json:"room_id" binding:"required"`
 	ReceiverMemberID    int64  `json:"receiver_member_id" binding:"required"`
+	ReceiverDeviceID    string `json:"receiver_device_id"`
 	SenderKeyVersion    int64  `json:"sender_key_version" binding:"required"`
 	DistributionMessage string `json:"distribution_message" binding:"required"`
 }
 
 type SenderKeyItemResponse struct {
 	ChatMemberID     int64 `json:"chat_member_id"`
+	SenderDeviceID   string `json:"sender_device_id"`
 	SenderKeyVersion int64 `json:"sender_key_version"`
 }
 
@@ -87,24 +89,33 @@ type GetSenderKeysResponse struct {
 
 // Sender Key Request
 type CreateSenderKeyRequestRequest struct {
-	RoomID           int64 `json:"room_id"            binding:"required"`
-	ProviderMemberID int64 `json:"provider_member_id" binding:"required"`
+	RoomID            int64  `json:"room_id"             binding:"required"`
+	ProviderMemberID  int64  `json:"provider_member_id"  binding:"required"`
+	ProviderDeviceID  string `json:"provider_device_id"  binding:"required"`
+	RequesterDeviceID string `json:"requester_device_id"`
+}
+
+type SenderKeyDeviceRefResponse struct {
+	MemberID int64  `json:"member_id"`
+	DeviceID string `json:"device_id"`
 }
 
 // Sender Key Distribution Status
 type GetSenderKeyDistributionStatusResponse struct {
-	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
-	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
-	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
-	AvailableToMemberIDs   []int64 `json:"available_to_member_ids"`
-	PendingReceivers       []int64 `json:"pending_receivers"`
-	PendingFromMembers     []int64 `json:"pending_from_members"`
+	OwnDeviceSenderKeyExists bool                         `json:"own_device_sender_key_exists"`
+	RequestableSources       []SenderKeyDeviceRefResponse `json:"requestable_sources"`
+	AvailableFromSources     []SenderKeyDeviceRefResponse `json:"available_from_sources"`
+	AvailableToTargets       []SenderKeyDeviceRefResponse `json:"available_to_targets"`
+	PendingReceivers         []SenderKeyDeviceRefResponse `json:"pending_receivers"`
+	PendingFromSources       []SenderKeyDeviceRefResponse `json:"pending_from_sources"`
 }
 
 type PendingSenderKeyDistributionItemResponse struct {
 	DistributionID      int64  `json:"distribution_id"`
 	SenderMemberID      int64  `json:"sender_member_id"`
+	SenderDeviceID      string `json:"sender_device_id"`
 	ReceiverMemberID    int64  `json:"receiver_member_id"`
+	ReceiverDeviceID    string `json:"receiver_device_id"`
 	SenderKeyVersion    int64  `json:"sender_key_version"`
 	DistributionMessage string `json:"distribution_message"`
 }
@@ -115,4 +126,63 @@ type GetPendingSenderKeyDistributionsResponse struct {
 
 type ConsumeSenderKeyDistributionRequest struct {
 	Status string `json:"status" binding:"required,oneof=consumed failed"`
+}
+
+type SelfSenderKeySyncDistributionItemRequest struct {
+	SenderMemberID      int64  `json:"sender_member_id" binding:"required"`
+	SenderDeviceID      string `json:"sender_device_id" binding:"required"`
+	SenderKeyVersion    int64  `json:"sender_key_version" binding:"required"`
+	DistributionMessage string `json:"distribution_message" binding:"required"`
+}
+
+type BulkSelfSenderKeySyncDistributionsRequest struct {
+	Items []SelfSenderKeySyncDistributionItemRequest `json:"items" binding:"required,min=1"`
+}
+
+type BulkSelfSenderKeySyncDistributionsResponse struct {
+	Count int `json:"count"`
+}
+
+type PendingSelfSenderKeySyncDistributionItemResponse struct {
+	DistributionID      int64  `json:"distribution_id"`
+	SenderMemberID      int64  `json:"sender_member_id"`
+	SenderDeviceID      string `json:"sender_device_id"`
+	SenderKeyVersion    int64  `json:"sender_key_version"`
+	DistributionMessage string `json:"distribution_message"`
+}
+
+type GetPendingSelfSenderKeySyncDistributionsResponse struct {
+	Distributions []PendingSelfSenderKeySyncDistributionItemResponse `json:"distributions"`
+}
+
+type ConsumeSelfSenderKeySyncDistributionRequest struct {
+	Status string `json:"status" binding:"required,oneof=consumed failed"`
+}
+
+type GetSelfSenderKeySyncResponse struct {
+	Exists                 bool                 `json:"exists"`
+	Status                 string               `json:"status"`
+	RequesterDevice        *SelfSenderKeyDevice `json:"requester_device,omitempty"`
+	ProviderDevice         *SelfSenderKeyDevice `json:"provider_device,omitempty"`
+	RequesterCurrentDevice bool                 `json:"requester_current_device"`
+	ProviderCurrentDevice  bool                 `json:"provider_current_device"`
+	LastError              string               `json:"last_error,omitempty"`
+	RequestedAtMS          int64                `json:"requested_at_ms,omitempty"`
+	ProviderClaimedAtMS    int64                `json:"provider_claimed_at_ms,omitempty"`
+	UploadedAtMS           int64                `json:"uploaded_at_ms,omitempty"`
+	CompletedAtMS          int64                `json:"completed_at_ms,omitempty"`
+	FailedAtMS             int64                `json:"failed_at_ms,omitempty"`
+}
+
+type SelfSenderKeyDevice struct {
+	DeviceID      string `json:"device_id"`
+	DeviceName    string `json:"device_name"`
+	Platform      string `json:"platform"`
+	LastIP        string `json:"last_ip,omitempty"`
+	BindingStatus string `json:"binding_status,omitempty"`
+}
+
+type FailSelfSenderKeySyncRequest struct {
+	LastError string `json:"last_error"`
+	Retryable bool   `json:"retryable"`
 }

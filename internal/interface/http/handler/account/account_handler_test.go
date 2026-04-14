@@ -133,6 +133,10 @@ func (s accountHandlerAccountRepoStub) RegisterDevice(context.Context, *domainac
 	return nil
 }
 
+func (s accountHandlerAccountRepoStub) UpdateDeviceStatus(context.Context, shared.AccountID, shared.DeviceID, domainaccount.DeviceStatus) error {
+	return nil
+}
+
 func (s accountHandlerAccountRepoStub) RecordLoginEvent(context.Context, *domainaccount.AccountLoginEvent) error {
 	return nil
 }
@@ -395,6 +399,10 @@ func (s *accountHandlerVerifyEmailAccountRepoStub) RegisterDevice(context.Contex
 	return nil
 }
 
+func (s *accountHandlerVerifyEmailAccountRepoStub) UpdateDeviceStatus(context.Context, shared.AccountID, shared.DeviceID, domainaccount.DeviceStatus) error {
+	return nil
+}
+
 func (s *accountHandlerVerifyEmailAccountRepoStub) RecordLoginEvent(context.Context, *domainaccount.AccountLoginEvent) error {
 	return nil
 }
@@ -421,7 +429,7 @@ func newAccountHandlerRouter(emailExists, accountExists bool, createErr error) (
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(registerUseCase, nil, nil, nil, nil, nil, nil)
+	handler := NewAuthHandler(registerUseCase, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router, uow
 }
@@ -435,7 +443,7 @@ func newAccountHandlerVerifyEmailRouter(
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, nil, nil, nil, verifyEmailUseCase, nil, nil)
+	handler := NewAuthHandler(nil, nil, nil, nil, verifyEmailUseCase, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router
 }
@@ -456,7 +464,7 @@ func newAccountHandlerResendVerifyEmailRouter(
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, nil, nil, nil, nil, resendVerifyEmailUseCase, nil)
+	handler := NewAuthHandler(nil, nil, nil, nil, nil, resendVerifyEmailUseCase, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router
 }
@@ -470,6 +478,7 @@ func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
 		accountHandlerHasherStub{verifyResult: true},
 		nil,
 		accountHandlerSessionManagerStub{},
+		nil,
 		accountHandlerAccountRepoStub{
 			emailExists:   true,
 			loginPassword: "stored-hash",
@@ -478,15 +487,19 @@ func newAccountHandlerLoginRouter() (*gin.Engine, *accountHandlerUOWStub) {
 		accountHandlerUserRoleRepoStub{},
 		accountHandlerDeviceRepoStub{deviceID: deviceID},
 		accountHandlerParticipantRepoStub{},
+		nil,
 		accountHandlerEmailServiceStub{},
 		func(string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return accountHandlerEmailBuilderStub{}
+		},
+		func(string, string, string, string, string, string, time.Time) appEmail.EmailBuilder {
 			return accountHandlerEmailBuilderStub{}
 		},
 	)
 
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, loginUseCase, nil, nil, nil, nil, nil)
+	handler := NewAuthHandler(nil, loginUseCase, nil, nil, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router, uow
 }
@@ -495,7 +508,7 @@ func newAccountHandlerLoginInvalidPayloadRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.ContextMiddleware())
-	handler := NewAuthHandler(nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAuthHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler.RegisterAuthRoutes(router.Group("/api/auth"))
 	return router
 }
@@ -567,7 +580,7 @@ func assertVerificationExpiryContract(t *testing.T, expiresAtMS int64, startedAt
 func TestAuthHandler_RegisterSuccessHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	router, uow := newAccountHandlerRouter(false, false, nil)
-	body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password"}`
+	body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`
 
 	t.Log("Given: register usecase dependencies succeed")
 	t.Log("Input: valid register JSON with email/account/display_name/password_present=true")
@@ -696,13 +709,13 @@ func TestAuthHandler_RegisterInvalidPayloadHasStructuredLog(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "invalid email", body: `{"email":"not-an-email","account":"new_account","name":"New Display","password":"redacted-password"}`},
+		{name: "invalid email", body: `{"email":"not-an-email","account":"new_account","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`},
 		{name: "missing fields", body: `{"email":"new@example.com"}`},
-		{name: "password too short", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":"abc"}`},
-		{name: "empty password", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":""}`},
-		{name: "account name too long", body: `{"email":"new@example.com","account":"` + strings.Repeat("a", 51) + `","name":"New Display","password":"redacted-password"}`},
-		{name: "display name too long", body: `{"email":"new@example.com","account":"new_account","name":"` + strings.Repeat("a", 101) + `","password":"redacted-password"}`},
-		{name: "email too long", body: `{"email":"` + strings.Repeat("a", 243) + `@example.com","account":"new_account","name":"New Display","password":"redacted-password"}`},
+		{name: "password too short", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":"abc","confirm_password":"abc"}`},
+		{name: "empty password", body: `{"email":"new@example.com","account":"new_account","name":"New Display","password":"","confirm_password":""}`},
+		{name: "account name too long", body: `{"email":"new@example.com","account":"` + strings.Repeat("a", 51) + `","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`},
+		{name: "display name too long", body: `{"email":"new@example.com","account":"new_account","name":"` + strings.Repeat("a", 101) + `","password":"redacted-password","confirm_password":"redacted-password"}`},
+		{name: "email too long", body: `{"email":"` + strings.Repeat("a", 243) + `@example.com","account":"new_account","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`},
 	}
 
 	for _, tc := range cases {
@@ -746,7 +759,7 @@ func TestAuthHandler_RegisterConflictHasStructuredLog(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
 			router, uow := newAccountHandlerRouter(tc.emailExists, tc.accountExists, nil)
-			body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password"}`
+			body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`
 
 			t.Log("Given: register usecase detects an existing account identity")
 			t.Logf("Input: case=%s email_exists=%t account_exists=%t", tc.name, tc.emailExists, tc.accountExists)
@@ -776,7 +789,7 @@ func TestAuthHandler_RegisterConflictHasStructuredLog(t *testing.T) {
 func TestAuthHandler_RegisterFailedHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	router, uow := newAccountHandlerRouter(false, false, errors.New("database unavailable"))
-	body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password"}`
+	body := `{"email":"new@example.com","account":"new_account","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`
 
 	t.Log("Given: register usecase dependency returns a non-conflict registration failure")
 	t.Log("Input: valid register JSON with password_present=true")
@@ -810,13 +823,13 @@ func TestAuthHandler_RegisterUseCaseValidationHasStructuredLog(t *testing.T) {
 	}{
 		{
 			name:     "invalid account name format",
-			body:     `{"email":"new@example.com","account":"invalid account!","name":"New Display","password":"redacted-password"}`,
+			body:     `{"email":"new@example.com","account":"invalid account!","name":"New Display","password":"redacted-password","confirm_password":"redacted-password"}`,
 			wantCode: "INVALID_ACCOUNT",
 			wantHTTP: http.StatusBadRequest,
 		},
 		{
 			name:     "common password",
-			body:     `{"email":"new@example.com","account":"new_account","name":"New Display","password":"password"}`,
+			body:     `{"email":"new@example.com","account":"new_account","name":"New Display","password":"password","confirm_password":"password"}`,
 			wantCode: "WEAK_PASSWORD",
 			wantHTTP: http.StatusBadRequest,
 		},
@@ -851,7 +864,7 @@ func TestAuthHandler_RegisterUseCaseValidationHasStructuredLog(t *testing.T) {
 func TestAuthHandler_RegisterLocalhostEmailRejectedByBindingHasStructuredLog(t *testing.T) {
 	start := time.Now()
 	router, _ := newAccountHandlerRouter(false, false, nil)
-	body := `{"email":"user@localhost","account":"local_account","name":"Local User","password":"redacted-password"}`
+	body := `{"email":"user@localhost","account":"local_account","name":"Local User","password":"redacted-password","confirm_password":"redacted-password"}`
 
 	t.Log("Given: email uses localhost single-label domain")
 	t.Log("Input: email=user@localhost account=local_account name=Local User password_present=true")
@@ -895,8 +908,12 @@ func TestAuthHandler_LoginSuccessSetsBearerHeaderHasStructuredLog(t *testing.T) 
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		t.Fatalf("expected Bearer auth header, got %q", authHeader)
 	}
-	if resp.Body.String() != "{}" {
-		t.Fatalf("expected empty JSON object, got %s", resp.Body.String())
+	var out LoginResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
+		t.Fatalf("expected valid login response json, got %v", err)
+	}
+	if out.LoginStatus != "authenticated" {
+		t.Fatalf("expected login_status=authenticated, got %+v", out)
 	}
 }
 

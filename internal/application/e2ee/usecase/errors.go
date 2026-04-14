@@ -3,9 +3,11 @@ package usecase
 import "errors"
 
 var (
-	ErrInvalidSignature  = errors.New("invalid signature")
-	ErrIdentityNotFound  = errors.New("identity key not found")
-	ErrNotRoomMember     = errors.New("not a room member")
-	ErrKeyBundleNotFound = errors.New("key bundle not found")
-	ErrForbidden         = errors.New("forbidden")
+	ErrInvalidSignature           = errors.New("invalid signature")
+	ErrIdentityNotFound           = errors.New("identity key not found")
+	ErrNotRoomMember              = errors.New("not a room member")
+	ErrKeyBundleNotFound          = errors.New("key bundle not found")
+	ErrForbidden                  = errors.New("forbidden")
+	ErrSelfSenderKeySyncIncomplete = errors.New("self sender key sync incomplete")
+	ErrSelfSenderKeySyncInProgress = errors.New("self sender key sync in progress")
 )

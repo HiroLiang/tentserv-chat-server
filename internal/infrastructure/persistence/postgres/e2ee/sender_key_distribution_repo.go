@@ -8,8 +8,10 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
+	"github.com/gofrs/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -18,7 +20,9 @@ var distributionTable = postgres.Table{
 	Columns: []string{
 		"id",
 		"sender_member_id",
+		"sender_device_id",
 		"receiver_member_id",
+		"receiver_device_id",
 		"sender_key_version",
 		"chain_id",
 		"distribution_message",
@@ -48,8 +52,8 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 	}
 
 	q := distributionTable.Insert().
-		Columns("sender_member_id", "receiver_member_id", "sender_key_version", "chain_id", "distribution_message", "status").
-		Suffix(`ON CONFLICT (sender_member_id, receiver_member_id)
+		Columns("sender_member_id", "sender_device_id", "receiver_member_id", "receiver_device_id", "sender_key_version", "chain_id", "distribution_message", "status").
+		Suffix(`ON CONFLICT (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
 			DO UPDATE SET sender_key_version = GREATEST(EXCLUDED.sender_key_version, sender_key_distributions.sender_key_version),
 			              chain_id = GREATEST(EXCLUDED.chain_id, sender_key_distributions.chain_id),
 			              status = CASE
@@ -81,7 +85,9 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 		}
 		q = q.Values(
 			int64(d.SenderMemberID),
+			d.SenderDeviceID.String(),
 			int64(d.ReceiverMemberID),
+			d.ReceiverDeviceID.String(),
 			version,
 			chainID,
 			message,
@@ -100,6 +106,7 @@ func (r *SenderKeyDistributionRepository) UpsertBatch(
 func (r *SenderKeyDistributionRepository) FindPendingReceivers(
 	ctx context.Context,
 	senderMemberID chatmember.ID,
+	senderDeviceID shared.DeviceID,
 	latestChainID int64,
 ) ([]chatmember.ID, error) {
 	const query = `
@@ -111,14 +118,15 @@ WHERE cm.room_id = (SELECT room_id FROM public.chat_members WHERE id = $1)
   AND NOT EXISTS (
       SELECT 1 FROM public.sender_key_distributions skd
       WHERE skd.sender_member_id = $1
+        AND skd.sender_device_id = $2
         AND skd.receiver_member_id = cm.id
-        AND skd.sender_key_version >= $2
+        AND skd.sender_key_version >= $3
         AND skd.status = 'consumed'
   )`
 
 	db := r.GetDB(ctx)
 	var ids []int64
-	if err := sqlx.SelectContext(ctx, db, &ids, query, int64(senderMemberID), latestChainID); err != nil {
+	if err := sqlx.SelectContext(ctx, db, &ids, query, int64(senderMemberID), senderDeviceID.String(), latestChainID); err != nil {
 		return nil, fmt.Errorf("find pending receivers: %w", err)
 	}
 
@@ -139,9 +147,9 @@ func (r *SenderKeyDistributionRepository) UpsertAvailable(
 
 	query := `
 INSERT INTO public.sender_key_distributions
-    (sender_member_id, receiver_member_id, sender_key_version, chain_id, distribution_message, status, distributed_at, consumed_at, failed_at)
-VALUES ($1, $2, $3, $4, $5, $6, now(), NULL, NULL)
-ON CONFLICT (sender_member_id, receiver_member_id)
+    (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id, sender_key_version, chain_id, distribution_message, status, distributed_at, consumed_at, failed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), NULL, NULL)
+ON CONFLICT (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
 DO UPDATE SET sender_key_version = EXCLUDED.sender_key_version,
               chain_id = EXCLUDED.chain_id,
               distribution_message = EXCLUDED.distribution_message,
@@ -156,7 +164,9 @@ RETURNING id, distributed_at`
 		ctx,
 		query,
 		int64(dist.SenderMemberID),
+		dist.SenderDeviceID.String(),
 		int64(dist.ReceiverMemberID),
+		dist.ReceiverDeviceID.String(),
 		dist.SenderKeyVersion,
 		dist.ChainID,
 		dist.DistributionMessage,
@@ -171,10 +181,15 @@ RETURNING id, distributed_at`
 
 func (r *SenderKeyDistributionRepository) FindLatest(
 	ctx context.Context,
-	senderMemberID, receiverMemberID chatmember.ID,
+	senderMemberID chatmember.ID,
+	senderDeviceID shared.DeviceID,
+	receiverMemberID chatmember.ID,
+	receiverDeviceID shared.DeviceID,
 ) (*senderkeydistribution.SenderKeyDistribution, error) {
-	query, args, err := distributionTable.Select(distributionTable.Columns...).
-		Where("sender_member_id = ? AND receiver_member_id = ?", int64(senderMemberID), int64(receiverMemberID)).
+	builder := distributionTable.Select(distributionTable.Columns...).
+		Where("sender_member_id = ? AND sender_device_id = ? AND receiver_member_id = ? AND receiver_device_id = ?", int64(senderMemberID), senderDeviceID.String(), int64(receiverMemberID), receiverDeviceID.String())
+
+	query, args, err := builder.
 		OrderBy("sender_key_version DESC").
 		Limit(1).
 		PlaceholderFormat(squirrel.Dollar).
@@ -197,11 +212,14 @@ func (r *SenderKeyDistributionRepository) FindAvailableByRoomAndReceiver(
 	ctx context.Context,
 	roomID chatroom.ID,
 	receiverMemberID chatmember.ID,
+	receiverDeviceID shared.DeviceID,
 ) ([]*senderkeydistribution.SenderKeyDistribution, error) {
-	const query = `
+	query := `
 SELECT skd.id,
        skd.sender_member_id,
+       skd.sender_device_id,
        skd.receiver_member_id,
+       skd.receiver_device_id,
        skd.sender_key_version,
        skd.chain_id,
        skd.distribution_message,
@@ -217,11 +235,19 @@ WHERE cm_sender.room_id = $1
   AND cm_sender.is_deleted = false
   AND cm_receiver.is_deleted = false
   AND skd.receiver_member_id = $2
-  AND skd.status = 'available'
+  AND skd.status = 'available'`
+
+	args := []any{int64(roomID), int64(receiverMemberID)}
+	if uuid.UUID(receiverDeviceID) != uuid.Nil {
+		query += `
+  AND skd.receiver_device_id = $3`
+		args = append(args, receiverDeviceID.String())
+	}
+	query += `
 ORDER BY skd.distributed_at ASC`
 
 	var rows []SenderKeyDistributionRecord
-	if err := sqlx.SelectContext(ctx, r.GetDB(ctx), &rows, query, int64(roomID), int64(receiverMemberID)); err != nil {
+	if err := sqlx.SelectContext(ctx, r.GetDB(ctx), &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("find available distributions: %w", err)
 	}
 

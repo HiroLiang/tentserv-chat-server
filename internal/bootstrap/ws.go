@@ -45,10 +45,13 @@ func BuildWsComponents(deps *Dependencies, useCases *UseCases) (*ws.Hub, *ws.Mes
 	router.Register("game.move", wsGame.NewMoveHandler())
 	router.Register("system.ack", wsSystem.NewAckHandler(deps.Hub))
 
-	deps.Hub.SetOnConnect(func(userID string) {
+	deps.Hub.SetOnConnect(func(userID string, deviceID string) {
 		ctx := context.Background()
-		useCases.NotifyPendingSenderKeyRequestsUseCase.Execute(ctx, userID)
-		useCases.NotifyPendingSenderKeyDistributionsUseCase.Execute(ctx, userID)
+		parsedDeviceID, err := domainshared.ParseDeviceID(deviceID)
+		if err == nil {
+			useCases.NotifyPendingSenderKeyRequestsUseCase.Execute(ctx, userID, parsedDeviceID)
+			useCases.NotifyPendingSenderKeyDistributionsUseCase.Execute(ctx, userID, parsedDeviceID)
+		}
 		parsedUserID, err := domainshared.ParseUserID(userID)
 		if err != nil {
 			return

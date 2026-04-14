@@ -17,10 +17,25 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	sharedDomain "github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+func mustSenderKeyReqDeviceID(raw string) sharedDomain.DeviceID {
+	id, err := sharedDomain.ParseDeviceID(raw)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
+var (
+	senderKeyReqRequesterDeviceID = mustSenderKeyReqDeviceID("11111111-1111-1111-1111-111111111111")
+	senderKeyReqProviderDeviceID  = mustSenderKeyReqDeviceID("22222222-2222-2222-2222-222222222222")
 )
 
 type senderKeyReqParticipantStub struct {
@@ -113,20 +128,26 @@ func (s *senderKeyReqSKRRepoStub) Upsert(_ context.Context, req *senderkeyreques
 		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
 	}
 	copied := *req
-	s.records[s.key(req.RequesterMemberID, req.ProviderMemberID)] = &copied
+	s.records[s.key(req.RequesterMemberID, req.RequesterDeviceID, req.ProviderMemberID, req.ProviderDeviceID)] = &copied
 	s.upsertCount++
 	return nil
 }
 
-func (s *senderKeyReqSKRRepoStub) FindPendingByProvider(context.Context, chatmember.ID) ([]*senderkeyrequest.SenderKeyRequest, error) {
+func (s *senderKeyReqSKRRepoStub) FindPendingByProvider(context.Context, chatmember.ID, sharedDomain.DeviceID) ([]*senderkeyrequest.SenderKeyRequest, error) {
 	return nil, nil
 }
 
-func (s *senderKeyReqSKRRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
+func (s *senderKeyReqSKRRepoStub) MarkFulfilled(
+	_ context.Context,
+	requesterMemberID chatmember.ID,
+	requesterDeviceID sharedDomain.DeviceID,
+	providerMemberID chatmember.ID,
+	providerDeviceID sharedDomain.DeviceID,
+) error {
 	if s.records == nil {
 		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
 	}
-	if req, ok := s.records[s.key(requesterMemberID, providerMemberID)]; ok {
+	if req, ok := s.records[s.key(requesterMemberID, requesterDeviceID, providerMemberID, providerDeviceID)]; ok {
 		now := time.Now()
 		req.FulfilledAt = &now
 	}
@@ -134,15 +155,20 @@ func (s *senderKeyReqSKRRepoStub) MarkFulfilled(_ context.Context, requesterMemb
 	return nil
 }
 
-func (s *senderKeyReqSKRRepoStub) key(requesterMemberID, providerMemberID chatmember.ID) string {
-	return fmt.Sprintf("%d:%d", requesterMemberID, providerMemberID)
+func (s *senderKeyReqSKRRepoStub) key(
+	requesterMemberID chatmember.ID,
+	requesterDeviceID sharedDomain.DeviceID,
+	providerMemberID chatmember.ID,
+	providerDeviceID sharedDomain.DeviceID,
+) string {
+	return fmt.Sprintf("%d:%s:%d:%s", requesterMemberID, requesterDeviceID.String(), providerMemberID, providerDeviceID.String())
 }
 
 func (s *senderKeyReqSKRRepoStub) storedRequest(requesterMemberID, providerMemberID chatmember.ID) *senderkeyrequest.SenderKeyRequest {
 	if s.records == nil {
 		return nil
 	}
-	return s.records[s.key(requesterMemberID, providerMemberID)]
+	return s.records[s.key(requesterMemberID, senderKeyReqRequesterDeviceID, providerMemberID, senderKeyReqProviderDeviceID)]
 }
 
 func (s *senderKeyReqSKRRepoStub) storedCount() int {
@@ -153,9 +179,11 @@ func (s *senderKeyReqSKRRepoStub) seedPendingRequest(requesterMemberID, provider
 	if s.records == nil {
 		s.records = map[string]*senderkeyrequest.SenderKeyRequest{}
 	}
-	s.records[s.key(requesterMemberID, providerMemberID)] = &senderkeyrequest.SenderKeyRequest{
+	s.records[s.key(requesterMemberID, senderKeyReqRequesterDeviceID, providerMemberID, senderKeyReqProviderDeviceID)] = &senderkeyrequest.SenderKeyRequest{
 		RequesterMemberID: requesterMemberID,
+		RequesterDeviceID: senderKeyReqRequesterDeviceID,
 		ProviderMemberID:  providerMemberID,
+		ProviderDeviceID:  senderKeyReqProviderDeviceID,
 	}
 }
 
@@ -163,11 +191,19 @@ type senderKeyReqMSKRepoStub struct {
 	findLatestErr error
 }
 
-func (s *senderKeyReqMSKRepoStub) FindLatest(context.Context, chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
+func (s *senderKeyReqMSKRepoStub) FindLatest(_ context.Context, memberID chatmember.ID, deviceID sharedDomain.DeviceID) (*membersenderkey.MemberSenderKey, error) {
 	if s.findLatestErr != nil {
 		return nil, s.findLatestErr
 	}
-	return &membersenderkey.MemberSenderKey{}, nil
+	return &membersenderkey.MemberSenderKey{ChatMemberID: memberID, SenderDeviceID: deviceID}, nil
+}
+
+func (s *senderKeyReqMSKRepoStub) FindLatestForMember(_ context.Context, memberID chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
+	key, err := s.FindLatest(context.Background(), memberID, senderKeyReqProviderDeviceID)
+	if err != nil {
+		return nil, err
+	}
+	return []*membersenderkey.MemberSenderKey{key}, nil
 }
 
 func (s *senderKeyReqMSKRepoStub) FindAllByMembers(context.Context, []chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
@@ -190,7 +226,7 @@ func (s *senderKeyReqDistributionRepoStub) UpsertBatch(context.Context, []*sende
 	return nil
 }
 
-func (s *senderKeyReqDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
+func (s *senderKeyReqDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, sharedDomain.DeviceID, int64) ([]chatmember.ID, error) {
 	return nil, nil
 }
 
@@ -198,7 +234,7 @@ func (s *senderKeyReqDistributionRepoStub) UpsertAvailable(context.Context, *sen
 	return nil
 }
 
-func (s *senderKeyReqDistributionRepoStub) FindLatest(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *senderKeyReqDistributionRepoStub) FindLatest(_ context.Context, senderMemberID chatmember.ID, _ sharedDomain.DeviceID, receiverMemberID chatmember.ID, _ sharedDomain.DeviceID) (*senderkeydistribution.SenderKeyDistribution, error) {
 	if s.latest == nil {
 		return nil, senderkeydistribution.ErrNotFound
 	}
@@ -209,7 +245,7 @@ func (s *senderKeyReqDistributionRepoStub) FindLatest(_ context.Context, senderM
 	return dist, nil
 }
 
-func (s *senderKeyReqDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *senderKeyReqDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID, sharedDomain.DeviceID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
 	return nil, nil
 }
 
@@ -227,6 +263,92 @@ func (s *senderKeyReqDistributionRepoStub) MarkFailed(context.Context, senderkey
 
 func (s *senderKeyReqDistributionRepoStub) key(senderMemberID, receiverMemberID chatmember.ID) string {
 	return fmt.Sprintf("%d:%d", senderMemberID, receiverMemberID)
+}
+
+type senderKeyReqReceiptRepoStub struct {
+	latest map[string]*senderkeyreceipt.SenderKeyReceipt
+}
+
+func (s *senderKeyReqReceiptRepoStub) FindLatest(
+	_ context.Context,
+	senderMemberID chatmember.ID,
+	_ sharedDomain.DeviceID,
+	receiverMemberID chatmember.ID,
+	_ sharedDomain.DeviceID,
+) (*senderkeyreceipt.SenderKeyReceipt, error) {
+	if s.latest == nil {
+		return nil, senderkeyreceipt.ErrNotFound
+	}
+	receipt, ok := s.latest[fmt.Sprintf("%d:%d", senderMemberID, receiverMemberID)]
+	if !ok {
+		return nil, senderkeyreceipt.ErrNotFound
+	}
+	return receipt, nil
+}
+
+func (s *senderKeyReqReceiptRepoStub) Upsert(context.Context, *senderkeyreceipt.SenderKeyReceipt) error {
+	return nil
+}
+
+type senderKeyReqSelfSyncRepoStub struct {
+	findByParticipantID func(ctx context.Context, participantID participant.ID) (*selfsenderkeysync.SelfSenderKeySync, error)
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) FindByParticipantID(ctx context.Context, participantID participant.ID) (*selfsenderkeysync.SelfSenderKeySync, error) {
+	if s.findByParticipantID != nil {
+		return s.findByParticipantID(ctx, participantID)
+	}
+	return nil, selfsenderkeysync.ErrNotFound
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) UpsertPending(context.Context, participant.ID, sharedDomain.DeviceID) (*selfsenderkeysync.SelfSenderKeySync, error) {
+	return nil, selfsenderkeysync.ErrNotFound
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) ClaimProvider(context.Context, selfsenderkeysync.ID, participant.ID, sharedDomain.DeviceID, sharedDomain.DeviceID) (bool, error) {
+	return false, nil
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) MarkUploaded(context.Context, selfsenderkeysync.ID, participant.ID, sharedDomain.DeviceID, sharedDomain.DeviceID) error {
+	return nil
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) MarkCompleted(context.Context, selfsenderkeysync.ID, participant.ID, sharedDomain.DeviceID) error {
+	return nil
+}
+
+func (s *senderKeyReqSelfSyncRepoStub) MarkFailed(context.Context, selfsenderkeysync.ID, participant.ID, sharedDomain.DeviceID, sharedDomain.DeviceID, string, bool) error {
+	return nil
+}
+
+func newCreateSenderKeyRequestUseCaseForTest(
+	participantRepo participant.Repository,
+	chatMemberRepo chatmember.Repository,
+	requestRepo senderkeyrequest.Repository,
+	memberSenderKeyRepo membersenderkey.Repository,
+	distributionRepo senderkeydistribution.Repository,
+	receiptRepo senderkeyreceipt.Repository,
+	selfSyncRepo selfsenderkeysync.Repository,
+	friendshipRepo friendship.Repository,
+	broadcaster e2eePort.Broadcaster,
+) *CreateSenderKeyRequestUseCase {
+	if receiptRepo == nil {
+		receiptRepo = &senderKeyReqReceiptRepoStub{}
+	}
+	if selfSyncRepo == nil {
+		selfSyncRepo = &senderKeyReqSelfSyncRepoStub{}
+	}
+	return NewCreateSenderKeyRequestUseCase(
+		participantRepo,
+		chatMemberRepo,
+		requestRepo,
+		memberSenderKeyRepo,
+		distributionRepo,
+		receiptRepo,
+		selfSyncRepo,
+		friendshipRepo,
+		broadcaster,
+	)
 }
 
 type senderKeyReqFriendshipStub struct {
@@ -324,8 +446,12 @@ func makeCreateSKRInput(callerUserID int64, roomID, providerMemberID int64) appS
 	uid := sharedDomain.UserID(callerUserID)
 	auth := appShared.AuthContext{UserID: uid}
 	return appShared.UseCaseInput[CreateSenderKeyRequestInput]{
-		Base: appShared.BaseContext{Auth: &auth},
-		Data: CreateSenderKeyRequestInput{RoomID: roomID, ProviderMemberID: providerMemberID},
+		Base: appShared.BaseContext{Auth: &auth, Request: appShared.RequestContext{DeviceID: senderKeyReqRequesterDeviceID}},
+		Data: CreateSenderKeyRequestInput{
+			RoomID:           roomID,
+			ProviderMemberID: providerMemberID,
+			ProviderDeviceID: senderKeyReqProviderDeviceID.String(),
+		},
 	}
 }
 
@@ -378,12 +504,14 @@ func TestCreateSenderKeyRequest_ProviderInDifferentRoom(t *testing.T) {
 	skrStub := &senderKeyReqSKRRepoStub{}
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		&senderKeyReqDistributionRepoStub{},
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -408,12 +536,14 @@ func TestCreateSenderKeyRequest_CallerNotInRoom(t *testing.T) {
 	delete(cmStub.byRoomAndParticipant[roomID], participant.ID(callerUID))
 	delete(cmStub.byID, callerMemberID)
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		&senderKeyReqSKRRepoStub{},
 		&senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound},
 		&senderKeyReqDistributionRepoStub{},
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -446,12 +576,14 @@ func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailable(t *testing.T)
 		},
 	}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		distStub,
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -486,12 +618,14 @@ func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailableMarksPendingRe
 		},
 	}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		distStub,
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -524,12 +658,14 @@ func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
 	fsStub := &senderKeyReqFriendshipStub{rows: []*friendship.Friendship{blockedRow}}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		&senderKeyReqDistributionRepoStub{},
+		nil,
+		nil,
 		fsStub,
 		&senderKeyReqBroadcasterStub{},
 	)
@@ -555,12 +691,14 @@ func TestCreateSenderKeyRequest_Success(t *testing.T) {
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
 	broadcaster := &senderKeyReqBroadcasterStub{}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		&senderKeyReqDistributionRepoStub{},
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		broadcaster,
 	)
@@ -611,12 +749,14 @@ func TestCreateSenderKeyRequest_RepeatedRequestsUseUpsertContract(t *testing.T) 
 	skrStub := &senderKeyReqSKRRepoStub{}
 	mskStub := &senderKeyReqMSKRepoStub{findLatestErr: membersenderkey.ErrNotFound}
 
-	uc := NewCreateSenderKeyRequestUseCase(
+	uc := newCreateSenderKeyRequestUseCaseForTest(
 		pStub,
 		cmStub,
 		skrStub,
 		mskStub,
 		&senderKeyReqDistributionRepoStub{},
+		nil,
+		nil,
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		&senderKeyReqBroadcasterStub{},
 	)

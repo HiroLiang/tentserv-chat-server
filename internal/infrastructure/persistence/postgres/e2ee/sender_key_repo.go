@@ -8,6 +8,7 @@ import (
 
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/persistence/postgres"
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
@@ -16,7 +17,7 @@ import (
 var senderKeyTable = postgres.Table{
 	Name: "public.member_sender_keys",
 	Columns: []string{
-		"id", "chat_member_id", "chain_id", "sender_key_version", "key_fingerprint", "created_at",
+		"id", "chat_member_id", "sender_device_id", "chain_id", "sender_key_version", "key_fingerprint", "created_at",
 	},
 }
 
@@ -33,9 +34,10 @@ func NewSenderKeyRepository(db *sqlx.DB) *SenderKeyRepository {
 func (r *SenderKeyRepository) FindLatest(
 	ctx context.Context,
 	chatMemberID chatmember.ID,
+	senderDeviceID shared.DeviceID,
 ) (*membersenderkey.MemberSenderKey, error) {
 	query, args, err := senderKeyTable.Select(senderKeyTable.Columns...).
-		Where(squirrel.Eq{"chat_member_id": chatMemberID}).
+		Where(squirrel.Eq{"chat_member_id": chatMemberID, "sender_device_id": senderDeviceID.String()}).
 		OrderBy("sender_key_version DESC", "chain_id DESC").
 		Limit(1).
 		ToSql()
@@ -54,6 +56,36 @@ func (r *SenderKeyRepository) FindLatest(
 	return toSenderKeyDomain(rec)
 }
 
+func (r *SenderKeyRepository) FindLatestForMember(
+	ctx context.Context,
+	chatMemberID chatmember.ID,
+) ([]*membersenderkey.MemberSenderKey, error) {
+	query, args, err := postgres.Builder.
+		Select("DISTINCT ON (sender_device_id) "+strings.Join(senderKeyTable.Columns, ", ")).
+		From(senderKeyTable.Name).
+		Where(squirrel.Eq{"chat_member_id": chatMemberID}).
+		OrderBy("sender_device_id", "sender_key_version DESC", "chain_id DESC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build sender keys by member query: %w", err)
+	}
+
+	records, err := postgres.ScanAll[SenderKeyRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan sender keys by member: %w", err)
+	}
+
+	keys := make([]*membersenderkey.MemberSenderKey, 0, len(records))
+	for _, rec := range records {
+		k, err := toSenderKeyDomain(&rec)
+		if err != nil {
+			return nil, fmt.Errorf("convert sender key: %w", err)
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
 func (r *SenderKeyRepository) FindAllByMembers(
 	ctx context.Context,
 	chatMemberIDs []chatmember.ID,
@@ -62,11 +94,11 @@ func (r *SenderKeyRepository) FindAllByMembers(
 		return nil, nil
 	}
 
-	query, args, err := squirrel.
-		Select("DISTINCT ON (chat_member_id) "+strings.Join(senderKeyTable.Columns, ", ")).
+	query, args, err := postgres.Builder.
+		Select("DISTINCT ON (chat_member_id, sender_device_id) "+strings.Join(senderKeyTable.Columns, ", ")).
 		From(senderKeyTable.Name).
 		Where(squirrel.Eq{"chat_member_id": chatMemberIDs}).
-		OrderBy("chat_member_id", "sender_key_version DESC", "chain_id DESC").
+		OrderBy("chat_member_id", "sender_device_id", "sender_key_version DESC", "chain_id DESC").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build sender keys query: %w", err)
@@ -98,8 +130,8 @@ func (r *SenderKeyRepository) Add(ctx context.Context, sk *membersenderkey.Membe
 	}
 
 	query, args, err := senderKeyTable.Insert().
-		Columns("chat_member_id", "chain_id", "sender_key_version", "key_fingerprint").
-		Values(rec.ChatMemberID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
+		Columns("chat_member_id", "sender_device_id", "chain_id", "sender_key_version", "key_fingerprint").
+		Values(rec.ChatMemberID, rec.SenderDeviceID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
 		Suffix("RETURNING id, created_at").
 		ToSql()
 	if err != nil {
@@ -124,9 +156,9 @@ func (r *SenderKeyRepository) UpsertLatest(ctx context.Context, sk *membersender
 	}
 
 	query, args, err := senderKeyTable.Insert().
-		Columns("chat_member_id", "chain_id", "sender_key_version", "key_fingerprint").
-		Values(rec.ChatMemberID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
-		Suffix(`ON CONFLICT (chat_member_id, sender_key_version) DO UPDATE
+		Columns("chat_member_id", "sender_device_id", "chain_id", "sender_key_version", "key_fingerprint").
+		Values(rec.ChatMemberID, rec.SenderDeviceID, rec.ChainID, rec.SenderKeyVersion, rec.KeyFingerprint).
+		Suffix(`ON CONFLICT (chat_member_id, sender_device_id, sender_key_version) DO UPDATE
 SET chain_id = EXCLUDED.chain_id,
     key_fingerprint = COALESCE(EXCLUDED.key_fingerprint, public.member_sender_keys.key_fingerprint)
 RETURNING id, created_at`).

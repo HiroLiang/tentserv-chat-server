@@ -13,13 +13,15 @@ import (
 )
 
 type AuthHandler struct {
-	registerUsecase          *authUseCase.RegisterUseCase
-	loginUsecase             *authUseCase.LoginUseCase
-	logoutUsecase            *authUseCase.LogoutUseCase
-	getProfileUsecase        *authUseCase.GetProfileUseCase
-	verifyEmailUsecase       *authUseCase.VerifyEmailUseCase
-	resendVerifyEmailUsecase *authUseCase.ResendVerifyEmailUseCase
-	registerLimiter          appSecurity.RegisterRateLimiter
+	registerUsecase                      *authUseCase.RegisterUseCase
+	loginUsecase                         *authUseCase.LoginUseCase
+	logoutUsecase                        *authUseCase.LogoutUseCase
+	getProfileUsecase                    *authUseCase.GetProfileUseCase
+	verifyEmailUsecase                   *authUseCase.VerifyEmailUseCase
+	resendVerifyEmailUsecase             *authUseCase.ResendVerifyEmailUseCase
+	verifyLoginDeviceUsecase             *authUseCase.VerifyLoginDeviceUseCase
+	resendLoginDeviceVerificationUsecase *authUseCase.ResendLoginDeviceVerificationUseCase
+	registerLimiter                      appSecurity.RegisterRateLimiter
 }
 
 func NewAuthHandler(
@@ -29,16 +31,20 @@ func NewAuthHandler(
 	getProfileUsecase *authUseCase.GetProfileUseCase,
 	verifyEmailUsecase *authUseCase.VerifyEmailUseCase,
 	resendVerifyEmailUsecase *authUseCase.ResendVerifyEmailUseCase,
+	verifyLoginDeviceUsecase *authUseCase.VerifyLoginDeviceUseCase,
+	resendLoginDeviceVerificationUsecase *authUseCase.ResendLoginDeviceVerificationUseCase,
 	registerLimiter appSecurity.RegisterRateLimiter,
 ) *AuthHandler {
 	return &AuthHandler{
-		registerUsecase:          registerUsecase,
-		loginUsecase:             loginUsecase,
-		logoutUsecase:            logoutUsecase,
-		getProfileUsecase:        getProfileUsecase,
-		verifyEmailUsecase:       verifyEmailUsecase,
-		resendVerifyEmailUsecase: resendVerifyEmailUsecase,
-		registerLimiter:          registerLimiter,
+		registerUsecase:                      registerUsecase,
+		loginUsecase:                         loginUsecase,
+		logoutUsecase:                        logoutUsecase,
+		getProfileUsecase:                    getProfileUsecase,
+		verifyEmailUsecase:                   verifyEmailUsecase,
+		resendVerifyEmailUsecase:             resendVerifyEmailUsecase,
+		verifyLoginDeviceUsecase:             verifyLoginDeviceUsecase,
+		resendLoginDeviceVerificationUsecase: resendLoginDeviceVerificationUsecase,
+		registerLimiter:                      registerLimiter,
 	}
 }
 
@@ -53,6 +59,8 @@ func (h *AuthHandler) RegisterAuthRoutes(r *gin.RouterGroup) {
 	r.GET("/profile", middleware.RequireAuthMiddleware(), h.getProfile)
 	r.POST("/verify-email", h.verifyEmail)
 	r.POST("/resend-verify-email", h.resendVerifyEmail)
+	r.POST("/verify-login-device", h.verifyLoginDevice)
+	r.POST("/resend-login-device-verification", h.resendLoginDeviceVerification)
 }
 
 // @Summary Account register
@@ -80,10 +88,11 @@ func (h *AuthHandler) register(c *gin.Context) {
 	}
 
 	input := adapter.BuildInput(c, authUseCase.RegisterInput{
-		Account:  req.Account,
-		Email:    req.Email,
-		Name:     req.Name,
-		Password: req.Password,
+		Account:         req.Account,
+		Email:           req.Email,
+		Name:            req.Name,
+		Password:        req.Password,
+		ConfirmPassword: req.ConfirmPassword,
 	})
 
 	out, err := h.registerUsecase.Execute(c.Request.Context(), input)
@@ -137,8 +146,17 @@ func (h *AuthHandler) login(c *gin.Context) {
 		return
 	}
 
-	c.Header("Authorization", fmt.Sprintf("Bearer %s", string(output.TokenPair.AccessToken)))
-	c.JSON(http.StatusOK, LoginResponse{})
+	if output.LoginStatus == "authenticated" {
+		c.Header("Authorization", fmt.Sprintf("Bearer %s", string(output.TokenPair.AccessToken)))
+		c.JSON(http.StatusOK, LoginResponse{LoginStatus: output.LoginStatus})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, LoginResponse{
+		LoginStatus:             output.LoginStatus,
+		VerificationToken:       output.VerificationToken,
+		VerificationExpiresAtMS: output.VerificationExpiresAtMS,
+	})
 }
 
 // @Summary Account Logout
@@ -229,6 +247,30 @@ func (h *AuthHandler) verifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, VerifyEmailResponse{})
 }
 
+func (h *AuthHandler) verifyLoginDevice(c *gin.Context) {
+	var req VerifyLoginDeviceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid verify login device payload",
+		})
+		return
+	}
+
+	input := adapter.BuildInput(c, authUseCase.VerifyLoginDeviceInput{
+		Token: req.Token,
+		Code:  req.Code,
+	})
+	out, err := h.verifyLoginDeviceUsecase.Execute(c.Request.Context(), &input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.Header("Authorization", fmt.Sprintf("Bearer %s", string(out.TokenPair.AccessToken)))
+	c.JSON(http.StatusOK, VerifyLoginDeviceResponse{LoginStatus: out.LoginStatus})
+}
+
 // @Summary Resend verification email
 // @Description Resend the verification code for an existing verification session. Generates a new token each call.
 // @Tags Auth
@@ -257,6 +299,29 @@ func (h *AuthHandler) resendVerifyEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ResendVerifyEmailResponse{
+		VerificationToken:       out.VerificationToken,
+		VerificationExpiresAtMS: out.VerificationExpiresAtMS,
+	})
+}
+
+func (h *AuthHandler) resendLoginDeviceVerification(c *gin.Context) {
+	var req ResendLoginDeviceVerificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "invalid resend login device verification payload",
+		})
+		return
+	}
+
+	input := adapter.BuildInput(c, authUseCase.ResendLoginDeviceVerificationInput{Token: req.Token})
+	out, err := h.resendLoginDeviceVerificationUsecase.Execute(c.Request.Context(), input)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, ResendLoginDeviceVerificationResponse{
 		VerificationToken:       out.VerificationToken,
 		VerificationExpiresAtMS: out.VerificationExpiresAtMS,
 	})

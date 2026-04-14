@@ -144,17 +144,17 @@ INSERT INTO public.accounts (public_id, email, account, password, status)
 VALUES (gen_random_uuid(),
         'hiromichi.liang@gmail.com',
         'hiro',
-        'eRB2soJ8fMdiEoUmOafq1Q:GhpLtQK6dDnFDumbl1MNs6NU9yOt5QpuXGpIKBG7Az0',
+        'ZuvwbAh4eVnvmIY6BTA+mA:x1YiQMC649WNmZJ6P2ab04+mg/OtH3k9vyb0xi9Zt2k',
         'active');
 
 INSERT INTO public.users (account_id, name)
 VALUES (1, 'Hiro Liang');
 
 INSERT INTO public.roles (code, name, description, created_by)
-VALUES ('admin',  'Administrator', 'Manager of this platform', 1),
-       ('user',   'User',          'Authorized user',          1),
-       ('vendor', 'Vendor',        'Vendor of service',        1),
-       ('client', 'Client',        'Unauthed client',          1);
+VALUES ('admin', 'Administrator', 'Manager of this platform', 1),
+       ('user', 'User', 'Authorized user', 1),
+       ('vendor', 'Vendor', 'Vendor of service', 1),
+       ('client', 'Client', 'Unauthed client', 1);
 
 INSERT INTO public.users_roles (user_id, role_id)
 VALUES (1, 1),

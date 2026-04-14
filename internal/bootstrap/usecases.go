@@ -17,12 +17,14 @@ import (
 )
 
 type UseCases struct {
-	RegisterUseCase          *authUseCase.RegisterUseCase
-	LoginUseCase             *authUseCase.LoginUseCase
-	LogoutUseCase            *authUseCase.LogoutUseCase
-	GetAccountProfileUseCase *authUseCase.GetProfileUseCase
-	VerifyEmailUseCase       *authUseCase.VerifyEmailUseCase
-	ResendVerifyEmailUseCase *authUseCase.ResendVerifyEmailUseCase
+	RegisterUseCase                      *authUseCase.RegisterUseCase
+	LoginUseCase                         *authUseCase.LoginUseCase
+	LogoutUseCase                        *authUseCase.LogoutUseCase
+	GetAccountProfileUseCase             *authUseCase.GetProfileUseCase
+	VerifyEmailUseCase                   *authUseCase.VerifyEmailUseCase
+	ResendVerifyEmailUseCase             *authUseCase.ResendVerifyEmailUseCase
+	VerifyLoginDeviceUseCase             *authUseCase.VerifyLoginDeviceUseCase
+	ResendLoginDeviceVerificationUseCase *authUseCase.ResendLoginDeviceVerificationUseCase
 
 	UpdateUserProfileUseCase *userUseCase.UpdateProfileUseCase
 	UploadAvatarUseCase      *userUseCase.UploadAvatarUseCase
@@ -63,6 +65,11 @@ type UseCases struct {
 	GetPendingSenderKeyDistributionsUseCase    *e2eeUseCase.GetPendingSenderKeyDistributionsUseCase
 	ConsumeSenderKeyDistributionUseCase        *e2eeUseCase.ConsumeSenderKeyDistributionUseCase
 	CreateSenderKeyRequestUseCase              *e2eeUseCase.CreateSenderKeyRequestUseCase
+	UploadSelfSenderKeySyncDistributionsUseCase *e2eeUseCase.UploadSelfSenderKeySyncDistributionsUseCase
+	GetPendingSelfSenderKeySyncDistributionsUseCase *e2eeUseCase.GetPendingSelfSenderKeySyncDistributionsUseCase
+	ConsumeSelfSenderKeySyncDistributionUseCase *e2eeUseCase.ConsumeSelfSenderKeySyncDistributionUseCase
+	GetSelfSenderKeySyncUseCase                *e2eeUseCase.GetSelfSenderKeySyncUseCase
+	SelfSenderKeySyncMutationUseCase           *e2eeUseCase.SelfSenderKeySyncMutationUseCase
 	NotifyPendingSenderKeyRequestsUseCase      *e2eeUseCase.NotifyPendingSenderKeyRequestsUseCase
 	NotifyPendingSenderKeyDistributionsUseCase *e2eeUseCase.NotifyPendingSenderKeyDistributionsUseCase
 
@@ -104,12 +111,15 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			},
 		),
 		LoginUseCase: authUseCase.NewLoginUseCase(
-			deps.Uow, deps.PwdHasher, deps.LoginRateLimiter, deps.SessionManager,
+			deps.Uow, deps.PwdHasher, deps.LoginRateLimiter, deps.SessionManager, deps.DeviceLoginVerificationStore,
 			deps.AccountRepo, deps.UserRepo, deps.UserRoleRepo,
-			deps.DeviceRepo, deps.ParticipantRepository,
+			deps.DeviceRepo, deps.ParticipantRepository, deps.SelfSenderKeySyncRepo,
 			deps.EmailService,
 			func(recipientEmail, recipientName, deviceName, deviceID, ip string, loginTime time.Time) appEmail.EmailBuilder {
 				return infraBuilder.NewLoginMailBuilder(sender, recipientEmail, recipientName, deviceName, deviceID, ip, loginTime)
+			},
+			func(recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode string, loginTime time.Time) appEmail.EmailBuilder {
+				return infraBuilder.NewDeviceLoginVerificationMailBuilder(sender, recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode, loginTime)
 			},
 		),
 		LogoutUseCase:            authUseCase.NewLogoutUseCase(deps.SessionManager),
@@ -121,6 +131,25 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.EmailService,
 			func(recipientEmail, recipientName, verifyURL string) appEmail.EmailBuilder {
 				return infraBuilder.NewRegisterMailBuilder(sender, recipientEmail, recipientName, verifyURL)
+			},
+		),
+		VerifyLoginDeviceUseCase: authUseCase.NewVerifyLoginDeviceUseCase(
+			deps.Uow,
+			deps.SessionManager,
+			deps.DeviceLoginVerificationStore,
+			deps.AccountRepo,
+			deps.UserRepo,
+			deps.UserRoleRepo,
+			deps.DeviceRepo,
+			deps.ParticipantRepository,
+			deps.SelfSenderKeySyncRepo,
+		),
+		ResendLoginDeviceVerificationUseCase: authUseCase.NewResendLoginDeviceVerificationUseCase(
+			deps.DeviceLoginVerificationStore,
+			deps.AccountRepo,
+			deps.EmailService,
+			func(recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode string, loginTime time.Time) appEmail.EmailBuilder {
+				return infraBuilder.NewDeviceLoginVerificationMailBuilder(sender, recipientEmail, recipientName, deviceName, deviceID, ip, verificationCode, loginTime)
 			},
 		),
 
@@ -237,9 +266,12 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 		UploadSenderKeyUseCase: e2eeUseCase.NewUploadSenderKeyUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.AccountRepo,
+			deps.UserRepo,
 			deps.MemberSenderKeyRepo,
 			deps.SenderKeyDistributionRepo,
 			deps.SenderKeyRequestRepo,
+			deps.SelfSenderKeySyncRepo,
 			deps.FriendshipRepo,
 			deps.Hub,
 		),
@@ -249,7 +281,40 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.SenderKeyRequestRepo,
 			deps.MemberSenderKeyRepo,
 			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyReceiptRepo,
+			deps.SelfSenderKeySyncRepo,
 			deps.FriendshipRepo,
+			deps.Hub,
+		),
+		GetSelfSenderKeySyncUseCase: e2eeUseCase.NewGetSelfSenderKeySyncUseCase(
+			deps.ParticipantRepository,
+			deps.SelfSenderKeySyncRepo,
+			deps.AccountRepo,
+			deps.DeviceRepo,
+		),
+		UploadSelfSenderKeySyncDistributionsUseCase: e2eeUseCase.NewUploadSelfSenderKeySyncDistributionsUseCase(
+			deps.ParticipantRepository,
+			deps.SelfSenderKeySyncRepo,
+			deps.SelfSenderKeySyncDistributionRepo,
+		),
+		GetPendingSelfSenderKeySyncDistributionsUseCase: e2eeUseCase.NewGetPendingSelfSenderKeySyncDistributionsUseCase(
+			deps.ParticipantRepository,
+			deps.SelfSenderKeySyncRepo,
+			deps.SelfSenderKeySyncDistributionRepo,
+		),
+		ConsumeSelfSenderKeySyncDistributionUseCase: e2eeUseCase.NewConsumeSelfSenderKeySyncDistributionUseCase(
+			deps.ParticipantRepository,
+			deps.ChatMemberRepo,
+			deps.SelfSenderKeySyncRepo,
+			deps.SelfSenderKeySyncDistributionRepo,
+			deps.SenderKeyReceiptRepo,
+		),
+		SelfSenderKeySyncMutationUseCase: e2eeUseCase.NewSelfSenderKeySyncMutationUseCase(
+			deps.ParticipantRepository,
+			deps.SelfSenderKeySyncRepo,
+			deps.SelfSenderKeySyncDistributionRepo,
+			deps.AccountRepo,
+			deps.DeviceRepo,
 			deps.Hub,
 		),
 		NotifyPendingSenderKeyRequestsUseCase: e2eeUseCase.NewNotifyPendingSenderKeyRequestsUseCase(
@@ -270,13 +335,16 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.MemberSenderKeyRepo,
-			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyReceiptRepo,
 		),
 		GetSenderKeyDistributionStatusUseCase: e2eeUseCase.NewGetSenderKeyDistributionStatusUseCase(
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
+			deps.AccountRepo,
+			deps.UserRepo,
 			deps.MemberSenderKeyRepo,
 			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyReceiptRepo,
 		),
 		GetPendingSenderKeyDistributionsUseCase: e2eeUseCase.NewGetPendingSenderKeyDistributionsUseCase(
 			deps.ParticipantRepository,
@@ -287,6 +355,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.ParticipantRepository,
 			deps.ChatMemberRepo,
 			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyReceiptRepo,
 			deps.SenderKeyRequestRepo,
 			deps.Hub,
 		),

@@ -43,6 +43,10 @@ func (*getProfileAccountRepoStub) RegisterDevice(context.Context, *domainaccount
 	return nil
 }
 
+func (*getProfileAccountRepoStub) UpdateDeviceStatus(context.Context, shared.AccountID, shared.DeviceID, domainaccount.DeviceStatus) error {
+	return nil
+}
+
 func (*getProfileAccountRepoStub) RecordLoginEvent(context.Context, *domainaccount.AccountLoginEvent) error {
 	return nil
 }

@@ -198,8 +198,11 @@ func (h *ChatRoomHandler) getUserChatRooms(c *gin.Context) {
 				PresenceStatus:     s.PresenceStatus,
 				LastSeenAt:         s.LastSeenAt,
 				LatestMsg:          s.LatestMsg,
+				LatestMsgID:        s.LatestMsgID,
 				LatestMsgCreatedAt: s.LatestMsgCreatedAt,
 				LatestMsgSenderID:  s.LatestMsgSenderID,
+				LatestMsgSenderDeviceID: s.LatestMsgSenderDeviceID,
+				LatestMsgSenderKeyVersion: s.LatestMsgSenderKeyVersion,
 				UnreadCount:        s.UnreadCount,
 				BlockedByPeer:      s.BlockedByPeer,
 				BlockedByMe:        s.BlockedByMe,
@@ -259,13 +262,15 @@ func (h *ChatRoomHandler) getChatRoomDetail(c *gin.Context) {
 	messages := make([]ChatMessageInfoResponse, 0, len(out.Messages))
 	for _, msg := range out.Messages {
 		messages = append(messages, ChatMessageInfoResponse{
-			MessageID: msg.MessageID,
-			SenderID:  msg.SenderID,
-			Content:   h.resolveContentURL(msg.Content, msg.Type),
-			Type:      msg.Type,
-			ReplyToID: msg.ReplyToID,
-			IsEdited:  msg.IsEdited,
-			CreatedAt: msg.CreatedAt,
+			MessageID:        msg.MessageID,
+			SenderID:         msg.SenderID,
+			SenderDeviceID:   msg.SenderDeviceID,
+			SenderKeyVersion: msg.SenderKeyVersion,
+			Content:          h.resolveContentURL(msg.Content, msg.Type),
+			Type:             msg.Type,
+			ReplyToID:        msg.ReplyToID,
+			IsEdited:         msg.IsEdited,
+			CreatedAt:        msg.CreatedAt,
 		})
 	}
 
@@ -323,13 +328,15 @@ func (h *ChatRoomHandler) getChatRoomMessages(c *gin.Context) {
 	messages := make([]ChatMessageInfoResponse, 0, len(out.Messages))
 	for _, msg := range out.Messages {
 		messages = append(messages, ChatMessageInfoResponse{
-			MessageID: msg.MessageID,
-			SenderID:  msg.SenderID,
-			Content:   h.resolveContentURL(msg.Content, msg.Type),
-			Type:      msg.Type,
-			ReplyToID: msg.ReplyToID,
-			IsEdited:  msg.IsEdited,
-			CreatedAt: msg.CreatedAt,
+			MessageID:        msg.MessageID,
+			SenderID:         msg.SenderID,
+			SenderDeviceID:   msg.SenderDeviceID,
+			SenderKeyVersion: msg.SenderKeyVersion,
+			Content:          h.resolveContentURL(msg.Content, msg.Type),
+			Type:             msg.Type,
+			ReplyToID:        msg.ReplyToID,
+			IsEdited:         msg.IsEdited,
+			CreatedAt:        msg.CreatedAt,
 		})
 	}
 
@@ -404,10 +411,11 @@ func (h *ChatRoomHandler) sendMessage(c *gin.Context) {
 	}
 
 	input := adapter.BuildInput(c, usecase.SendMessageInput{
-		RoomID:    roomID,
-		Content:   req.Content,
-		Type:      req.Type,
-		ReplyToID: req.ReplyToID,
+		RoomID:           roomID,
+		Content:          req.Content,
+		Type:             req.Type,
+		ReplyToID:        req.ReplyToID,
+		SenderKeyVersion: req.SenderKeyVersion,
 	})
 	out, err := h.sendMessageUseCase.Execute(c.Request.Context(), input)
 	if err != nil {
@@ -418,12 +426,14 @@ func (h *ChatRoomHandler) sendMessage(c *gin.Context) {
 	content := h.resolveContentURL(out.Content, out.Type)
 
 	c.JSON(http.StatusCreated, SendMessageResponse{
-		MessageID: out.MessageID,
-		SenderID:  out.SenderID,
-		Content:   content,
-		Type:      out.Type,
-		ReplyToID: out.ReplyToID,
-		CreatedAt: out.CreatedAt,
+		MessageID:        out.MessageID,
+		SenderID:         out.SenderID,
+		SenderDeviceID:   out.SenderDeviceID,
+		SenderKeyVersion: out.SenderKeyVersion,
+		Content:          content,
+		Type:             out.Type,
+		ReplyToID:        out.ReplyToID,
+		CreatedAt:        out.CreatedAt,
 	})
 }
 

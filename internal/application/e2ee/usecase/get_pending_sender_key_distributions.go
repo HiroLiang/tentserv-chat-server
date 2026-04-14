@@ -19,7 +19,9 @@ type GetPendingSenderKeyDistributionsInput struct {
 type PendingSenderKeyDistributionItem struct {
 	DistributionID      int64  `json:"distribution_id"`
 	SenderMemberID      int64  `json:"sender_member_id"`
+	SenderDeviceID      string `json:"sender_device_id"`
 	ReceiverMemberID    int64  `json:"receiver_member_id"`
+	ReceiverDeviceID    string `json:"receiver_device_id"`
 	SenderKeyVersion    int64  `json:"sender_key_version"`
 	DistributionMessage string `json:"distribution_message"`
 }
@@ -61,7 +63,7 @@ func (u *GetPendingSenderKeyDistributionsUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
-	dists, err := u.distributionRepo.FindAvailableByRoomAndReceiver(ctx, roomID, callerMember.ID)
+	dists, err := u.distributionRepo.FindAvailableByRoomAndReceiver(ctx, roomID, callerMember.ID, input.Base.Request.DeviceID)
 	if err != nil {
 		return nil, fmt.Errorf("find pending sender key distributions: %w", err)
 	}
@@ -71,7 +73,9 @@ func (u *GetPendingSenderKeyDistributionsUseCase) Execute(
 		items = append(items, PendingSenderKeyDistributionItem{
 			DistributionID:      int64(dist.ID),
 			SenderMemberID:      int64(dist.SenderMemberID),
+			SenderDeviceID:      dist.SenderDeviceID.String(),
 			ReceiverMemberID:    int64(dist.ReceiverMemberID),
+			ReceiverDeviceID:    dist.ReceiverDeviceID.String(),
 			SenderKeyVersion:    dist.SenderKeyVersion,
 			DistributionMessage: base64.StdEncoding.EncodeToString(dist.DistributionMessage),
 		})

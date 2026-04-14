@@ -19,6 +19,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/deliveryqueue"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/cucumber/godog"
@@ -56,22 +57,37 @@ type keyBundleResponse struct {
 }
 
 type senderKeyDistributionStatusResponse struct {
-	OwnSenderKeyExists     bool    `json:"own_sender_key_exists"`
-	RequestableMemberIDs   []int64 `json:"requestable_member_ids"`
-	AvailableFromMemberIDs []int64 `json:"available_from_member_ids"`
-	AvailableToMemberIDs   []int64 `json:"available_to_member_ids"`
-	PendingReceivers       []int64 `json:"pending_receivers"`
-	PendingFromMembers     []int64 `json:"pending_from_members"`
+	OwnDeviceSenderKeyExists bool                     `json:"own_device_sender_key_exists"`
+	RequestableSources       []senderKeyDeviceRefStep `json:"requestable_sources"`
+	AvailableFromSources     []senderKeyDeviceRefStep `json:"available_from_sources"`
+	AvailableToTargets       []senderKeyDeviceRefStep `json:"available_to_targets"`
+	PendingReceivers         []senderKeyDeviceRefStep `json:"pending_receivers"`
+	PendingFromSources       []senderKeyDeviceRefStep `json:"pending_from_sources"`
+}
+
+type senderKeyDeviceRefStep struct {
+	MemberID int64  `json:"member_id"`
+	DeviceID string `json:"device_id"`
 }
 
 type pendingSenderKeyDistributionsResponse struct {
 	Distributions []struct {
 		DistributionID      int64  `json:"distribution_id"`
 		SenderMemberID      int64  `json:"sender_member_id"`
+		SenderDeviceID      string `json:"sender_device_id"`
 		ReceiverMemberID    int64  `json:"receiver_member_id"`
+		ReceiverDeviceID    string `json:"receiver_device_id"`
 		SenderKeyVersion    int64  `json:"sender_key_version"`
 		DistributionMessage string `json:"distribution_message"`
 	} `json:"distributions"`
+}
+
+type selfSenderKeySyncResponse struct {
+	Exists                 bool   `json:"exists"`
+	Status                 string `json:"status"`
+	RequesterCurrentDevice bool   `json:"requester_current_device"`
+	ProviderCurrentDevice  bool   `json:"provider_current_device"`
+	LastError              string `json:"last_error"`
 }
 
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, accountBDD *accountfeatures.Deps) {
@@ -120,13 +136,24 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^I request sender key distribution status for room (\d+)$`, s.iRequestSenderKeyDistributionStatus)
 	ctx.Step(`^sender key distribution status should show own key exists as (true|false)$`, s.senderKeyDistributionStatusShouldShowOwnKeyExists)
 	ctx.Step(`^sender key distribution status should list available sender member (\d+)$`, s.senderKeyDistributionStatusShouldListAvailableSenderMember)
+	ctx.Step(`^sender key distribution status should list available sender member (\d+) device "([^"]*)"$`, s.senderKeyDistributionStatusShouldListAvailableSenderMemberDevice)
 	ctx.Step(`^sender key distribution status should list available receiver member (\d+)$`, s.senderKeyDistributionStatusShouldListAvailableReceiverMember)
+	ctx.Step(`^sender key distribution status should list available receiver member (\d+) device "([^"]*)"$`, s.senderKeyDistributionStatusShouldListAvailableReceiverMemberDevice)
 	ctx.Step(`^sender key distribution status should list pending receiver member (\d+)$`, s.senderKeyDistributionStatusShouldListPendingReceiverMember)
+	ctx.Step(`^sender key distribution status should list pending receiver member (\d+) device "([^"]*)"$`, s.senderKeyDistributionStatusShouldListPendingReceiverMemberDevice)
 	ctx.Step(`^I list pending sender key distributions for room (\d+)$`, s.iListPendingSenderKeyDistributions)
 	ctx.Step(`^pending sender key distributions should include sender member (\d+), receiver member (\d+), and version (\d+)$`, s.pendingSenderKeyDistributionsShouldInclude)
+	ctx.Step(`^pending sender key distributions should include sender member (\d+) device "([^"]*)", receiver member (\d+) device "([^"]*)", and version (\d+)$`, s.pendingSenderKeyDistributionsShouldIncludeDevices)
 	ctx.Step(`^I mark the first pending sender key distribution as "([^"]*)"$`, s.iMarkTheFirstPendingSenderKeyDistributionAs)
 	ctx.Step(`^the first pending sender key distribution should now be "([^"]*)"$`, s.theFirstPendingSenderKeyDistributionShouldNowBe)
 	ctx.Step(`^an e2ee\.sender_key_needed event should have been broadcast for provider member (\d+)$`, s.senderKeyNeededEventShouldHaveBeenBroadcast)
+	ctx.Step(`^a self sender key sync exists for the logged in user with participant id (\d+), requester device "([^"]*)", and status "([^"]*)"$`, s.aSelfSenderKeySyncExistsForTheLoggedInUserWithoutProvider)
+	ctx.Step(`^a self sender key sync exists for the logged in user with participant id (\d+), requester device "([^"]*)", provider device "([^"]*)", and status "([^"]*)"$`, s.aSelfSenderKeySyncExistsForTheLoggedInUserWithProvider)
+	ctx.Step(`^self sender key sync snapshot lookups will fail after mutation$`, s.selfSenderKeySyncSnapshotLookupsWillFailAfterMutation)
+	ctx.Step(`^I accept the self sender key sync$`, s.iAcceptTheSelfSenderKeySync)
+	ctx.Step(`^I complete the self sender key sync$`, s.iCompleteTheSelfSenderKeySync)
+	ctx.Step(`^I fail the self sender key sync with last error "([^"]*)" and retryable (true|false)$`, s.iFailTheSelfSenderKeySyncWithLastErrorAndRetryable)
+	ctx.Step(`^the self sender key sync response should show status "([^"]*)"$`, s.theSelfSenderKeySyncResponseShouldShowStatus)
 }
 
 func (s *steps) e2eeKeyBootstrapStateIsClean() error {
@@ -956,17 +983,27 @@ func (s *steps) roomMemberSetup(
 	callerPID := participant.ID(callerMemberID + 1000)
 	providerUID := shared.UserID(providerMemberID + 2000)
 	providerPID := participant.ID(providerMemberID + 1000)
+	providerDeviceID := defaultReadyAccountDevice(shared.AccountID(providerUID), providerUID).DeviceID
 
 	s.deps.SKR.SeedMember(callerUserID, callerPID, chatmember.ID(callerMemberID), chatroom.ID(roomID))
 	s.deps.SKR.SeedMember(providerUID, providerPID, chatmember.ID(providerMemberID), chatroom.ID(providerRoomID))
+	callerDeviceID := s.accountBDD.LastSessionDeviceID()
 	if seedProviderKey {
-		s.deps.SKR.SeedProviderKeyVersion(chatmember.ID(providerMemberID), 99)
+		s.deps.SKR.SeedProviderKeyVersionForDevice(chatmember.ID(providerMemberID), providerDeviceID, 99)
 	}
 	if seedAvailableDistribution {
-		s.deps.SKR.SeedDistribution(roomID, chatmember.ID(providerMemberID), chatmember.ID(callerMemberID), 99, senderkeydistribution.StatusAvailable)
+		s.deps.SKR.SeedDistributionForPair(
+			roomID,
+			chatmember.ID(providerMemberID),
+			providerDeviceID,
+			chatmember.ID(callerMemberID),
+			callerDeviceID,
+			99,
+			senderkeydistribution.StatusAvailable,
+		)
 	}
 	if seedPendingRequest {
-		s.deps.SKR.SeedPendingSKRRequest(chatmember.ID(callerMemberID), chatmember.ID(providerMemberID))
+		s.deps.SKR.SeedPendingSKRRequestForPair(chatmember.ID(callerMemberID), callerDeviceID, chatmember.ID(providerMemberID), providerDeviceID)
 	}
 	fmt.Println("Given: room member setup complete")
 	fmt.Printf("Input: room_id=%d caller_member=%d provider_member=%d provider_room=%d with_key=%t with_available_distribution=%t with_pending_request=%t\n",
@@ -1033,14 +1070,18 @@ func (s *steps) senderKeyReceiverSetupWithAvailableDistribution(roomID, senderMe
 	senderUID := shared.UserID(senderMemberID + 2000)
 	senderPID := participant.ID(senderMemberID + 1000)
 	receiverPID := participant.ID(receiverMemberID + 1000)
+	senderDeviceID := defaultReadyAccountDevice(shared.AccountID(senderUID), senderUID).DeviceID
 
 	s.deps.SKR.SeedMember(senderUID, senderPID, chatmember.ID(senderMemberID), chatroom.ID(roomID))
 	s.deps.SKR.SeedMember(receiverUserID, receiverPID, chatmember.ID(receiverMemberID), chatroom.ID(roomID))
-	s.deps.SKR.SeedProviderKeyVersion(chatmember.ID(senderMemberID), version)
-	s.lastDistributionID = int64(s.deps.SKR.SeedDistribution(
+	s.deps.SKR.SeedProviderKeyVersionForDevice(chatmember.ID(senderMemberID), senderDeviceID, version)
+	receiverDeviceID := s.accountBDD.LastSessionDeviceID()
+	s.lastDistributionID = int64(s.deps.SKR.SeedDistributionForPair(
 		roomID,
 		chatmember.ID(senderMemberID),
+		senderDeviceID,
 		chatmember.ID(receiverMemberID),
+		receiverDeviceID,
 		version,
 		senderkeydistribution.StatusAvailable,
 	))
@@ -1110,13 +1151,31 @@ func (s *steps) senderKeyDistributionStatusShouldShowOwnKeyExists(expected strin
 		return err
 	}
 	expectedValue := expected == "true"
-	if body.OwnSenderKeyExists != expectedValue {
-		return fmt.Errorf("expected own_sender_key_exists=%t, got %t", expectedValue, body.OwnSenderKeyExists)
+	if body.OwnDeviceSenderKeyExists != expectedValue {
+		return fmt.Errorf("expected own_device_sender_key_exists=%t, got %t", expectedValue, body.OwnDeviceSenderKeyExists)
 	}
-	fmt.Printf("Output: own_sender_key_exists=%t\n", body.OwnSenderKeyExists)
+	fmt.Printf("Output: own_device_sender_key_exists=%t\n", body.OwnDeviceSenderKeyExists)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	return nil
+}
+
+func containsMemberRef(refs []senderKeyDeviceRefStep, memberID int64) bool {
+	for _, ref := range refs {
+		if ref.MemberID == memberID {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMemberDeviceRef(refs []senderKeyDeviceRefStep, memberID int64, deviceID string) bool {
+	for _, ref := range refs {
+		if ref.MemberID == memberID && ref.DeviceID == deviceID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *steps) senderKeyDistributionStatusShouldListAvailableSenderMember(memberID int64) error {
@@ -1125,14 +1184,26 @@ func (s *steps) senderKeyDistributionStatusShouldListAvailableSenderMember(membe
 	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
 		return err
 	}
-	for _, id := range body.AvailableFromMemberIDs {
-		if id == memberID {
-			fmt.Printf("Output: available_from_member_ids=%v\n", body.AvailableFromMemberIDs)
-			fmt.Printf("Duration: %s\n", time.Since(start))
-			return nil
-		}
+	if containsMemberRef(body.AvailableFromSources, memberID) {
+		fmt.Printf("Output: available_from_sources=%v\n", body.AvailableFromSources)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
 	}
-	return fmt.Errorf("expected available_from_member_ids to include %d, got %v", memberID, body.AvailableFromMemberIDs)
+	return fmt.Errorf("expected available_from_sources to include member %d, got %v", memberID, body.AvailableFromSources)
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListAvailableSenderMemberDevice(memberID int64, deviceID string) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	if containsMemberDeviceRef(body.AvailableFromSources, memberID, deviceID) {
+		fmt.Printf("Output: available_from_sources=%v\n", body.AvailableFromSources)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
+	}
+	return fmt.Errorf("expected available_from_sources to include member %d device %s, got %v", memberID, deviceID, body.AvailableFromSources)
 }
 
 func (s *steps) senderKeyDistributionStatusShouldListAvailableReceiverMember(memberID int64) error {
@@ -1141,14 +1212,26 @@ func (s *steps) senderKeyDistributionStatusShouldListAvailableReceiverMember(mem
 	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
 		return err
 	}
-	for _, id := range body.AvailableToMemberIDs {
-		if id == memberID {
-			fmt.Printf("Output: available_to_member_ids=%v\n", body.AvailableToMemberIDs)
-			fmt.Printf("Duration: %s\n", time.Since(start))
-			return nil
-		}
+	if containsMemberRef(body.AvailableToTargets, memberID) {
+		fmt.Printf("Output: available_to_targets=%v\n", body.AvailableToTargets)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
 	}
-	return fmt.Errorf("expected available_to_member_ids to include %d, got %v", memberID, body.AvailableToMemberIDs)
+	return fmt.Errorf("expected available_to_targets to include member %d, got %v", memberID, body.AvailableToTargets)
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListAvailableReceiverMemberDevice(memberID int64, deviceID string) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	if containsMemberDeviceRef(body.AvailableToTargets, memberID, deviceID) {
+		fmt.Printf("Output: available_to_targets=%v\n", body.AvailableToTargets)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
+	}
+	return fmt.Errorf("expected available_to_targets to include member %d device %s, got %v", memberID, deviceID, body.AvailableToTargets)
 }
 
 func (s *steps) senderKeyDistributionStatusShouldListPendingReceiverMember(memberID int64) error {
@@ -1157,14 +1240,26 @@ func (s *steps) senderKeyDistributionStatusShouldListPendingReceiverMember(membe
 	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
 		return err
 	}
-	for _, id := range body.PendingReceivers {
-		if id == memberID {
-			fmt.Printf("Output: pending_receivers=%v\n", body.PendingReceivers)
-			fmt.Printf("Duration: %s\n", time.Since(start))
-			return nil
-		}
+	if containsMemberRef(body.PendingReceivers, memberID) {
+		fmt.Printf("Output: pending_receivers=%v\n", body.PendingReceivers)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
 	}
 	return fmt.Errorf("expected pending_receivers to include %d, got %v", memberID, body.PendingReceivers)
+}
+
+func (s *steps) senderKeyDistributionStatusShouldListPendingReceiverMemberDevice(memberID int64, deviceID string) error {
+	start := time.Now()
+	var body senderKeyDistributionStatusResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	if containsMemberDeviceRef(body.PendingReceivers, memberID, deviceID) {
+		fmt.Printf("Output: pending_receivers=%v\n", body.PendingReceivers)
+		fmt.Printf("Duration: %s\n", time.Since(start))
+		return nil
+	}
+	return fmt.Errorf("expected pending_receivers to include member %d device %s, got %v", memberID, deviceID, body.PendingReceivers)
 }
 
 func (s *steps) iListPendingSenderKeyDistributions(roomID int64) error {
@@ -1203,6 +1298,35 @@ func (s *steps) pendingSenderKeyDistributionsShouldInclude(senderMemberID, recei
 		}
 	}
 	return fmt.Errorf("expected pending distribution sender=%d receiver=%d version=%d, got %+v", senderMemberID, receiverMemberID, version, body.Distributions)
+}
+
+func (s *steps) pendingSenderKeyDistributionsShouldIncludeDevices(senderMemberID int64, senderDeviceID string, receiverMemberID int64, receiverDeviceID string, version int64) error {
+	start := time.Now()
+	var body pendingSenderKeyDistributionsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, dist := range body.Distributions {
+		if dist.SenderMemberID == senderMemberID &&
+			dist.SenderDeviceID == senderDeviceID &&
+			dist.ReceiverMemberID == receiverMemberID &&
+			dist.ReceiverDeviceID == receiverDeviceID &&
+			dist.SenderKeyVersion == version {
+			s.lastDistributionID = dist.DistributionID
+			fmt.Printf("Output: found_distribution_id=%d distributions=%d\n", dist.DistributionID, len(body.Distributions))
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"expected pending distribution sender=%d sender_device=%s receiver=%d receiver_device=%s version=%d, got %+v",
+		senderMemberID,
+		senderDeviceID,
+		receiverMemberID,
+		receiverDeviceID,
+		version,
+		body.Distributions,
+	)
 }
 
 func (s *steps) iMarkTheFirstPendingSenderKeyDistributionAs(status string) error {
@@ -1276,17 +1400,37 @@ func (s *steps) senderKeyNeededEventShouldHaveBeenBroadcast(providerMemberID int
 	return fmt.Errorf("expected e2ee.sender_key_needed event for provider member %d, got %d broadcast messages", providerMemberID, len(messages))
 }
 
+func (s *steps) defaultReadyDeviceIDForMember(memberID chatmember.ID) (shared.DeviceID, error) {
+	member, err := s.deps.SKR.chatMemberRepo.FindByID(nil, memberID)
+	if err != nil {
+		return shared.DeviceID{}, err
+	}
+	participantData, err := s.deps.SKR.participantRepo.FindByID(nil, member.ParticipantID)
+	if err != nil || participantData.UserID == nil {
+		return shared.DeviceID{}, fmt.Errorf("participant user not found for member %d", memberID)
+	}
+	return defaultReadyAccountDevice(shared.AccountID(*participantData.UserID), *participantData.UserID).DeviceID, nil
+}
+
 func (s *steps) iCreateASenderKeyRequestForRoomAndProviderMember(roomID, providerMemberID int64) error {
 	s.start = time.Now()
 	authHeader, err := s.e2eeAuthorizationHeader()
 	if err != nil {
 		return err
 	}
+	providerDeviceID, err := s.defaultReadyDeviceIDForMember(chatmember.ID(providerMemberID))
+	if err != nil {
+		return err
+	}
 	fmt.Println("Given: authenticated user creates a sender key request")
-	fmt.Printf("Input: room_id=%d provider_member_id=%d\n", roomID, providerMemberID)
+	fmt.Printf("Input: room_id=%d provider_member_id=%d provider_device_id=%s\n", roomID, providerMemberID, providerDeviceID.String())
 	fmt.Println("Action: POST /api/e2ee/sender-key-request")
 
-	payload := map[string]any{"room_id": roomID, "provider_member_id": providerMemberID}
+	payload := map[string]any{
+		"room_id":            roomID,
+		"provider_member_id": providerMemberID,
+		"provider_device_id": providerDeviceID.String(),
+	}
 	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/sender-key-request", payload, authHeader); err != nil {
 		return err
 	}
@@ -1345,6 +1489,151 @@ func (s *steps) pendingSenderKeyRequestCountFromMemberToProviderShouldBe(request
 
 func (s *steps) e2eeAuthorizationHeader() (string, error) {
 	return s.authorizationHeader()
+}
+
+func (s *steps) aSelfSenderKeySyncExistsForTheLoggedInUserWithoutProvider(participantID int64, requesterDeviceIDText, status string) error {
+	return s.seedSelfSenderKeySync(participantID, requesterDeviceIDText, "", status)
+}
+
+func (s *steps) aSelfSenderKeySyncExistsForTheLoggedInUserWithProvider(participantID int64, requesterDeviceIDText, providerDeviceIDText, status string) error {
+	return s.seedSelfSenderKeySync(participantID, requesterDeviceIDText, providerDeviceIDText, status)
+}
+
+func (s *steps) seedSelfSenderKeySync(participantID int64, requesterDeviceIDText, providerDeviceIDText, status string) error {
+	s.start = time.Now()
+	userID := s.accountBDD.LastSessionUserID()
+	if userID == 0 {
+		return fmt.Errorf("no logged in user available for self sender key sync setup")
+	}
+
+	requesterDeviceID, err := shared.ParseDeviceID(requesterDeviceIDText)
+	if err != nil {
+		return err
+	}
+
+	var providerDeviceID *shared.DeviceID
+	if providerDeviceIDText != "" {
+		parsed, parseErr := shared.ParseDeviceID(providerDeviceIDText)
+		if parseErr != nil {
+			return parseErr
+		}
+		providerDeviceID = &parsed
+	}
+
+	s.deps.SKR.SeedParticipant(userID, participant.ID(participantID))
+	s.deps.SKR.SeedSelfSenderKeySync(&selfsenderkeysync.SelfSenderKeySync{
+		ParticipantID:     participant.ID(participantID),
+		RequesterDeviceID: requesterDeviceID,
+		ProviderDeviceID:  providerDeviceID,
+		Status:            selfsenderkeysync.Status(status),
+		RequestedAt:       time.Now().Add(-time.Minute),
+		UpdatedAt:         time.Now().Add(-time.Minute),
+	})
+
+	if providerDeviceID != nil {
+		fmt.Println("Given: a self sender key sync exists with both requester and provider devices")
+		fmt.Printf("Input: participant_id=%d requester_device_id=%s provider_device_id=%s status=%s\n", participantID, requesterDeviceIDText, providerDeviceIDText, status)
+	} else {
+		fmt.Println("Given: a self sender key sync exists with only a requester device")
+		fmt.Printf("Input: participant_id=%d requester_device_id=%s status=%s\n", participantID, requesterDeviceIDText, status)
+	}
+	fmt.Println("Action: seed participant_self_sender_key_syncs fake state")
+	fmt.Printf("Output: self_sync_seeded=true provider_present=%t\n", providerDeviceID != nil)
+	fmt.Println("Mutation: self sender key sync fake repository expanded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) selfSenderKeySyncSnapshotLookupsWillFailAfterMutation() error {
+	s.start = time.Now()
+	fmt.Println("Given: authoritative self sync snapshot lookups will fail after the mutation commits")
+	fmt.Println("Input: account_lookup_failure=true")
+	fmt.Println("Action: configure SKR fake account repo to fail FindByID")
+	s.deps.SKR.SetSelfSyncSnapshotLookupFailure(true)
+	fmt.Println("Output: self_sync_snapshot_lookup_failure=true")
+	fmt.Println("Mutation: fake account repository now forces fallback snapshots")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iAcceptTheSelfSenderKeySync() error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the current device tries to become the self sync provider")
+	fmt.Println("Action: POST /api/e2ee/self-sender-key-sync/accept")
+	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/self-sender-key-sync/accept", map[string]any{}, authHeader); err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: self sender key sync may advance to syncing")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iCompleteTheSelfSenderKeySync() error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the requester device finishes consuming its self sender key sync payload")
+	fmt.Println("Action: POST /api/e2ee/self-sender-key-sync/complete")
+	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/self-sender-key-sync/complete", map[string]any{}, authHeader); err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: self sender key sync may advance to completed")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) iFailTheSelfSenderKeySyncWithLastErrorAndRetryable(lastError, retryable string) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Given: the current device reports a self sync failure")
+	fmt.Printf("Input: last_error=%s retryable=%s\n", lastError, retryable)
+	fmt.Println("Action: POST /api/e2ee/self-sender-key-sync/fail")
+	payload := map[string]any{
+		"last_error": lastError,
+		"retryable":  retryable == "true",
+	}
+	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/self-sender-key-sync/fail", payload, authHeader); err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Println("Mutation: self sender key sync may reset to waiting or terminal failed")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theSelfSenderKeySyncResponseShouldShowStatus(expected string) error {
+	start := time.Now()
+	fmt.Println("Given: a self sender key sync response body is available")
+	fmt.Printf("Input: expected_status=%s\n", expected)
+	fmt.Println("Action: decode self sender key sync response")
+
+	var body selfSenderKeySyncResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	fmt.Printf("Output: exists=%t status=%s requester_current_device=%t provider_current_device=%t\n",
+		body.Exists,
+		body.Status,
+		body.RequesterCurrentDevice,
+		body.ProviderCurrentDevice,
+	)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+	if body.Status != expected {
+		return fmt.Errorf("expected self sender key sync status %s, got %s", expected, body.Status)
+	}
+	return nil
 }
 
 func (s *steps) doE2EEJSONRequest(method, path string, payload any, authHeader string) error {

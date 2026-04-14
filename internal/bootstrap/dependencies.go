@@ -23,7 +23,10 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysyncdistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -73,8 +76,9 @@ type Dependencies struct {
 
 	HMacer appSecurity.HMACer
 
-	VerificationStore port.VerificationStore
-	EmailService      appEmail.EmailService
+	VerificationStore            port.VerificationStore
+	DeviceLoginVerificationStore port.VerificationStore
+	EmailService                 appEmail.EmailService
 
 	AccountRepo           account.Repository
 	UserRepo              user.Repository
@@ -93,7 +97,10 @@ type Dependencies struct {
 	OTPPreKeyRepo             userotpprekey.Repository
 	MemberSenderKeyRepo       membersenderkey.Repository
 	SenderKeyDistributionRepo senderkeydistribution.Repository
+	SenderKeyReceiptRepo      senderkeyreceipt.Repository
 	SenderKeyRequestRepo      senderkeyrequest.Repository
+	SelfSenderKeySyncRepo     selfsenderkeysync.Repository
+	SelfSenderKeySyncDistributionRepo selfsenderkeysyncdistribution.Repository
 
 	Hub               *ws.Hub
 	DeliveryQueueRepo deliveryqueue.Repository
@@ -157,37 +164,41 @@ func BuildDeps(redis *redis.Client, dataSources *database.DataSources) (*Depende
 			sessionRepo,
 			conf.AuthToken.Expiration,
 		),
-		RateLimiter:               rateLimiter,
-		RegisterRateLimiter:       registerRateLimiter,
-		LoginRateLimiter:          loginRateLimiter,
-		RedisCache:                redisCache,
-		PwdHasher:                 infraSharedSecurity.NewArgon2Hasher(),
-		ContextHasher:             infraSharedSecurity.NewContentHasher(),
-		LocalFileStorage:          infraStorage.NewLocalFileStorage(conf.Storage.BasePath, conf.Storage.BaseURL),
-		HMacer:                    infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
-		VerificationStore:         infraVerification.NewVerificationStore(redisCache, conf.Email.VerifyCacheTTL),
-		EmailService:              infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
-		AccountRepo:               postgresAccount.NewAccountRepo(postgresDB),
-		UserRepo:                  postgresUser.NewUserRepository(postgresDB),
-		UserRoleRepo:              postgresUserRole.NewUserRoleRepository(postgresDB),
-		DeviceRepo:                postgresDevice.NewDeviceRepository(postgresDB),
-		ParticipantRepository:     postgresChat.NewParticipantRepository(postgresDB),
-		ChatRoomRepo:              postgresChat.NewChatRoomRepository(postgresDB),
-		ChatMemberRepo:            postgresChat.NewChatMemberRepository(postgresDB),
-		ChatInvitationRepo:        postgresChat.NewChatInvitationRepository(postgresDB),
-		ChatMessageRepo:           postgresChat.NewChatMessageRepository(postgresDB),
-		AgentRepo:                 postgresAgent.NewAgentRepository(postgresDB),
-		KeyVerifier:               infraCrypto.NewE2EEVerifier(),
-		IdentityKeyRepo:           postgresE2EE.NewIdentityKeyRepository(postgresDB),
-		SignedPreKeyRepo:          postgresE2EE.NewSignedPreKeyRepository(postgresDB),
-		OTPPreKeyRepo:             postgresE2EE.NewOTPPreKeyRepository(postgresDB),
-		MemberSenderKeyRepo:       postgresE2EE.NewSenderKeyRepository(postgresDB),
-		SenderKeyDistributionRepo: postgresE2EE.NewSenderKeyDistributionRepository(postgresDB),
-		SenderKeyRequestRepo:      postgresE2EE.NewSenderKeyRequestRepository(postgresDB),
-		Hub:                       hub,
-		DeliveryQueueRepo:         deliveryQueueRepo,
-		PushDispatcher:            pushDispatcher,
-		FriendshipRepo:            postgresFriendship.NewFriendshipRepository(postgresDB),
+		RateLimiter:                  rateLimiter,
+		RegisterRateLimiter:          registerRateLimiter,
+		LoginRateLimiter:             loginRateLimiter,
+		RedisCache:                   redisCache,
+		PwdHasher:                    infraSharedSecurity.NewArgon2Hasher(),
+		ContextHasher:                infraSharedSecurity.NewContentHasher(),
+		LocalFileStorage:             infraStorage.NewLocalFileStorage(conf.Storage.BasePath, conf.Storage.BaseURL),
+		HMacer:                       infraSharedSecurity.NewSHA256HMACer(conf.Secrets.HmacSecret),
+		VerificationStore:            infraVerification.NewVerificationStore(redisCache, conf.Email.VerifyCacheTTL),
+		DeviceLoginVerificationStore: infraVerification.NewVerificationStoreWithNamespace(redisCache, conf.Email.VerifyCacheTTL, "device_login"),
+		EmailService:                 infraEmail.NewResendEmailService(conf.Email.ApiKey, emailRecorder),
+		AccountRepo:                  postgresAccount.NewAccountRepo(postgresDB),
+		UserRepo:                     postgresUser.NewUserRepository(postgresDB),
+		UserRoleRepo:                 postgresUserRole.NewUserRoleRepository(postgresDB),
+		DeviceRepo:                   postgresDevice.NewDeviceRepository(postgresDB),
+		ParticipantRepository:        postgresChat.NewParticipantRepository(postgresDB),
+		ChatRoomRepo:                 postgresChat.NewChatRoomRepository(postgresDB),
+		ChatMemberRepo:               postgresChat.NewChatMemberRepository(postgresDB),
+		ChatInvitationRepo:           postgresChat.NewChatInvitationRepository(postgresDB),
+		ChatMessageRepo:              postgresChat.NewChatMessageRepository(postgresDB),
+		AgentRepo:                    postgresAgent.NewAgentRepository(postgresDB),
+		KeyVerifier:                  infraCrypto.NewE2EEVerifier(),
+		IdentityKeyRepo:              postgresE2EE.NewIdentityKeyRepository(postgresDB),
+		SignedPreKeyRepo:             postgresE2EE.NewSignedPreKeyRepository(postgresDB),
+		OTPPreKeyRepo:                postgresE2EE.NewOTPPreKeyRepository(postgresDB),
+		MemberSenderKeyRepo:          postgresE2EE.NewSenderKeyRepository(postgresDB),
+		SenderKeyDistributionRepo:    postgresE2EE.NewSenderKeyDistributionRepository(postgresDB),
+		SenderKeyReceiptRepo:         postgresE2EE.NewSenderKeyReceiptRepository(postgresDB),
+		SenderKeyRequestRepo:         postgresE2EE.NewSenderKeyRequestRepository(postgresDB),
+		SelfSenderKeySyncRepo:        postgresE2EE.NewSelfSenderKeySyncRepository(postgresDB),
+		SelfSenderKeySyncDistributionRepo: postgresE2EE.NewSelfSenderKeySyncDistributionRepository(postgresDB),
+		Hub:                          hub,
+		DeliveryQueueRepo:            deliveryQueueRepo,
+		PushDispatcher:               pushDispatcher,
+		FriendshipRepo:               postgresFriendship.NewFriendshipRepository(postgresDB),
 	}, nil
 }
 

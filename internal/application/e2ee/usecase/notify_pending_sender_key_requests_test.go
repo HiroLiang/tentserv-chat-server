@@ -73,10 +73,10 @@ func (s *notifyPendingSenderKeyRequestRepoStub) Upsert(context.Context, *senderk
 	return nil
 }
 
-func (s *notifyPendingSenderKeyRequestRepoStub) FindPendingByProvider(_ context.Context, providerID chatmember.ID) ([]*senderkeyrequest.SenderKeyRequest, error) {
+func (s *notifyPendingSenderKeyRequestRepoStub) FindPendingByProvider(_ context.Context, providerID chatmember.ID, providerDeviceID shared.DeviceID) ([]*senderkeyrequest.SenderKeyRequest, error) {
 	out := make([]*senderkeyrequest.SenderKeyRequest, 0, len(s.requests))
 	for _, req := range s.requests {
-		if req.ProviderMemberID != providerID || req.FulfilledAt != nil {
+		if req.ProviderMemberID != providerID || req.ProviderDeviceID != providerDeviceID || req.FulfilledAt != nil {
 			continue
 		}
 		copied := *req
@@ -85,7 +85,7 @@ func (s *notifyPendingSenderKeyRequestRepoStub) FindPendingByProvider(_ context.
 	return out, nil
 }
 
-func (s *notifyPendingSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID, providerMemberID chatmember.ID) error {
+func (s *notifyPendingSenderKeyRequestRepoStub) MarkFulfilled(_ context.Context, requesterMemberID chatmember.ID, _ shared.DeviceID, providerMemberID chatmember.ID, _ shared.DeviceID) error {
 	s.marked = append(s.marked, [2]chatmember.ID{requesterMemberID, providerMemberID})
 	return nil
 }
@@ -94,12 +94,21 @@ type notifyPendingMemberSenderKeyRepoStub struct {
 	latestByMember map[chatmember.ID]*membersenderkey.MemberSenderKey
 }
 
-func (s *notifyPendingMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
+func (s *notifyPendingMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID, deviceID shared.DeviceID) (*membersenderkey.MemberSenderKey, error) {
 	if latest, ok := s.latestByMember[memberID]; ok {
 		copied := *latest
+		copied.SenderDeviceID = deviceID
 		return &copied, nil
 	}
 	return nil, membersenderkey.ErrNotFound
+}
+
+func (s *notifyPendingMemberSenderKeyRepoStub) FindLatestForMember(_ context.Context, memberID chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
+	latest, err := s.FindLatest(context.Background(), memberID, senderKeyReqProviderDeviceID)
+	if err != nil {
+		return nil, err
+	}
+	return []*membersenderkey.MemberSenderKey{latest}, nil
 }
 
 func (s *notifyPendingMemberSenderKeyRepoStub) FindAllByMembers(context.Context, []chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
@@ -123,7 +132,7 @@ func (s *notifyPendingDistributionRepoStub) UpsertBatch(context.Context, []*send
 	return nil
 }
 
-func (s *notifyPendingDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, int64) ([]chatmember.ID, error) {
+func (s *notifyPendingDistributionRepoStub) FindPendingReceivers(context.Context, chatmember.ID, shared.DeviceID, int64) ([]chatmember.ID, error) {
 	return nil, nil
 }
 
@@ -131,7 +140,7 @@ func (s *notifyPendingDistributionRepoStub) UpsertAvailable(context.Context, *se
 	return nil
 }
 
-func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, senderMemberID, receiverMemberID chatmember.ID) (*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, senderMemberID chatmember.ID, _ shared.DeviceID, receiverMemberID chatmember.ID, _ shared.DeviceID) (*senderkeydistribution.SenderKeyDistribution, error) {
 	if dist, ok := s.latest[[2]chatmember.ID{senderMemberID, receiverMemberID}]; ok {
 		copied := *dist
 		return &copied, nil
@@ -139,7 +148,7 @@ func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, sender
 	return nil, senderkeydistribution.ErrNotFound
 }
 
-func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(_ context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
+func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(_ context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID, _ shared.DeviceID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
 	rows := s.availableByRoomMember[[2]int64{int64(roomID), int64(receiverMemberID)}]
 	out := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(rows))
 	for _, row := range rows {
@@ -200,6 +209,8 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 		requests: []*senderkeyrequest.SenderKeyRequest{{
 			RequesterMemberID: requesterMemberID,
 			ProviderMemberID:  providerMemberID,
+			RequesterDeviceID: senderKeyReqRequesterDeviceID,
+			ProviderDeviceID:  senderKeyReqProviderDeviceID,
 		}},
 	}
 	memberSenderKeyRepo := &notifyPendingMemberSenderKeyRepoStub{
@@ -223,7 +234,7 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 		ID:            providerMemberID,
 		RoomID:        roomID,
 		ParticipantID: providerParticipantID,
-	}, "41")
+	}, senderKeyReqProviderDeviceID, "41")
 
 	require.Equal(t, 1, broadcaster.callCount())
 	call := broadcaster.lastCall()
@@ -285,13 +296,16 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberMarksSatisfiedRequestFulf
 	requestRepo := &notifyPendingSenderKeyRequestRepoStub{
 		requests: []*senderkeyrequest.SenderKeyRequest{{
 			RequesterMemberID: requesterMemberID,
+			RequesterDeviceID: senderKeyReqRequesterDeviceID,
 			ProviderMemberID:  providerMemberID,
+			ProviderDeviceID:  senderKeyReqProviderDeviceID,
 		}},
 	}
 	memberSenderKeyRepo := &notifyPendingMemberSenderKeyRepoStub{
 		latestByMember: map[chatmember.ID]*membersenderkey.MemberSenderKey{
 			providerMemberID: {
 				ChatMemberID:     providerMemberID,
+				SenderDeviceID:   senderKeyReqProviderDeviceID,
 				SenderKeyVersion: senderVersion,
 			},
 		},
@@ -321,7 +335,7 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberMarksSatisfiedRequestFulf
 		ID:            providerMemberID,
 		RoomID:        roomID,
 		ParticipantID: providerParticipantID,
-	}, "51")
+	}, senderKeyReqProviderDeviceID, "51")
 
 	assert.Equal(t, 0, broadcaster.callCount())
 	assert.Equal(t, [][2]chatmember.ID{{requesterMemberID, providerMemberID}}, requestRepo.marked)

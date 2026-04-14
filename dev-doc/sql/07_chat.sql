@@ -97,16 +97,18 @@ CREATE TABLE IF NOT EXISTS public.chat_members
 -- Chat records (messages) | 聊天訊息 | チャットレコード（メッセージ）
 CREATE TABLE IF NOT EXISTS public.chat_records
 (
-    id           BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    room_id      BIGINT            NOT NULL REFERENCES chat_rooms (id) ON DELETE CASCADE,
-    sender_id    BIGINT            NOT NULL REFERENCES chat_members (id) ON DELETE NO ACTION,
-    content      TEXT              NOT NULL,
-    message_type chat_message_type NOT NULL DEFAULT 'text',
-    reply_to_id  BIGINT            REFERENCES chat_records (id) ON DELETE SET NULL,
-    is_edited    BOOLEAN           NOT NULL DEFAULT FALSE,
-    is_deleted   BOOLEAN           NOT NULL DEFAULT FALSE,
-    created_at   TIMESTAMPTZ       NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ       NOT NULL DEFAULT now()
+    id                 BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    room_id            BIGINT            NOT NULL REFERENCES chat_rooms (id) ON DELETE CASCADE,
+    sender_id          BIGINT            NOT NULL REFERENCES chat_members (id) ON DELETE NO ACTION,
+    sender_device_id   UUID              NOT NULL REFERENCES devices (id) ON DELETE NO ACTION,
+    sender_key_version BIGINT            NOT NULL,
+    content            TEXT              NOT NULL,
+    message_type       chat_message_type NOT NULL DEFAULT 'text',
+    reply_to_id        BIGINT            REFERENCES chat_records (id) ON DELETE SET NULL,
+    is_edited          BOOLEAN           NOT NULL DEFAULT FALSE,
+    is_deleted         BOOLEAN           NOT NULL DEFAULT FALSE,
+    created_at         TIMESTAMPTZ       NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
 

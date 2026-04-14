@@ -11,17 +11,25 @@ import (
 )
 
 const (
-	tokenKeyPrefix   = "email_verify:token:"
-	accountKeyPrefix = "email_verify:account:"
+	defaultNamespace = "email_verify"
 )
 
 type VerificationStore struct {
-	cache    cache.Cache
-	cacheTTL time.Duration
+	cache     cache.Cache
+	cacheTTL  time.Duration
+	namespace string
 }
 
 func NewVerificationStore(c cache.Cache, cacheTTL time.Duration) *VerificationStore {
-	return &VerificationStore{cache: c, cacheTTL: cacheTTL}
+	return NewVerificationStoreWithNamespace(c, cacheTTL, defaultNamespace)
+}
+
+func NewVerificationStoreWithNamespace(c cache.Cache, cacheTTL time.Duration, namespace string) *VerificationStore {
+	return &VerificationStore{
+		cache:     c,
+		cacheTTL:  cacheTTL,
+		namespace: namespace,
+	}
 }
 
 var _ port.VerificationStore = (*VerificationStore)(nil)
@@ -32,14 +40,14 @@ func (s *VerificationStore) Store(ctx context.Context, token string, session por
 		return err
 	}
 	storeTTL := s.storeTTL(ttl)
-	if err := s.cache.Set(ctx, tokenCacheKey(token), payload, storeTTL); err != nil {
+	if err := s.cache.Set(ctx, s.tokenCacheKey(token), payload, storeTTL); err != nil {
 		return err
 	}
-	return s.cache.Set(ctx, accountCacheKey(session.AccountID), []byte(token), storeTTL)
+	return s.cache.Set(ctx, s.accountCacheKey(session.AccountID), []byte(token), storeTTL)
 }
 
 func (s *VerificationStore) Get(ctx context.Context, token string) (port.VerificationSession, bool, error) {
-	data, ok, err := s.cache.Get(ctx, tokenCacheKey(token))
+	data, ok, err := s.cache.Get(ctx, s.tokenCacheKey(token))
 	if err != nil {
 		return port.VerificationSession{}, false, err
 	}
@@ -55,7 +63,7 @@ func (s *VerificationStore) Get(ctx context.Context, token string) (port.Verific
 }
 
 func (s *VerificationStore) FindTokenByAccountID(ctx context.Context, accountID int64) (string, bool, error) {
-	data, ok, err := s.cache.Get(ctx, accountCacheKey(accountID))
+	data, ok, err := s.cache.Get(ctx, s.accountCacheKey(accountID))
 	if err != nil {
 		return "", false, err
 	}
@@ -69,16 +77,16 @@ func (s *VerificationStore) FindTokenByAccountID(ctx context.Context, accountID 
 		return "", false, err
 	}
 	if !sessionOK {
-		if err := s.cache.Delete(ctx, accountCacheKey(accountID)); err != nil {
+		if err := s.cache.Delete(ctx, s.accountCacheKey(accountID)); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
 	}
 	if isSessionExpired(session, time.Now().UTC()) {
-		if err := s.cache.Delete(ctx, accountCacheKey(accountID)); err != nil {
+		if err := s.cache.Delete(ctx, s.accountCacheKey(accountID)); err != nil {
 			return "", false, err
 		}
-		if err := s.cache.Delete(ctx, tokenCacheKey(token)); err != nil {
+		if err := s.cache.Delete(ctx, s.tokenCacheKey(token)); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
@@ -93,19 +101,23 @@ func (s *VerificationStore) Delete(ctx context.Context, token string) error {
 		return err
 	}
 	if ok {
-		if err := s.cache.Delete(ctx, accountCacheKey(session.AccountID)); err != nil {
+		if err := s.cache.Delete(ctx, s.accountCacheKey(session.AccountID)); err != nil {
 			return err
 		}
 	}
-	return s.cache.Delete(ctx, tokenCacheKey(token))
+	return s.cache.Delete(ctx, s.tokenCacheKey(token))
 }
 
-func tokenCacheKey(token string) string {
-	return tokenKeyPrefix + token
+func (s *VerificationStore) tokenCacheKey(token string) string {
+	return cacheKey(s.namespace, "token", token)
 }
 
-func accountCacheKey(accountID int64) string {
-	return accountKeyPrefix + fmt.Sprintf("%d", accountID)
+func (s *VerificationStore) accountCacheKey(accountID int64) string {
+	return cacheKey(s.namespace, "account", fmt.Sprintf("%d", accountID))
+}
+
+func cacheKey(namespace, kind, value string) string {
+	return fmt.Sprintf("%s:%s:%s", namespace, kind, value)
 }
 
 func (s *VerificationStore) storeTTL(sessionTTL time.Duration) time.Duration {

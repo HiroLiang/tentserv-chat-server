@@ -15,10 +15,11 @@ import (
 
 // SendPayload is the payload for a "chat.send" message.
 type SendPayload struct {
-	RoomID    string `json:"room_id"`
-	Content   string `json:"content"`
-	Type      string `json:"type"`
-	ReplyToID *int64 `json:"reply_to_id,omitempty"`
+	RoomID           string `json:"room_id"`
+	Content          string `json:"content"`
+	Type             string `json:"type"`
+	ReplyToID        *int64 `json:"reply_to_id,omitempty"`
+	SenderKeyVersion int64  `json:"sender_key_version"`
 }
 
 // MessageHandler handles "chat.send" messages.
@@ -60,10 +61,11 @@ func (h *MessageHandler) Handle(client *ws.Client, payload json.RawMessage) erro
 			},
 		},
 		Data: chatUseCase.SendMessageInput{
-			RoomID:    roomID,
-			Content:   p.Content,
-			Type:      msgType,
-			ReplyToID: p.ReplyToID,
+			RoomID:           roomID,
+			Content:          p.Content,
+			Type:             msgType,
+			ReplyToID:        p.ReplyToID,
+			SenderKeyVersion: p.SenderKeyVersion,
 		},
 	}
 
