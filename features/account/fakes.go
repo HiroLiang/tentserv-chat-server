@@ -17,6 +17,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
 	domainSecurity "github.com/HiroLiang/tentserv-chat-server/internal/domain/security"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/transaction"
 	domainuser "github.com/HiroLiang/tentserv-chat-server/internal/domain/user"
@@ -93,6 +94,16 @@ func (d *Deps) LastSessionUserID() shared.UserID {
 	return d.sessionManager.lastCreated.UserID
 }
 
+func (d *Deps) LastSessionAccountID() shared.AccountID {
+	d.sessionManager.mu.Lock()
+	defer d.sessionManager.mu.Unlock()
+
+	if d.sessionManager.lastCreated == nil {
+		return 0
+	}
+	return d.sessionManager.lastCreated.AccountID
+}
+
 func (d *Deps) LastSessionDeviceID() shared.DeviceID {
 	d.sessionManager.mu.Lock()
 	defer d.sessionManager.mu.Unlock()
@@ -101,6 +112,41 @@ func (d *Deps) LastSessionDeviceID() shared.DeviceID {
 		return shared.DeviceID{}
 	}
 	return d.sessionManager.lastCreated.DeviceID
+}
+
+func (d *Deps) LastSessionParticipantID() participant.ID {
+	userID := d.LastSessionUserID()
+	if userID == 0 {
+		return 0
+	}
+	participantData, err := d.participantRepo.FindByUserID(context.Background(), userID)
+	if err != nil || participantData == nil {
+		return 0
+	}
+	return participantData.ID
+}
+
+func (d *Deps) LastSessionAccountSnapshot() *domainaccount.Account {
+	accountID := d.LastSessionAccountID()
+	if accountID == 0 {
+		return nil
+	}
+	accountData, err := d.accountRepo.FindByID(context.Background(), accountID)
+	if err != nil || accountData == nil {
+		return nil
+	}
+	return accountData
+}
+
+func (d *Deps) LastRegisteredAccountDevice() *domainaccount.AccountDevice {
+	d.accountRepo.mu.Lock()
+	defer d.accountRepo.mu.Unlock()
+
+	if d.accountRepo.lastRegisteredDevice == nil {
+		return nil
+	}
+	device := *d.accountRepo.lastRegisteredDevice
+	return &device
 }
 
 func (d *Deps) LastAccessToken() auth.AccessToken {
@@ -152,7 +198,14 @@ func (d *Deps) RegisterUseCases(
 func (d *Deps) LoginUseCases(
 	uow transaction.UnitOfWork,
 	hasher appSecurity.Hasher,
-) (*authUseCase.LoginUseCase, *authUseCase.LogoutUseCase, *authUseCase.GetProfileUseCase) {
+	selfSyncRepo selfsenderkeysync.Repository,
+) (
+	*authUseCase.LoginUseCase,
+	*authUseCase.LogoutUseCase,
+	*authUseCase.GetProfileUseCase,
+	*authUseCase.VerifyLoginDeviceUseCase,
+	*authUseCase.ResendLoginDeviceVerificationUseCase,
+) {
 	loginUseCase := authUseCase.NewLoginUseCase(
 		uow,
 		hasher,
@@ -164,7 +217,7 @@ func (d *Deps) LoginUseCases(
 		d.roleRepo,
 		d.deviceRepo,
 		d.participantRepo,
-		nil,
+		selfSyncRepo,
 		d.email,
 		func(string, string, string, string, string, time.Time) appEmail.EmailBuilder {
 			return bddEmailBuilder{}
@@ -175,7 +228,26 @@ func (d *Deps) LoginUseCases(
 	)
 	logoutUseCase := authUseCase.NewLogoutUseCase(d.sessionManager)
 	profileUseCase := authUseCase.NewGetProfileUseCase(d.accountRepo, d.userRepo)
-	return loginUseCase, logoutUseCase, profileUseCase
+	verifyLoginDeviceUseCase := authUseCase.NewVerifyLoginDeviceUseCase(
+		uow,
+		d.sessionManager,
+		d.store,
+		d.accountRepo,
+		d.userRepo,
+		d.roleRepo,
+		d.deviceRepo,
+		d.participantRepo,
+		selfSyncRepo,
+	)
+	resendLoginDeviceVerificationUseCase := authUseCase.NewResendLoginDeviceVerificationUseCase(
+		d.store,
+		d.accountRepo,
+		d.email,
+		func(string, string, string, string, string, string, time.Time) appEmail.EmailBuilder {
+			return bddEmailBuilder{}
+		},
+	)
+	return loginUseCase, logoutUseCase, profileUseCase, verifyLoginDeviceUseCase, resendLoginDeviceVerificationUseCase
 }
 
 type bddAccountRepo struct {
@@ -313,6 +385,9 @@ func (r *bddAccountRepo) Update(_ context.Context, acc *domainaccount.Account) e
 	defer r.mu.Unlock()
 
 	updated := cloneBDDAccount(acc)
+	if existing, ok := r.accountsByID[updated.ID]; ok {
+		updated.Devices = append([]domainaccount.AccountDevice(nil), existing.Devices...)
+	}
 	r.accountsByID[updated.ID] = updated
 	r.accountsByEmail[updated.Email] = updated
 	r.accountsByName[updated.AccountName] = updated
@@ -328,6 +403,17 @@ func (r *bddAccountRepo) RegisterDevice(_ context.Context, device *domainaccount
 	r.registerDeviceCalls++
 	copied := *device
 	r.lastRegisteredDevice = &copied
+	acc, ok := r.accountsByID[device.AccountID]
+	if !ok {
+		return domainaccount.ErrAccountNotFound
+	}
+	for i := range acc.Devices {
+		if acc.Devices[i].DeviceID == device.DeviceID {
+			acc.Devices[i] = copied
+			return nil
+		}
+	}
+	acc.Devices = append(acc.Devices, copied)
 	return nil
 }
 

@@ -53,7 +53,11 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 			bddsupport.UOW{},
 			hasher,
 		)
-		loginUseCase, logoutUseCase, getProfileUseCase := accountBDD.LoginUseCases(bddsupport.UOW{}, hasher)
+		loginUseCase, logoutUseCase, getProfileUseCase, verifyLoginDeviceUseCase, resendLoginDeviceVerificationUseCase := accountBDD.LoginUseCases(
+			bddsupport.UOW{},
+			hasher,
+			e2eeBDD.SKR.SelfSyncRepository(),
+		)
 		deviceRegisterUseCase, deviceUpdateUseCase := deviceBDD.RegisterUseCases(bddsupport.UOW{})
 		e2eeUseCases := e2eeBDD.RegisterUseCases()
 		createSKRUseCase := e2eeBDD.SKR.RegisterCreateSenderKeyRequestUseCase()
@@ -78,7 +82,17 @@ func InitializeSuite(ctx *godog.TestSuiteContext) {
 		router := gin.New()
 		router.Use(middleware.AuthMiddleware(accountBDD.SessionManager(), accountBDD.UserRepo()))
 		router.Use(middleware.ContextMiddleware())
-		authHandler := accountHandler.NewAuthHandler(accountRegisterUseCase, loginUseCase, logoutUseCase, getProfileUseCase, verifyEmailUseCase, resendVerifyEmailUseCase, nil, nil, accountBDD.RegisterLimiter())
+		authHandler := accountHandler.NewAuthHandler(
+			accountRegisterUseCase,
+			loginUseCase,
+			logoutUseCase,
+			getProfileUseCase,
+			verifyEmailUseCase,
+			resendVerifyEmailUseCase,
+			verifyLoginDeviceUseCase,
+			resendLoginDeviceVerificationUseCase,
+			accountBDD.RegisterLimiter(),
+		)
 		authHandler.RegisterAuthRoutes(router.Group("/api/auth"))
 		deviceRoutes := deviceHandler.NewDeviceHandler(deviceRegisterUseCase, nil, deviceUpdateUseCase, nil, nil, nil)
 		deviceRoutes.RegisterPublicDeviceRoutes(router.Group("/api/device"))

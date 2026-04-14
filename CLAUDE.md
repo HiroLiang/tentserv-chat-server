@@ -19,6 +19,14 @@ go test ./internal/path/to/pkg -count=1 -v -run TestFunctionName
 
 Use `go test ./features -count=1 -v` whenever backend HTTP behavior changes.
 
+## HTTP Log Routing
+
+- `/api/device/*` logs: `../docs/agent-guides/device-lifecycle/SKILL.md`
+- `/api/auth/*` logs: `../docs/agent-guides/login-session/SKILL.md`
+- `/api/e2ee/key-policy`, `/api/e2ee/key-status/*`, `/api/e2ee/otp-prekeys`, or other bootstrap endpoints: `../docs/agent-guides/e2ee-key-bootstrap/SKILL.md`
+- `/api/e2ee/self-sender-key-sync*`, `/api/e2ee/sender-key`, `/api/e2ee/sender-key-request`, or `/api/e2ee/sender-key-distributions*`: `../docs/agent-guides/e2ee-sender-key/SKILL.md`
+- Backend access logs that only mirror runtime-owned chat startup are not enough to justify reading every E2EE guide. Follow the first abnormal endpoint, then hand off to `../docs/agent-guides/chat-runtime-sync/SKILL.md` only when the remaining symptom is runtime ownership.
+
 ## Architecture Rules
 
 - Keep Clean Architecture direction: `domain -> application -> infrastructure/interface`.

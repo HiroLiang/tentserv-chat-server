@@ -71,16 +71,17 @@ type GetKeyPolicyResponse struct {
 // Sender Key (used for both direct and group rooms)
 type UploadSenderKeyRequest struct {
 	RoomID              int64  `json:"room_id" binding:"required"`
-	ReceiverMemberID    int64  `json:"receiver_member_id" binding:"required"`
+	SenderMemberID      int64  `json:"sender_member_id" binding:"required"`
+	ReceiverUserID      int64  `json:"receiver_user_id" binding:"required"`
 	ReceiverDeviceID    string `json:"receiver_device_id"`
 	SenderKeyVersion    int64  `json:"sender_key_version" binding:"required"`
 	DistributionMessage string `json:"distribution_message" binding:"required"`
 }
 
 type SenderKeyItemResponse struct {
-	ChatMemberID     int64 `json:"chat_member_id"`
-	SenderDeviceID   string `json:"sender_device_id"`
-	SenderKeyVersion int64 `json:"sender_key_version"`
+	ChatMemberID     int64  `json:"chat_member_id"`
+	ProviderDeviceID string `json:"provider_device_id"`
+	SenderKeyVersion int64  `json:"sender_key_version"`
 }
 
 type GetSenderKeysResponse struct {
@@ -90,24 +91,26 @@ type GetSenderKeysResponse struct {
 // Sender Key Request
 type CreateSenderKeyRequestRequest struct {
 	RoomID            int64  `json:"room_id"             binding:"required"`
-	ProviderMemberID  int64  `json:"provider_member_id"  binding:"required"`
+	ProviderUserID    int64  `json:"provider_user_id"    binding:"required"`
 	ProviderDeviceID  string `json:"provider_device_id"  binding:"required"`
+	SenderMemberID    int64  `json:"sender_member_id"    binding:"required"`
 	RequesterDeviceID string `json:"requester_device_id"`
 }
 
-type SenderKeyDeviceRefResponse struct {
+type SenderKeyRouteRefResponse struct {
+	UserID   int64  `json:"user_id"`
 	MemberID int64  `json:"member_id"`
 	DeviceID string `json:"device_id"`
 }
 
 // Sender Key Distribution Status
 type GetSenderKeyDistributionStatusResponse struct {
-	OwnDeviceSenderKeyExists bool                         `json:"own_device_sender_key_exists"`
-	RequestableSources       []SenderKeyDeviceRefResponse `json:"requestable_sources"`
-	AvailableFromSources     []SenderKeyDeviceRefResponse `json:"available_from_sources"`
-	AvailableToTargets       []SenderKeyDeviceRefResponse `json:"available_to_targets"`
-	PendingReceivers         []SenderKeyDeviceRefResponse `json:"pending_receivers"`
-	PendingFromSources       []SenderKeyDeviceRefResponse `json:"pending_from_sources"`
+	OwnMemberSenderKeyExists bool                        `json:"own_member_sender_key_exists"`
+	RequestableSources       []SenderKeyRouteRefResponse `json:"requestable_sources"`
+	AvailableFromSources     []SenderKeyRouteRefResponse `json:"available_from_sources"`
+	AvailableToTargets       []SenderKeyRouteRefResponse `json:"available_to_targets"`
+	PendingReceivers         []SenderKeyRouteRefResponse `json:"pending_receivers"`
+	PendingFromSources       []SenderKeyRouteRefResponse `json:"pending_from_sources"`
 }
 
 type PendingSenderKeyDistributionItemResponse struct {

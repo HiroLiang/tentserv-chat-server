@@ -67,7 +67,7 @@ Feature: E2EE key bootstrap after login
     Then the response status should be 200
     And E2EE key status should expose identity "beta", signed pre-key "beta", key id 2, and 2 OTP keys for device "11111111-1111-1111-1111-111111111111"
 
-  Scenario: Device-scoped keys remain isolated across multiple login devices
+  Scenario: Device-scoped keys remain isolated across multiple verified login devices
     Given a registered login device "22222222-2222-2222-2222-222222222222" named "Hiro iPhone" exists
     When I upload E2EE identity key "alpha" for device "11111111-1111-1111-1111-111111111111"
     Then the response status should be 200
@@ -76,6 +76,9 @@ Feature: E2EE key bootstrap after login
     When I upload 2 E2EE one-time pre-keys starting at key id 1 for device "11111111-1111-1111-1111-111111111111"
     Then the response status should be 200
     When I login with identifier "e2ee-login@example.com", password "correct-password", and device "22222222-2222-2222-2222-222222222222"
+    Then the response status should be 202
+    And login response should require device verification and include a verification token and expiry timestamp
+    When I verify the login device using the stored token
     Then the response status should be 200
     And login response should include a bearer token
     When I upload E2EE identity key "beta" for device "22222222-2222-2222-2222-222222222222"

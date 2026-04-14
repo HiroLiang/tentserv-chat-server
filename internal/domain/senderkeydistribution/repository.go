@@ -19,6 +19,7 @@ type Repository interface {
 
 	UpsertAvailable(ctx context.Context, dist *SenderKeyDistribution) error
 	FindLatest(ctx context.Context, senderMemberID chatmember.ID, senderDeviceID shared.DeviceID, receiverMemberID chatmember.ID, receiverDeviceID shared.DeviceID) (*SenderKeyDistribution, error)
+	FindLatestForReceiver(ctx context.Context, senderMemberID chatmember.ID, receiverMemberID chatmember.ID, receiverDeviceID shared.DeviceID) (*SenderKeyDistribution, error)
 	FindAvailableByRoomAndReceiver(ctx context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID, receiverDeviceID shared.DeviceID) ([]*SenderKeyDistribution, error)
 	FindByID(ctx context.Context, id ID) (*SenderKeyDistribution, error)
 	MarkConsumed(ctx context.Context, id ID) error

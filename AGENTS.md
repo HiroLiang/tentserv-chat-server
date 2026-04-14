@@ -14,6 +14,14 @@ This repo owns the Go REST API, WebSocket server, application use cases, domain 
 4. Read this file to confirm the work belongs in the backend repo.
 5. Read `CLAUDE.md` for backend commands, architecture style, and test execution rules.
 
+## Endpoint Routing
+
+- `/api/device/*`: `../docs/agent-guides/device-lifecycle/SKILL.md`
+- `/api/auth/login`, `/api/auth/profile`, `/api/auth/verify-login-device`, or session restore side effects: `../docs/agent-guides/login-session/SKILL.md`
+- `/api/e2ee/key-policy`, `/api/e2ee/key-status/*`, `/api/e2ee/identity-key`, `/api/e2ee/signed-prekey`, or `/api/e2ee/otp-prekeys`: `../docs/agent-guides/e2ee-key-bootstrap/SKILL.md`
+- `/api/e2ee/self-sender-key-sync*`, `/api/e2ee/sender-key-request`, `/api/e2ee/sender-key`, or `/api/e2ee/sender-key-distributions*`: `../docs/agent-guides/e2ee-sender-key/SKILL.md`
+- `/ws` or runtime-owned startup symptoms after the HTTP contract already looks correct: pair backend investigation with `../docs/agent-guides/chat-runtime-sync/SKILL.md`
+
 ## Boundaries
 
 - Do not edit `../tentserv-chat/` unless the selected business guide or API contract requires frontend or Rust changes.

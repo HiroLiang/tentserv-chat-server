@@ -323,6 +323,7 @@ func BuildUseCases(deps *Dependencies) *UseCases {
 			deps.SenderKeyRequestRepo,
 			deps.MemberSenderKeyRepo,
 			deps.SenderKeyDistributionRepo,
+			deps.SenderKeyReceiptRepo,
 			deps.Hub,
 		),
 		NotifyPendingSenderKeyDistributionsUseCase: e2eeUseCase.NewNotifyPendingSenderKeyDistributionsUseCase(

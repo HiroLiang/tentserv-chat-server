@@ -2,6 +2,7 @@ package e2ee
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,23 +16,28 @@ import (
 
 	accountfeatures "github.com/HiroLiang/tentserv-chat-server/features/account"
 	bddsupport "github.com/HiroLiang/tentserv-chat-server/features/support"
+	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatmember"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/chatroom"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/deliveryqueue"
+	domaindevice "github.com/HiroLiang/tentserv-chat-server/internal/domain/device"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysyncdistribution"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/cucumber/godog"
 )
 
 type steps struct {
 	*bddsupport.APITestContext
-	deps               *Deps
-	accountBDD         *accountfeatures.Deps
-	authHeader         string
-	start              time.Time
-	lastDistributionID int64
+	deps                       *Deps
+	accountBDD                 *accountfeatures.Deps
+	authHeader                 string
+	start                      time.Time
+	lastDistributionID         int64
+	lastSelfSyncDistributionID int64
 }
 
 type keyStatusResponse struct {
@@ -57,7 +63,7 @@ type keyBundleResponse struct {
 }
 
 type senderKeyDistributionStatusResponse struct {
-	OwnDeviceSenderKeyExists bool                     `json:"own_device_sender_key_exists"`
+	OwnMemberSenderKeyExists bool                     `json:"own_member_sender_key_exists"`
 	RequestableSources       []senderKeyDeviceRefStep `json:"requestable_sources"`
 	AvailableFromSources     []senderKeyDeviceRefStep `json:"available_from_sources"`
 	AvailableToTargets       []senderKeyDeviceRefStep `json:"available_to_targets"`
@@ -66,6 +72,7 @@ type senderKeyDistributionStatusResponse struct {
 }
 
 type senderKeyDeviceRefStep struct {
+	UserID   int64  `json:"user_id"`
 	MemberID int64  `json:"member_id"`
 	DeviceID string `json:"device_id"`
 }
@@ -88,6 +95,16 @@ type selfSenderKeySyncResponse struct {
 	RequesterCurrentDevice bool   `json:"requester_current_device"`
 	ProviderCurrentDevice  bool   `json:"provider_current_device"`
 	LastError              string `json:"last_error"`
+}
+
+type pendingSelfSenderKeySyncDistributionsResponse struct {
+	Distributions []struct {
+		DistributionID      int64  `json:"distribution_id"`
+		SenderMemberID      int64  `json:"sender_member_id"`
+		SenderDeviceID      string `json:"sender_device_id"`
+		SenderKeyVersion    int64  `json:"sender_key_version"`
+		DistributionMessage string `json:"distribution_message"`
+	} `json:"distributions"`
 }
 
 func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, accountBDD *accountfeatures.Deps) {
@@ -149,16 +166,32 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^an e2ee\.sender_key_needed event should have been broadcast for provider member (\d+)$`, s.senderKeyNeededEventShouldHaveBeenBroadcast)
 	ctx.Step(`^a self sender key sync exists for the logged in user with participant id (\d+), requester device "([^"]*)", and status "([^"]*)"$`, s.aSelfSenderKeySyncExistsForTheLoggedInUserWithoutProvider)
 	ctx.Step(`^a self sender key sync exists for the logged in user with participant id (\d+), requester device "([^"]*)", provider device "([^"]*)", and status "([^"]*)"$`, s.aSelfSenderKeySyncExistsForTheLoggedInUserWithProvider)
+	ctx.Step(`^the self sender key sync requester device "([^"]*)" is bound as "([^"]*)"$`, s.theSelfSenderKeySyncRequesterDeviceIsBoundAs)
+	ctx.Step(`^the self sender key sync provider device "([^"]*)" is bound as "([^"]*)"$`, s.theSelfSenderKeySyncProviderDeviceIsBoundAs)
+	ctx.Step(`^the current logged in user is available to sender key use cases$`, s.theCurrentLoggedInUserIsAvailableToSenderKeyUseCases)
+	ctx.Step(`^a self sender key sync distribution exists for the logged in user with participant id (\d+), room id (\d+), sender member id (\d+), requester device "([^"]*)", provider device "([^"]*)", and sender key version (\d+)$`, s.aSelfSenderKeySyncDistributionExistsForTheLoggedInUser)
+	ctx.Step(`^a self sender key sync distribution exists for the current logged in participant with room id (\d+), sender member id (\d+), requester device "([^"]*)", provider device "([^"]*)", and sender key version (\d+)$`, s.aSelfSenderKeySyncDistributionExistsForTheCurrentLoggedInParticipant)
 	ctx.Step(`^self sender key sync snapshot lookups will fail after mutation$`, s.selfSenderKeySyncSnapshotLookupsWillFailAfterMutation)
+	ctx.Step(`^I list pending self sender key sync distributions$`, s.iListPendingSelfSenderKeySyncDistributions)
+	ctx.Step(`^pending self sender key sync distributions should include sender member (\d+) device "([^"]*)" and version (\d+)$`, s.pendingSelfSenderKeySyncDistributionsShouldInclude)
+	ctx.Step(`^I mark the first pending self sender key sync distribution as "([^"]*)"$`, s.iMarkTheFirstPendingSelfSenderKeySyncDistributionAs)
+	ctx.Step(`^the first pending self sender key sync distribution should now be "([^"]*)"$`, s.theFirstPendingSelfSenderKeySyncDistributionShouldNowBe)
+	ctx.Step(`^a self sender key receipt should exist from sender member (\d+) device "([^"]*)" to requester device "([^"]*)" with version (\d+) and source "([^"]*)"$`, s.aSelfSenderKeyReceiptShouldExistFromSenderMemberDeviceToRequesterDeviceWithVersionAndSource)
 	ctx.Step(`^I accept the self sender key sync$`, s.iAcceptTheSelfSenderKeySync)
+	ctx.Step(`^I accept the self sender key sync as device "([^"]*)"$`, s.iAcceptTheSelfSenderKeySyncAsDevice)
+	ctx.Step(`^I mark the self sender key sync uploaded$`, s.iMarkTheSelfSenderKeySyncUploaded)
+	ctx.Step(`^I mark the self sender key sync uploaded as device "([^"]*)"$`, s.iMarkTheSelfSenderKeySyncUploadedAsDevice)
 	ctx.Step(`^I complete the self sender key sync$`, s.iCompleteTheSelfSenderKeySync)
 	ctx.Step(`^I fail the self sender key sync with last error "([^"]*)" and retryable (true|false)$`, s.iFailTheSelfSenderKeySyncWithLastErrorAndRetryable)
 	ctx.Step(`^the self sender key sync response should show status "([^"]*)"$`, s.theSelfSenderKeySyncResponseShouldShowStatus)
+	ctx.Step(`^the self sender key sync requester device "([^"]*)" should now be bound as "([^"]*)"$`, s.theSelfSenderKeySyncRequesterDeviceShouldNowBeBoundAs)
 }
 
 func (s *steps) e2eeKeyBootstrapStateIsClean() error {
 	s.start = time.Now()
 	s.authHeader = ""
+	s.lastDistributionID = 0
+	s.lastSelfSyncDistributionID = 0
 	s.deps.Reset()
 
 	identity, signed, otp := s.deps.RepositoryCounts()
@@ -724,7 +757,8 @@ func (s *steps) e2eeEndpointRequest(endpoint, deviceID string) (method string, p
 	case "sender-key":
 		return http.MethodPost, "/api/e2ee/sender-key", map[string]any{
 			"room_id":              1,
-			"receiver_member_id":   202,
+			"sender_member_id":     101,
+			"receiver_user_id":     202,
 			"sender_key_version":   1,
 			"distribution_message": base64.StdEncoding.EncodeToString([]byte("distribution-message")),
 		}, nil
@@ -741,7 +775,9 @@ func (s *steps) e2eeEndpointRequest(endpoint, deviceID string) (method string, p
 	case "sender-key-request":
 		return http.MethodPost, "/api/e2ee/sender-key-request", map[string]any{
 			"room_id":            1,
-			"provider_member_id": 202,
+			"provider_user_id":   202,
+			"provider_device_id": "00000000-0000-0000-0000-000000000202",
+			"sender_member_id":   202,
 		}, nil
 	default:
 		return "", "", nil, fmt.Errorf("unsupported E2EE endpoint %q", endpoint)
@@ -1099,14 +1135,23 @@ func (s *steps) iProvideASenderKeyDistribution(roomID, receiverMemberID, version
 	if err != nil {
 		return err
 	}
+	senderMemberID, err := s.currentLoggedInMemberIDInRoom(chatroom.ID(roomID))
+	if err != nil {
+		return err
+	}
+	receiverUserID, err := s.userIDForMember(chatmember.ID(receiverMemberID))
+	if err != nil {
+		return err
+	}
 
 	fmt.Println("Given: authenticated provider uploads a sealed sender key distribution")
-	fmt.Printf("Input: room_id=%d receiver_member_id=%d sender_key_version=%d\n", roomID, receiverMemberID, version)
+	fmt.Printf("Input: room_id=%d sender_member_id=%d receiver_user_id=%d sender_key_version=%d\n", roomID, senderMemberID, receiverUserID, version)
 	fmt.Println("Action: POST /api/e2ee/sender-key")
 
 	payload := map[string]any{
 		"room_id":              roomID,
-		"receiver_member_id":   receiverMemberID,
+		"sender_member_id":     int64(senderMemberID),
+		"receiver_user_id":     int64(receiverUserID),
 		"sender_key_version":   version,
 		"distribution_message": base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("dist-%d", version))),
 	}
@@ -1151,10 +1196,10 @@ func (s *steps) senderKeyDistributionStatusShouldShowOwnKeyExists(expected strin
 		return err
 	}
 	expectedValue := expected == "true"
-	if body.OwnDeviceSenderKeyExists != expectedValue {
-		return fmt.Errorf("expected own_device_sender_key_exists=%t, got %t", expectedValue, body.OwnDeviceSenderKeyExists)
+	if body.OwnMemberSenderKeyExists != expectedValue {
+		return fmt.Errorf("expected own_member_sender_key_exists=%t, got %t", expectedValue, body.OwnMemberSenderKeyExists)
 	}
-	fmt.Printf("Output: own_device_sender_key_exists=%t\n", body.OwnDeviceSenderKeyExists)
+	fmt.Printf("Output: own_member_sender_key_exists=%t\n", body.OwnMemberSenderKeyExists)
 	fmt.Println("Mutation: none")
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	return nil
@@ -1383,13 +1428,13 @@ func (s *steps) senderKeyNeededEventShouldHaveBeenBroadcast(providerMemberID int
 		var envelope struct {
 			Type    string `json:"type"`
 			Payload struct {
-				ProviderMemberID int64 `json:"provider_member_id"`
+				SenderMemberID int64 `json:"sender_member_id"`
 			} `json:"payload"`
 		}
 		if err := json.Unmarshal(msg.Payload, &envelope); err != nil {
 			continue
 		}
-		if envelope.Type == "e2ee.sender_key_needed" && envelope.Payload.ProviderMemberID == providerMemberID {
+		if envelope.Type == "e2ee.sender_key_needed" && envelope.Payload.SenderMemberID == providerMemberID {
 			fmt.Printf("Output: found e2ee.sender_key_needed for provider_member_id=%d\n", providerMemberID)
 			fmt.Println("Mutation: none")
 			fmt.Printf("Duration: %s\n", time.Since(start))
@@ -1412,9 +1457,41 @@ func (s *steps) defaultReadyDeviceIDForMember(memberID chatmember.ID) (shared.De
 	return defaultReadyAccountDevice(shared.AccountID(*participantData.UserID), *participantData.UserID).DeviceID, nil
 }
 
+func (s *steps) userIDForMember(memberID chatmember.ID) (shared.UserID, error) {
+	member, err := s.deps.SKR.chatMemberRepo.FindByID(nil, memberID)
+	if err != nil {
+		return 0, err
+	}
+	participantData, err := s.deps.SKR.participantRepo.FindByID(nil, member.ParticipantID)
+	if err != nil || participantData.UserID == nil {
+		return 0, fmt.Errorf("participant user not found for member %d", memberID)
+	}
+	return *participantData.UserID, nil
+}
+
+func (s *steps) currentLoggedInMemberIDInRoom(roomID chatroom.ID) (chatmember.ID, error) {
+	userID := s.accountBDD.LastSessionUserID()
+	if userID == 0 {
+		return 0, fmt.Errorf("no logged in user available for sender member lookup")
+	}
+	participantData, err := s.deps.SKR.participantRepo.FindByUserID(context.Background(), userID)
+	if err != nil {
+		return 0, err
+	}
+	member, err := s.deps.SKR.chatMemberRepo.FindByRoomAndParticipant(context.Background(), roomID, participantData.ID)
+	if err != nil {
+		return 0, err
+	}
+	return member.ID, nil
+}
+
 func (s *steps) iCreateASenderKeyRequestForRoomAndProviderMember(roomID, providerMemberID int64) error {
 	s.start = time.Now()
 	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	providerUserID, err := s.userIDForMember(chatmember.ID(providerMemberID))
 	if err != nil {
 		return err
 	}
@@ -1423,13 +1500,14 @@ func (s *steps) iCreateASenderKeyRequestForRoomAndProviderMember(roomID, provide
 		return err
 	}
 	fmt.Println("Given: authenticated user creates a sender key request")
-	fmt.Printf("Input: room_id=%d provider_member_id=%d provider_device_id=%s\n", roomID, providerMemberID, providerDeviceID.String())
+	fmt.Printf("Input: room_id=%d provider_user_id=%d sender_member_id=%d provider_device_id=%s\n", roomID, providerUserID, providerMemberID, providerDeviceID.String())
 	fmt.Println("Action: POST /api/e2ee/sender-key-request")
 
 	payload := map[string]any{
 		"room_id":            roomID,
-		"provider_member_id": providerMemberID,
+		"provider_user_id":   int64(providerUserID),
 		"provider_device_id": providerDeviceID.String(),
+		"sender_member_id":   providerMemberID,
 	}
 	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/sender-key-request", payload, authHeader); err != nil {
 		return err
@@ -1544,6 +1622,179 @@ func (s *steps) seedSelfSenderKeySync(participantID int64, requesterDeviceIDText
 	return nil
 }
 
+func (s *steps) theSelfSenderKeySyncRequesterDeviceIsBoundAs(deviceIDText, statusText string) error {
+	return s.seedSelfSenderKeySyncAccountBinding(deviceIDText, statusText, true)
+}
+
+func (s *steps) theSelfSenderKeySyncProviderDeviceIsBoundAs(deviceIDText, statusText string) error {
+	return s.seedSelfSenderKeySyncAccountBinding(deviceIDText, statusText, false)
+}
+
+func (s *steps) seedSelfSenderKeySyncAccountBinding(deviceIDText, statusText string, requester bool) error {
+	s.start = time.Now()
+	accountID := s.accountBDD.LastSessionAccountID()
+	if accountID == 0 {
+		return fmt.Errorf("no logged in user available for self sender key sync binding setup")
+	}
+	deviceID, err := shared.ParseDeviceID(deviceIDText)
+	if err != nil {
+		return err
+	}
+	status := domainaccount.DeviceStatus(statusText)
+	switch status {
+	case domainaccount.DeviceStatusPendingVerification, domainaccount.DeviceStatusPendingSync, domainaccount.DeviceStatusSyncing, domainaccount.DeviceStatusReady:
+	default:
+		return fmt.Errorf("unknown device status %q", statusText)
+	}
+
+	roleLabel := "provider"
+	if requester {
+		roleLabel = "requester"
+	}
+	fmt.Printf("Given: the self sender key sync %s device is bound to the account\n", roleLabel)
+	fmt.Printf("Input: account_id=%d device_id=%s status=%s\n", accountID, deviceIDText, statusText)
+	fmt.Println("Action: seed account and device repositories for self sync snapshots")
+	s.deps.SKR.SeedAccountBinding(accountID, deviceID, fmt.Sprintf("%s-device", roleLabel), domaindevice.MacOS, status)
+	fmt.Printf("Output: device_bound=true binding_status=%s\n", status)
+	fmt.Println("Mutation: accounts_devices fake state expanded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theCurrentLoggedInUserIsAvailableToSenderKeyUseCases() error {
+	s.start = time.Now()
+	userID := s.accountBDD.LastSessionUserID()
+	if userID == 0 {
+		return fmt.Errorf("no logged in user available for sender key participant seeding")
+	}
+	accountID := s.accountBDD.LastSessionAccountID()
+	if accountID == 0 {
+		return fmt.Errorf("no logged in account available for sender key participant seeding")
+	}
+	participantID := s.accountBDD.LastSessionParticipantID()
+	if participantID == 0 {
+		return fmt.Errorf("no logged in participant id available for sender key participant seeding")
+	}
+	accountData := s.accountBDD.LastSessionAccountSnapshot()
+	if accountData == nil {
+		return fmt.Errorf("no logged in account snapshot available for sender key participant seeding")
+	}
+
+	fmt.Println("Given: the logged in user should be available to sender key use cases")
+	fmt.Printf("Input: account_id=%d user_id=%d participant_id=%d device_bindings=%d\n", accountID, userID, participantID, len(accountData.Devices))
+	fmt.Println("Action: seed the sender key participant and account repositories from the authenticated login state")
+	s.deps.SKR.SeedParticipantForAccount(userID, accountID, participantID)
+	for index, binding := range accountData.Devices {
+		s.deps.SKR.SeedAccountBinding(accountID, binding.DeviceID, fmt.Sprintf("login-device-%d", index+1), domaindevice.MacOS, binding.Status)
+	}
+	registeredDevice := s.accountBDD.LastRegisteredAccountDevice()
+	if registeredDevice != nil {
+		s.deps.SKR.SeedAccountBinding(accountID, registeredDevice.DeviceID, "login-registered-device", domaindevice.MacOS, registeredDevice.Status)
+	}
+	fmt.Printf("Output: sender_key_participant_seeded=%t account_bindings_seeded=%d registered_device_seeded=%t\n", true, len(accountData.Devices), registeredDevice != nil)
+	fmt.Println("Mutation: sender key participant and account repositories expanded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) aSelfSenderKeySyncDistributionExistsForTheLoggedInUser(
+	participantID int64,
+	roomID int64,
+	senderMemberID int64,
+	requesterDeviceIDText, providerDeviceIDText string,
+	senderKeyVersion int64,
+) error {
+	return s.seedSelfSenderKeySyncDistribution(
+		participantID,
+		roomID,
+		senderMemberID,
+		requesterDeviceIDText,
+		providerDeviceIDText,
+		senderKeyVersion,
+	)
+}
+
+func (s *steps) aSelfSenderKeySyncDistributionExistsForTheCurrentLoggedInParticipant(
+	roomID int64,
+	senderMemberID int64,
+	requesterDeviceIDText, providerDeviceIDText string,
+	senderKeyVersion int64,
+) error {
+	userID := s.accountBDD.LastSessionUserID()
+	if userID == 0 {
+		return fmt.Errorf("no logged in user available for current participant self sender key sync distribution setup")
+	}
+	currentParticipant, err := s.deps.SKR.participantRepo.FindByUserID(context.Background(), userID)
+	if err != nil {
+		return err
+	}
+	return s.seedSelfSenderKeySyncDistribution(
+		int64(currentParticipant.ID),
+		roomID,
+		senderMemberID,
+		requesterDeviceIDText,
+		providerDeviceIDText,
+		senderKeyVersion,
+	)
+}
+
+func (s *steps) seedSelfSenderKeySyncDistribution(
+	participantID int64,
+	roomID int64,
+	senderMemberID int64,
+	requesterDeviceIDText, providerDeviceIDText string,
+	senderKeyVersion int64,
+) error {
+	s.start = time.Now()
+	requesterDeviceID, err := shared.ParseDeviceID(requesterDeviceIDText)
+	if err != nil {
+		return err
+	}
+	providerDeviceID, err := shared.ParseDeviceID(providerDeviceIDText)
+	if err != nil {
+		return err
+	}
+
+	syncState, err := s.deps.SKR.selfSyncRepo.FindByParticipantID(context.Background(), participant.ID(participantID))
+	if err != nil {
+		return err
+	}
+	s.deps.SKR.SeedRoomMember(participant.ID(participantID), chatmember.ID(senderMemberID), chatroom.ID(roomID))
+	rowsKey := s.deps.SKR.selfSyncCopyRepo.key(syncState.ID, participant.ID(participantID), requesterDeviceID)
+	rows := make([]*selfsenderkeysyncdistribution.SelfSenderKeySyncDistribution, 0)
+	for _, row := range s.deps.SKR.selfSyncCopyRepo.rows[rowsKey] {
+		rows = append(rows, s.deps.SKR.selfSyncCopyRepo.clone(row))
+	}
+	rows = append(rows, &selfsenderkeysyncdistribution.SelfSenderKeySyncDistribution{
+		SenderMemberID:      chatmember.ID(senderMemberID),
+		SenderDeviceID:      providerDeviceID,
+		SenderKeyVersion:    senderKeyVersion,
+		DistributionMessage: []byte(fmt.Sprintf("self-sync-%d", senderKeyVersion)),
+		Status:              selfsenderkeysyncdistribution.StatusAvailable,
+		CreatedAt:           time.Now().Add(-time.Minute),
+	})
+	err = s.deps.SKR.selfSyncCopyRepo.ReplaceForSync(
+		context.Background(),
+		syncState.ID,
+		participant.ID(participantID),
+		requesterDeviceID,
+		providerDeviceID,
+		rows,
+	)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Given: a pending self sender key sync distribution already exists for the requester")
+	fmt.Printf("Input: participant_id=%d room_id=%d sender_member_id=%d requester_device_id=%s provider_device_id=%s version=%d\n",
+		participantID, roomID, senderMemberID, requesterDeviceIDText, providerDeviceIDText, senderKeyVersion)
+	fmt.Println("Action: seed room membership and self sync copy rows")
+	fmt.Println("Output: self_sync_distribution_seeded=true")
+	fmt.Println("Mutation: self_sender_key_sync_distributions fake state expanded")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
 func (s *steps) selfSenderKeySyncSnapshotLookupsWillFailAfterMutation() error {
 	s.start = time.Now()
 	fmt.Println("Given: authoritative self sync snapshot lookups will fail after the mutation commits")
@@ -1556,19 +1807,179 @@ func (s *steps) selfSenderKeySyncSnapshotLookupsWillFailAfterMutation() error {
 	return nil
 }
 
-func (s *steps) iAcceptTheSelfSenderKeySync() error {
+func (s *steps) iListPendingSelfSenderKeySyncDistributions() error {
 	s.start = time.Now()
 	authHeader, err := s.e2eeAuthorizationHeader()
 	if err != nil {
 		return err
 	}
-	fmt.Println("Given: the current device tries to become the self sync provider")
-	fmt.Println("Action: POST /api/e2ee/self-sender-key-sync/accept")
-	if err := s.doE2EEJSONRequest(http.MethodPost, "/api/e2ee/self-sender-key-sync/accept", map[string]any{}, authHeader); err != nil {
+	fmt.Println("Given: the requester device asks for pending self sync distributions")
+	fmt.Println("Action: GET /api/e2ee/self-sender-key-sync/distributions/pending")
+	if err := s.DoRequestWithHeaders(http.MethodGet, "/api/e2ee/self-sender-key-sync/distributions/pending", map[string]string{
+		"Authorization": authHeader,
+		"X-Device-ID":   s.accountBDD.LastSessionDeviceID().String(),
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d body=%s\n", s.Response.StatusCode, string(s.ResponseBody))
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) pendingSelfSenderKeySyncDistributionsShouldInclude(senderMemberID int64, senderDeviceID string, version int64) error {
+	start := time.Now()
+	fmt.Println("Given: a pending self sender key sync distributions response is available")
+	fmt.Printf("Input: sender_member_id=%d sender_device_id=%s version=%d\n", senderMemberID, senderDeviceID, version)
+	fmt.Println("Action: decode pending self sync distributions response")
+
+	var body pendingSelfSenderKeySyncDistributionsResponse
+	if err := json.Unmarshal(s.ResponseBody, &body); err != nil {
+		return err
+	}
+	for _, dist := range body.Distributions {
+		if dist.SenderMemberID == senderMemberID && dist.SenderDeviceID == senderDeviceID && dist.SenderKeyVersion == version {
+			s.lastSelfSyncDistributionID = dist.DistributionID
+			fmt.Printf("Output: found_distribution_id=%d distributions=%d\n", dist.DistributionID, len(body.Distributions))
+			fmt.Println("Mutation: remembered_self_sync_distribution_id=true")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf("expected pending self sync distribution sender=%d sender_device=%s version=%d, got %+v", senderMemberID, senderDeviceID, version, body.Distributions)
+}
+
+func (s *steps) iMarkTheFirstPendingSelfSenderKeySyncDistributionAs(status string) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	if s.lastSelfSyncDistributionID == 0 {
+		return fmt.Errorf("no self sync distribution id recorded")
+	}
+	fmt.Println("Given: the requester device processes the first pending self sync distribution")
+	fmt.Printf("Input: distribution_id=%d status=%s\n", s.lastSelfSyncDistributionID, status)
+	fmt.Println("Action: POST /api/e2ee/self-sender-key-sync/distributions/:distribution_id/consume")
+	if err := s.doE2EEJSONRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/e2ee/self-sender-key-sync/distributions/%d/consume", s.lastSelfSyncDistributionID),
+		map[string]any{"status": status},
+		authHeader,
+	); err != nil {
 		return err
 	}
 	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
-	fmt.Println("Mutation: self sender key sync may advance to syncing")
+	fmt.Println("Mutation: self sync distribution status may change")
+	fmt.Printf("Duration: %s\n", time.Since(s.start))
+	return nil
+}
+
+func (s *steps) theFirstPendingSelfSenderKeySyncDistributionShouldNowBe(status string) error {
+	start := time.Now()
+	if s.lastSelfSyncDistributionID == 0 {
+		return fmt.Errorf("no self sync distribution id recorded")
+	}
+
+	fmt.Println("Given: the last self sync distribution id should now reflect the consume result")
+	fmt.Printf("Input: distribution_id=%d expected_status=%s\n", s.lastSelfSyncDistributionID, status)
+	fmt.Println("Action: inspect the self sync distribution fake repository")
+
+	expectedStatus := selfsenderkeysyncdistribution.Status(status)
+	for _, rows := range s.deps.SKR.selfSyncCopyRepo.rows {
+		if dist, ok := rows[selfsenderkeysyncdistribution.ID(s.lastSelfSyncDistributionID)]; ok {
+			fmt.Printf("Output: distribution_id=%d actual_status=%s\n", s.lastSelfSyncDistributionID, dist.Status)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			if dist.Status != expectedStatus {
+				return fmt.Errorf("expected self sync distribution id %d to be %s, got %s", s.lastSelfSyncDistributionID, status, dist.Status)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("expected self sync distribution id %d to exist", s.lastSelfSyncDistributionID)
+}
+
+func (s *steps) aSelfSenderKeyReceiptShouldExistFromSenderMemberDeviceToRequesterDeviceWithVersionAndSource(
+	senderMemberID int64,
+	senderDeviceIDText, requesterDeviceIDText string,
+	version int64,
+	source string,
+) error {
+	start := time.Now()
+	senderDeviceID, err := shared.ParseDeviceID(senderDeviceIDText)
+	if err != nil {
+		return err
+	}
+	requesterDeviceID, err := shared.ParseDeviceID(requesterDeviceIDText)
+	if err != nil {
+		return err
+	}
+	expectedSource := senderkeyreceipt.Source(source)
+	switch expectedSource {
+	case senderkeyreceipt.SourceDistribution, senderkeyreceipt.SourceSelfSync, senderkeyreceipt.SourceSenderKeys:
+	default:
+		return fmt.Errorf("unknown sender key receipt source %q", source)
+	}
+
+	fmt.Println("Given: the requester should have recorded a self sync sender key receipt")
+	fmt.Printf("Input: sender_member_id=%d sender_device_id=%s requester_device_id=%s version=%d source=%s\n",
+		senderMemberID, senderDeviceIDText, requesterDeviceIDText, version, source)
+	fmt.Println("Action: inspect the sender_key_receipts fake repository")
+
+	for _, receipt := range s.deps.SKR.receiptRepo.records {
+		if receipt.SenderMemberID == chatmember.ID(senderMemberID) &&
+			receipt.SenderDeviceID == senderDeviceID &&
+			receipt.ReceiverDeviceID == requesterDeviceID &&
+			receipt.SenderKeyVersion == version &&
+			receipt.Source == expectedSource {
+			fmt.Printf("Output: receiver_member_id=%d source=%s\n", receipt.ReceiverMemberID, receipt.Source)
+			fmt.Println("Mutation: none")
+			fmt.Printf("Duration: %s\n", time.Since(start))
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"expected self sync receipt sender=%d sender_device=%s requester_device=%s version=%d source=%s",
+		senderMemberID,
+		senderDeviceIDText,
+		requesterDeviceIDText,
+		version,
+		source,
+	)
+}
+
+func (s *steps) iAcceptTheSelfSenderKeySync() error {
+	return s.postSelfSenderKeySyncMutation("/api/e2ee/self-sender-key-sync/accept", "the current device tries to become the self sync provider", "self sender key sync may advance to syncing", "")
+}
+
+func (s *steps) iAcceptTheSelfSenderKeySyncAsDevice(deviceID string) error {
+	return s.postSelfSenderKeySyncMutation("/api/e2ee/self-sender-key-sync/accept", "the selected device tries to become the self sync provider", "self sender key sync may advance to syncing", deviceID)
+}
+
+func (s *steps) iMarkTheSelfSenderKeySyncUploaded() error {
+	return s.postSelfSenderKeySyncMutation("/api/e2ee/self-sender-key-sync/uploaded", "the provider device finished uploading self sync copies", "self sender key sync may advance to uploaded", "")
+}
+
+func (s *steps) iMarkTheSelfSenderKeySyncUploadedAsDevice(deviceID string) error {
+	return s.postSelfSenderKeySyncMutation("/api/e2ee/self-sender-key-sync/uploaded", "the selected provider device finished uploading self sync copies", "self sender key sync may advance to uploaded", deviceID)
+}
+
+func (s *steps) postSelfSenderKeySyncMutation(path, givenCopy, mutationCopy, deviceID string) error {
+	s.start = time.Now()
+	authHeader, err := s.e2eeAuthorizationHeader()
+	if err != nil {
+		return err
+	}
+	headers := s.authHeaders(authHeader, deviceID)
+	fmt.Printf("Given: %s\n", givenCopy)
+	fmt.Printf("Input: device_id=%s\n", headers["X-Device-ID"])
+	fmt.Printf("Action: POST %s\n", path)
+	if err := s.doJSONRequestWithHeaders(http.MethodPost, path, map[string]any{}, headers); err != nil {
+		return err
+	}
+	fmt.Printf("Output: status=%d\n", s.Response.StatusCode)
+	fmt.Printf("Mutation: %s\n", mutationCopy)
 	fmt.Printf("Duration: %s\n", time.Since(s.start))
 	return nil
 }
@@ -1632,6 +2043,40 @@ func (s *steps) theSelfSenderKeySyncResponseShouldShowStatus(expected string) er
 	fmt.Printf("Duration: %s\n", time.Since(start))
 	if body.Status != expected {
 		return fmt.Errorf("expected self sender key sync status %s, got %s", expected, body.Status)
+	}
+	return nil
+}
+
+func (s *steps) theSelfSenderKeySyncRequesterDeviceShouldNowBeBoundAs(deviceIDText, statusText string) error {
+	start := time.Now()
+	accountID := s.accountBDD.LastSessionAccountID()
+	if accountID == 0 {
+		return fmt.Errorf("no logged in user available for requester binding assertion")
+	}
+	deviceID, err := shared.ParseDeviceID(deviceIDText)
+	if err != nil {
+		return err
+	}
+	s.deps.SKR.accountRepo.mu.Lock()
+	accountData := s.deps.SKR.accountRepo.byID[accountID]
+	s.deps.SKR.accountRepo.mu.Unlock()
+	if accountData == nil {
+		return fmt.Errorf("account not found")
+	}
+	binding := accountData.GetDevice(deviceID)
+	if binding == nil {
+		return fmt.Errorf("expected account %d to have device binding %s", accountID, deviceIDText)
+	}
+
+	fmt.Println("Given: the requester device binding should reflect the self sync mutation")
+	fmt.Printf("Input: account_id=%d device_id=%s expected_status=%s\n", accountID, deviceIDText, statusText)
+	fmt.Println("Action: inspect the self sync account binding snapshot")
+	fmt.Printf("Output: actual_status=%s\n", binding.Status)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if string(binding.Status) != statusText {
+		return fmt.Errorf("expected requester device %s to be %s, got %s", deviceIDText, statusText, binding.Status)
 	}
 	return nil
 }

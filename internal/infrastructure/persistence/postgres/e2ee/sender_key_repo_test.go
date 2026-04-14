@@ -49,7 +49,7 @@ func TestSenderKeyRepository_UpsertLatestUsesConflictKeyOnMemberAndVersion(t *te
 	const senderDeviceID = "22222222-2222-2222-2222-222222222222"
 	now := time.Now()
 
-	mock.ExpectQuery(`(?s)INSERT INTO public\.member_sender_keys \(chat_member_id,sender_device_id,chain_id,sender_key_version,key_fingerprint\) VALUES \(\$1,\$2,\$3,\$4,\$5\) ON CONFLICT \(chat_member_id, sender_device_id, sender_key_version\) DO UPDATE SET.*RETURNING id, created_at`).
+	mock.ExpectQuery(`(?s)INSERT INTO public\.member_sender_keys \(chat_member_id,sender_device_id,chain_id,sender_key_version,key_fingerprint\) VALUES \(\$1,\$2,\$3,\$4,\$5\) ON CONFLICT \(chat_member_id, sender_key_version\) DO UPDATE SET.*RETURNING id, created_at`).
 		WithArgs(int64(chatmember.ID(302)), senderDeviceID, membersenderkey.ChainID(senderKeyVersion), senderKeyVersion, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(2, now))
 
@@ -67,25 +67,25 @@ func TestSenderKeyRepository_UpsertLatestUsesConflictKeyOnMemberAndVersion(t *te
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSenderKeyRepository_FindLatestForMemberUsesPostgresPlaceholdersAndOrdering(t *testing.T) {
+func TestSenderKeyRepository_FindLatestUsesPostgresPlaceholdersAndOrdering(t *testing.T) {
 	db, mock := testutil.SetupDB(t)
 	repo := NewSenderKeyRepository(sqlx.NewDb(db, "postgres"))
 	const senderDeviceID = "11111111-1111-1111-1111-111111111111"
 	now := time.Now()
 
-	mock.ExpectQuery(`SELECT DISTINCT ON \(sender_device_id\) id, chat_member_id, sender_device_id, chain_id, sender_key_version, key_fingerprint, created_at FROM public\.member_sender_keys WHERE chat_member_id = \$1 ORDER BY sender_device_id, sender_key_version DESC, chain_id DESC`).
+	mock.ExpectQuery(`SELECT id, chat_member_id, sender_device_id, chain_id, sender_key_version, key_fingerprint, created_at FROM public\.member_sender_keys WHERE chat_member_id = \$1 ORDER BY sender_key_version DESC, chain_id DESC, created_at DESC, id DESC LIMIT 1`).
 		WithArgs(int64(chatmember.ID(301))).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "chat_member_id", "sender_device_id", "chain_id", "sender_key_version", "key_fingerprint", "created_at",
 		}).AddRow(9, int64(chatmember.ID(301)), senderDeviceID, int64(101), int64(101), nil, now))
 
-	keys, err := repo.FindLatestForMember(context.Background(), chatmember.ID(301))
+	key, err := repo.FindLatest(context.Background(), chatmember.ID(301))
 
 	require.NoError(t, err)
-	require.Len(t, keys, 1)
-	assert.Equal(t, chatmember.ID(301), keys[0].ChatMemberID)
-	assert.Equal(t, mustSenderKeyRepoDeviceID(senderDeviceID), keys[0].SenderDeviceID)
-	assert.Equal(t, int64(101), keys[0].SenderKeyVersion)
+	require.NotNil(t, key)
+	assert.Equal(t, chatmember.ID(301), key.ChatMemberID)
+	assert.Equal(t, mustSenderKeyRepoDeviceID(senderDeviceID), key.SenderDeviceID)
+	assert.Equal(t, int64(101), key.SenderKeyVersion)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -95,7 +95,7 @@ func TestSenderKeyRepository_FindAllByMembersUsesPostgresPlaceholdersAndOrdering
 	const senderDeviceID = "22222222-2222-2222-2222-222222222222"
 	now := time.Now()
 
-	mock.ExpectQuery(`SELECT DISTINCT ON \(chat_member_id, sender_device_id\) id, chat_member_id, sender_device_id, chain_id, sender_key_version, key_fingerprint, created_at FROM public\.member_sender_keys WHERE chat_member_id IN \(\$1,\$2\) ORDER BY chat_member_id, sender_device_id, sender_key_version DESC, chain_id DESC`).
+	mock.ExpectQuery(`SELECT DISTINCT ON \(chat_member_id\) id, chat_member_id, sender_device_id, chain_id, sender_key_version, key_fingerprint, created_at FROM public\.member_sender_keys WHERE chat_member_id IN \(\$1,\$2\) ORDER BY chat_member_id, sender_key_version DESC, chain_id DESC, created_at DESC, id DESC`).
 		WithArgs(int64(chatmember.ID(301)), int64(chatmember.ID(302))).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "chat_member_id", "sender_device_id", "chain_id", "sender_key_version", "key_fingerprint", "created_at",

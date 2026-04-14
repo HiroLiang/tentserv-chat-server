@@ -135,7 +135,8 @@ func (u *ConsumeSenderKeyDistributionUseCase) notifyProvider(
 		Type: "e2ee.sender_key_needed",
 		Payload: wsSenderKeyNeededPayload{
 			RoomID:            int64(requesterMember.RoomID),
-			ProviderMemberID:  int64(providerMember.ID),
+			SenderMemberID:    int64(providerMember.ID),
+			ProviderUserID:    int64(*providerParticipant.UserID),
 			ProviderDeviceID:  providerDeviceID.String(),
 			RequesterMemberID: int64(requesterMember.ID),
 			RequesterUserID:   int64(*requesterParticipant.UserID),

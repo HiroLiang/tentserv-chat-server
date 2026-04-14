@@ -332,7 +332,8 @@ func (h *E2EEHandler) uploadSenderKey_(c *gin.Context) {
 	}
 	input := adapter.BuildInput(c, usecase.UploadSenderKeyInput{
 		RoomID:              req.RoomID,
-		ReceiverMemberID:    req.ReceiverMemberID,
+		SenderMemberID:      req.SenderMemberID,
+		ReceiverUserID:      req.ReceiverUserID,
 		ReceiverDeviceID:    req.ReceiverDeviceID,
 		SenderKeyVersion:    req.SenderKeyVersion,
 		DistributionMessage: req.DistributionMessage,
@@ -374,7 +375,7 @@ func (h *E2EEHandler) getSenderKeys_(c *gin.Context) {
 	for i, k := range out.Keys {
 		items[i] = SenderKeyItemResponse{
 			ChatMemberID:     k.ChatMemberID,
-			SenderDeviceID:   k.SenderDeviceID,
+			ProviderDeviceID: k.ProviderDeviceID,
 			SenderKeyVersion: k.SenderKeyVersion,
 		}
 	}
@@ -414,12 +415,12 @@ func (h *E2EEHandler) getSenderKeyDistributionStatus_(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GetSenderKeyDistributionStatusResponse{
-		OwnDeviceSenderKeyExists: out.OwnDeviceSenderKeyExists,
-		RequestableSources:       normalizeDeviceRefs(out.RequestableSources),
-		AvailableFromSources:     normalizeDeviceRefs(out.AvailableFromSources),
-		AvailableToTargets:       normalizeDeviceRefs(out.AvailableToTargets),
-		PendingReceivers:         normalizeDeviceRefs(out.PendingReceivers),
-		PendingFromSources:       normalizeDeviceRefs(out.PendingFromSources),
+		OwnMemberSenderKeyExists: out.OwnMemberSenderKeyExists,
+		RequestableSources:       normalizeRouteRefs(out.RequestableSources),
+		AvailableFromSources:     normalizeRouteRefs(out.AvailableFromSources),
+		AvailableToTargets:       normalizeRouteRefs(out.AvailableToTargets),
+		PendingReceivers:         normalizeRouteRefs(out.PendingReceivers),
+		PendingFromSources:       normalizeRouteRefs(out.PendingFromSources),
 	})
 }
 
@@ -526,8 +527,9 @@ func (h *E2EEHandler) createSenderKeyRequest_(c *gin.Context) {
 	}
 	input := adapter.BuildInput(c, usecase.CreateSenderKeyRequestInput{
 		RoomID:            req.RoomID,
-		ProviderMemberID:  req.ProviderMemberID,
+		ProviderUserID:    req.ProviderUserID,
 		ProviderDeviceID:  req.ProviderDeviceID,
+		SenderMemberID:    req.SenderMemberID,
 		RequesterDeviceID: req.RequesterDeviceID,
 	})
 	if _, err := h.createSenderKeyRequest.Execute(c.Request.Context(), input); err != nil {
@@ -537,13 +539,14 @@ func (h *E2EEHandler) createSenderKeyRequest_(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func normalizeDeviceRefs(refs []usecase.SenderKeyDeviceRef) []SenderKeyDeviceRefResponse {
+func normalizeRouteRefs(refs []usecase.SenderKeyRouteRef) []SenderKeyRouteRefResponse {
 	if refs == nil {
-		return []SenderKeyDeviceRefResponse{}
+		return []SenderKeyRouteRefResponse{}
 	}
-	items := make([]SenderKeyDeviceRefResponse, len(refs))
+	items := make([]SenderKeyRouteRefResponse, len(refs))
 	for i, ref := range refs {
-		items[i] = SenderKeyDeviceRefResponse{
+		items[i] = SenderKeyRouteRefResponse{
+			UserID:   ref.UserID,
 			MemberID: ref.MemberID,
 			DeviceID: ref.DeviceID,
 		}

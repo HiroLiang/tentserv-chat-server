@@ -155,17 +155,17 @@ CREATE TABLE IF NOT EXISTS public.member_sender_keys
 (
     id                   BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     chat_member_id       BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
-    sender_device_id     UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
+    sender_device_id     UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE, -- metadata only; canonical ownership is chat_member_id + sender_key_version
     chain_id             BIGINT    NOT NULL DEFAULT 1, -- mirrors sender_key_version for legacy compatibility
     sender_key_version   BIGINT    NOT NULL,           -- latest sender key version created by Rust
     key_fingerprint      TEXT,                         -- optional future debug / auditing metadata
     created_at           TIMESTAMP NOT NULL DEFAULT now(),
-    UNIQUE (chat_member_id, sender_device_id, sender_key_version)
+    UNIQUE (chat_member_id, sender_key_version)
 );
 
 -- Index for member-key lookup | 成員金鑰查詢索引 | メンバーキー検索インデックス
 CREATE INDEX IF NOT EXISTS idx_member_sender_keys_member
-    ON public.member_sender_keys (chat_member_id, sender_device_id);
+    ON public.member_sender_keys (chat_member_id);
 
 
 -- ============================================================
@@ -183,20 +183,20 @@ CREATE TABLE IF NOT EXISTS public.sender_key_receipts
 (
     id                 BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     sender_member_id   BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
-    sender_device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
-    receiver_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE,
+    sender_device_id   UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE, -- last provider device metadata
+    receiver_member_id BIGINT    NOT NULL REFERENCES public.chat_members (id) ON DELETE CASCADE, -- room/member metadata
     receiver_device_id UUID      NOT NULL REFERENCES public.devices (id) ON DELETE CASCADE,
     sender_key_version BIGINT    NOT NULL,
     source             TEXT      NOT NULL,
     updated_at         TIMESTAMP NOT NULL DEFAULT now(),
-    UNIQUE (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
+    UNIQUE (sender_member_id, receiver_device_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sender_key_receipts_sender
-    ON public.sender_key_receipts (sender_member_id, sender_device_id);
+    ON public.sender_key_receipts (sender_member_id);
 
 CREATE INDEX IF NOT EXISTS idx_sender_key_receipts_receiver
-    ON public.sender_key_receipts (receiver_member_id, receiver_device_id);
+    ON public.sender_key_receipts (receiver_device_id);
 
 
 -- ============================================================

@@ -18,6 +18,7 @@ import (
 func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *testing.T) {
 	const (
 		receiverUserID   = int64(51)
+		senderUserID     = int64(50)
 		roomID           = chatroom.ID(188)
 		senderMemberID   = chatmember.ID(341)
 		receiverMemberID = chatmember.ID(342)
@@ -26,21 +27,29 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 	)
 
 	receiverUID := shared.UserID(receiverUserID)
+	senderUID := shared.UserID(senderUserID)
+	senderParticipantID := participant.ID(250)
 	receiverParticipantID := participant.ID(251)
 
 	participantRepo := &senderKeyReqParticipantStub{
 		byUserID: map[shared.UserID]*participant.Participant{
+			senderUID:   {ID: senderParticipantID, Type: participant.UserType, UserID: &senderUID},
 			receiverUID: {ID: receiverParticipantID, Type: participant.UserType, UserID: &receiverUID},
 		},
 		byID: map[participant.ID]*participant.Participant{
+			senderParticipantID:   {ID: senderParticipantID, Type: participant.UserType, UserID: &senderUID},
 			receiverParticipantID: {ID: receiverParticipantID, Type: participant.UserType, UserID: &receiverUID},
 		},
 	}
 	chatMemberRepo := &notifyPendingChatMemberRepoStub{
 		byID: map[chatmember.ID]*chatmember.ChatMember{
+			senderMemberID:   {ID: senderMemberID, RoomID: roomID, ParticipantID: senderParticipantID},
 			receiverMemberID: {ID: receiverMemberID, RoomID: roomID, ParticipantID: receiverParticipantID},
 		},
 		byParticipant: map[participant.ID][]*chatmember.ChatMember{
+			senderParticipantID: {
+				{ID: senderMemberID, RoomID: roomID, ParticipantID: senderParticipantID},
+			},
 			receiverParticipantID: {
 				{ID: receiverMemberID, RoomID: roomID, ParticipantID: receiverParticipantID},
 			},
@@ -52,7 +61,9 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 			{int64(roomID), int64(receiverMemberID)}: {{
 				ID:               distributionID,
 				SenderMemberID:   senderMemberID,
+				SenderDeviceID:   senderKeyReqProviderDeviceID,
 				ReceiverMemberID: receiverMemberID,
+				ReceiverDeviceID: senderKeyReqRequesterDeviceID,
 				RoomID:           int64(roomID),
 				SenderKeyVersion: version,
 			}},
@@ -84,7 +95,11 @@ func TestNotifyPendingSenderKeyDistributions_ReplaysAvailableDistribution(t *tes
 	assert.Equal(t, int64(roomID), available.Payload.RoomID)
 	assert.Equal(t, int64(distributionID), available.Payload.DistributionID)
 	assert.Equal(t, int64(senderMemberID), available.Payload.SenderMemberID)
+	assert.Equal(t, senderUserID, available.Payload.SenderUserID)
+	assert.Equal(t, senderKeyReqProviderDeviceID.String(), available.Payload.SenderDeviceID)
 	assert.Equal(t, int64(receiverMemberID), available.Payload.ReceiverMemberID)
+	assert.Equal(t, receiverUserID, available.Payload.ReceiverUserID)
+	assert.Equal(t, senderKeyReqRequesterDeviceID.String(), available.Payload.ReceiverDeviceID)
 	assert.Equal(t, version, available.Payload.SenderKeyVersion)
 }
 

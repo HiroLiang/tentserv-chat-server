@@ -24,7 +24,8 @@ import (
 
 type UploadSenderKeyInput struct {
 	RoomID              int64
-	ReceiverMemberID    int64
+	SenderMemberID      int64
+	ReceiverUserID      int64
 	ReceiverDeviceID    string
 	SenderKeyVersion    int64
 	DistributionMessage string // base64
@@ -88,9 +89,16 @@ func (u *UploadSenderKeyUseCase) Execute(
 	if err != nil || senderMember.IsDeleted {
 		return nil, ErrNotRoomMember
 	}
+	if senderMember.ID != chatmember.ID(input.Data.SenderMemberID) {
+		return nil, ErrNotRoomMember
+	}
 
-	receiverMember, err := u.chatMemberRepo.FindByID(ctx, chatmember.ID(input.Data.ReceiverMemberID))
-	if err != nil || receiverMember.IsDeleted || receiverMember.RoomID != roomID {
+	receiverParticipant, err := u.participantRepo.FindByUserID(ctx, shared.UserID(input.Data.ReceiverUserID))
+	if err != nil || receiverParticipant.UserID == nil {
+		return nil, ErrNotRoomMember
+	}
+	receiverMember, err := u.chatMemberRepo.FindByRoomAndParticipant(ctx, roomID, receiverParticipant.ID)
+	if err != nil || receiverMember.IsDeleted {
 		return nil, ErrNotRoomMember
 	}
 

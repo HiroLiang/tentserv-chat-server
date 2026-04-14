@@ -208,6 +208,39 @@ func (r *SenderKeyDistributionRepository) FindLatest(
 	return toDistributionDomain(rec), nil
 }
 
+func (r *SenderKeyDistributionRepository) FindLatestForReceiver(
+	ctx context.Context,
+	senderMemberID chatmember.ID,
+	receiverMemberID chatmember.ID,
+	receiverDeviceID shared.DeviceID,
+) (*senderkeydistribution.SenderKeyDistribution, error) {
+	builder := distributionTable.Select(distributionTable.Columns...).
+		Where(
+			"sender_member_id = ? AND receiver_member_id = ? AND receiver_device_id = ?",
+			int64(senderMemberID),
+			int64(receiverMemberID),
+			receiverDeviceID.String(),
+		)
+
+	query, args, err := builder.
+		OrderBy("sender_key_version DESC", "distributed_at DESC", "id DESC").
+		Limit(1).
+		PlaceholderFormat(squirrel.Dollar).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest distribution by receiver query: %w", err)
+	}
+
+	rec, err := postgres.ScanOne[SenderKeyDistributionRecord](ctx, r.GetDB(ctx), query, args...)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, senderkeydistribution.ErrNotFound
+		}
+		return nil, fmt.Errorf("find latest distribution by receiver: %w", err)
+	}
+	return toDistributionDomain(rec), nil
+}
+
 func (r *SenderKeyDistributionRepository) FindAvailableByRoomAndReceiver(
 	ctx context.Context,
 	roomID chatroom.ID,

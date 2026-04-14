@@ -21,18 +21,19 @@ type GetSenderKeyDistributionStatusInput struct {
 	RoomID int64
 }
 
-type SenderKeyDeviceRef struct {
+type SenderKeyRouteRef struct {
+	UserID   int64
 	MemberID int64
 	DeviceID string
 }
 
 type GetSenderKeyDistributionStatusOutput struct {
-	OwnDeviceSenderKeyExists bool
-	RequestableSources       []SenderKeyDeviceRef
-	AvailableFromSources     []SenderKeyDeviceRef
-	AvailableToTargets       []SenderKeyDeviceRef
-	PendingReceivers         []SenderKeyDeviceRef
-	PendingFromSources       []SenderKeyDeviceRef
+	OwnMemberSenderKeyExists bool
+	RequestableSources       []SenderKeyRouteRef
+	AvailableFromSources     []SenderKeyRouteRef
+	AvailableToTargets       []SenderKeyRouteRef
+	PendingReceivers         []SenderKeyRouteRef
+	PendingFromSources       []SenderKeyRouteRef
 }
 
 type GetSenderKeyDistributionStatusUseCase struct {
@@ -86,26 +87,20 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 	}
 
 	out := &GetSenderKeyDistributionStatusOutput{
-		RequestableSources:   []SenderKeyDeviceRef{},
-		AvailableFromSources: []SenderKeyDeviceRef{},
-		AvailableToTargets:   []SenderKeyDeviceRef{},
-		PendingReceivers:     []SenderKeyDeviceRef{},
-		PendingFromSources:   []SenderKeyDeviceRef{},
+		RequestableSources:   []SenderKeyRouteRef{},
+		AvailableFromSources: []SenderKeyRouteRef{},
+		AvailableToTargets:   []SenderKeyRouteRef{},
+		PendingReceivers:     []SenderKeyRouteRef{},
+		PendingFromSources:   []SenderKeyRouteRef{},
 	}
 
 	currentDeviceID := input.Base.Request.DeviceID
-	ownLatestKeys, err := u.memberSenderKeyRepo.FindLatestForMember(ctx, callerMember.ID)
+	ownLatestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, callerMember.ID)
 	if err != nil && !errors.Is(err, membersenderkey.ErrNotFound) {
 		return nil, fmt.Errorf("find own sender keys: %w", err)
 	}
-
-	var ownCurrentDeviceKey *membersenderkey.MemberSenderKey
-	for _, key := range ownLatestKeys {
-		if key.SenderDeviceID == currentDeviceID {
-			ownCurrentDeviceKey = key
-			out.OwnDeviceSenderKeyExists = true
-			break
-		}
+	if err == nil {
+		out.OwnMemberSenderKeyExists = true
 	}
 
 	for _, member := range members {
@@ -113,55 +108,72 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 			continue
 		}
 
-		peerKeys, err := u.memberSenderKeyRepo.FindLatestForMember(ctx, member.ID)
-		if err != nil && !errors.Is(err, membersenderkey.ErrNotFound) {
-			return nil, fmt.Errorf("find peer sender keys for member %d: %w", member.ID, err)
-		}
-
-		for _, peerKey := range peerKeys {
-			ref := SenderKeyDeviceRef{MemberID: int64(member.ID), DeviceID: peerKey.SenderDeviceID.String()}
-			if receipt, receiptErr := u.receiptRepo.FindLatest(ctx, member.ID, peerKey.SenderDeviceID, callerMember.ID, currentDeviceID); receiptErr == nil && receipt.SenderKeyVersion >= peerKey.SenderKeyVersion {
-				continue
-			} else if receiptErr != nil && !errors.Is(receiptErr, senderkeyreceipt.ErrNotFound) {
-				return nil, fmt.Errorf("find sender key receipt from member %d device %s: %w", member.ID, peerKey.SenderDeviceID.String(), receiptErr)
-			}
-			dist, distErr := u.distributionRepo.FindLatest(ctx, member.ID, peerKey.SenderDeviceID, callerMember.ID, currentDeviceID)
-			switch {
-			case errors.Is(distErr, senderkeydistribution.ErrNotFound):
-				out.RequestableSources = append(out.RequestableSources, ref)
-				out.PendingFromSources = append(out.PendingFromSources, ref)
-			case distErr != nil:
-				return nil, fmt.Errorf("find latest distribution from member %d device %s: %w", member.ID, peerKey.SenderDeviceID.String(), distErr)
-			case dist.SenderKeyVersion < peerKey.SenderKeyVersion || dist.Status == senderkeydistribution.StatusFailed:
-				out.RequestableSources = append(out.RequestableSources, ref)
-				out.PendingFromSources = append(out.PendingFromSources, ref)
-			case dist.Status == senderkeydistribution.StatusAvailable:
-				out.AvailableFromSources = append(out.AvailableFromSources, ref)
-			}
-		}
-
-		if ownCurrentDeviceKey == nil {
-			continue
-		}
-
-		targetDeviceIDs, err := u.resolveReadyDeviceIDs(ctx, member.ParticipantID)
+		routeState, err := u.resolveRouteState(ctx, member)
 		if err != nil {
 			return nil, err
 		}
-		for _, receiverDeviceID := range targetDeviceIDs {
-			ref := SenderKeyDeviceRef{MemberID: int64(member.ID), DeviceID: receiverDeviceID.String()}
-			if receipt, receiptErr := u.receiptRepo.FindLatest(ctx, callerMember.ID, currentDeviceID, member.ID, receiverDeviceID); receiptErr == nil && receipt.SenderKeyVersion >= ownCurrentDeviceKey.SenderKeyVersion {
+		if routeState == nil {
+			continue
+		}
+
+		peerKey, err := u.memberSenderKeyRepo.FindLatest(ctx, member.ID)
+		if err != nil && !errors.Is(err, membersenderkey.ErrNotFound) {
+			return nil, fmt.Errorf("find peer sender keys for member %d: %w", member.ID, err)
+		}
+		if err == nil {
+			receipt, receiptErr := u.receiptRepo.FindLatest(ctx, member.ID, currentDeviceID)
+			switch {
+			case receiptErr == nil && receipt.SenderKeyVersion >= peerKey.SenderKeyVersion:
+			case receiptErr != nil && !errors.Is(receiptErr, senderkeyreceipt.ErrNotFound):
+				return nil, fmt.Errorf("find sender key receipt from member %d to device %s: %w", member.ID, currentDeviceID.String(), receiptErr)
+			default:
+				dist, distErr := u.distributionRepo.FindLatestForReceiver(ctx, member.ID, callerMember.ID, currentDeviceID)
+				switch {
+				case distErr == nil && dist.SenderKeyVersion >= peerKey.SenderKeyVersion && dist.Status == senderkeydistribution.StatusAvailable:
+					out.AvailableFromSources = append(out.AvailableFromSources, SenderKeyRouteRef{
+						UserID:   routeState.userID,
+						MemberID: int64(member.ID),
+						DeviceID: dist.SenderDeviceID.String(),
+					})
+				case distErr == nil && dist.SenderKeyVersion >= peerKey.SenderKeyVersion && dist.Status == senderkeydistribution.StatusConsumed:
+				case distErr != nil && !errors.Is(distErr, senderkeydistribution.ErrNotFound):
+					return nil, fmt.Errorf("find latest distribution from member %d to device %s: %w", member.ID, currentDeviceID.String(), distErr)
+				default:
+					for _, providerDeviceID := range routeState.readyDeviceIDs {
+						ref := SenderKeyRouteRef{
+							UserID:   routeState.userID,
+							MemberID: int64(member.ID),
+							DeviceID: providerDeviceID.String(),
+						}
+						out.RequestableSources = append(out.RequestableSources, ref)
+						out.PendingFromSources = append(out.PendingFromSources, ref)
+					}
+				}
+			}
+		}
+
+		if ownLatestKey == nil {
+			continue
+		}
+
+		for _, receiverDeviceID := range routeState.readyDeviceIDs {
+			ref := SenderKeyRouteRef{
+				UserID:   routeState.userID,
+				MemberID: int64(member.ID),
+				DeviceID: receiverDeviceID.String(),
+			}
+			if receipt, receiptErr := u.receiptRepo.FindLatest(ctx, callerMember.ID, receiverDeviceID); receiptErr == nil && receipt.SenderKeyVersion >= ownLatestKey.SenderKeyVersion {
 				continue
 			} else if receiptErr != nil && !errors.Is(receiptErr, senderkeyreceipt.ErrNotFound) {
-				return nil, fmt.Errorf("find sender key receipt from caller %d device %s to member %d device %s: %w", callerMember.ID, currentDeviceID.String(), member.ID, receiverDeviceID.String(), receiptErr)
+				return nil, fmt.Errorf("find sender key receipt from caller %d to member %d device %s: %w", callerMember.ID, member.ID, receiverDeviceID.String(), receiptErr)
 			}
-			dist, distErr := u.distributionRepo.FindLatest(ctx, callerMember.ID, currentDeviceID, member.ID, receiverDeviceID)
+			dist, distErr := u.distributionRepo.FindLatestForReceiver(ctx, callerMember.ID, member.ID, receiverDeviceID)
 			switch {
 			case errors.Is(distErr, senderkeydistribution.ErrNotFound):
 				out.PendingReceivers = append(out.PendingReceivers, ref)
 			case distErr != nil:
-				return nil, fmt.Errorf("find latest distribution from caller %d device %s to member %d device %s: %w", callerMember.ID, currentDeviceID.String(), member.ID, receiverDeviceID.String(), distErr)
-			case dist.SenderKeyVersion < ownCurrentDeviceKey.SenderKeyVersion || dist.Status == senderkeydistribution.StatusFailed:
+				return nil, fmt.Errorf("find latest distribution from caller %d to member %d device %s: %w", callerMember.ID, member.ID, receiverDeviceID.String(), distErr)
+			case dist.SenderKeyVersion < ownLatestKey.SenderKeyVersion || dist.Status == senderkeydistribution.StatusFailed:
 				out.PendingReceivers = append(out.PendingReceivers, ref)
 			case dist.Status == senderkeydistribution.StatusAvailable:
 				out.AvailableToTargets = append(out.AvailableToTargets, ref)
@@ -170,6 +182,31 @@ func (u *GetSenderKeyDistributionStatusUseCase) Execute(
 	}
 
 	return out, nil
+}
+
+type senderKeyRouteState struct {
+	userID         int64
+	readyDeviceIDs []shared.DeviceID
+}
+
+func (u *GetSenderKeyDistributionStatusUseCase) resolveRouteState(
+	ctx context.Context,
+	member *chatmember.ChatMember,
+) (*senderKeyRouteState, error) {
+	p, err := u.participantRepo.FindByID(ctx, member.ParticipantID)
+	if err != nil || p.UserID == nil {
+		return nil, nil
+	}
+
+	deviceIDs, err := u.resolveReadyDeviceIDs(ctx, member.ParticipantID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &senderKeyRouteState{
+		userID:         int64(*p.UserID),
+		readyDeviceIDs: deviceIDs,
+	}, nil
 }
 
 func (u *GetSenderKeyDistributionStatusUseCase) resolveReadyDeviceIDs(

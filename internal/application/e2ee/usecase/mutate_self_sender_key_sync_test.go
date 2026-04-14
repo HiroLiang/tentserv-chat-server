@@ -79,6 +79,44 @@ func TestSelfSenderKeySyncMutationUseCaseCompleteReturnsFallbackSnapshotAfterMut
 	assertSelfSyncBroadcastStatus(t, broadcaster.payloads[0], string(selfsenderkeysync.StatusCompleted))
 }
 
+func TestSelfSenderKeySyncMutationUseCaseCompleteRejectsWhenAnyCopyIsNotConsumed(t *testing.T) {
+	logger.Log = zap.NewNop()
+	requesterDeviceID := mustParseSyncTestDeviceID(t, "99999999-9999-4999-8999-999999999999")
+	providerDeviceID := mustParseSyncTestDeviceID(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	selfSyncRepo := &selfSyncRepoFallbackStub{current: cloneSelfSenderKeySync(&selfsenderkeysync.SelfSenderKeySync{
+		ID:                44,
+		ParticipantID:     3004,
+		RequesterDeviceID: requesterDeviceID,
+		ProviderDeviceID:  &providerDeviceID,
+		Status:            selfsenderkeysync.StatusUploaded,
+		RequestedAt:       time.Now().Add(-2 * time.Minute),
+		UpdatedAt:         time.Now().Add(-time.Minute),
+	})}
+	copyRepo := &selfSyncCopyRepoFallbackStub{hasNonConsumed: true}
+	uc := NewSelfSenderKeySyncMutationUseCase(
+		&selfSyncParticipantRepoStub{
+			participant: &participant.Participant{
+				ID:     3004,
+				Type:   participant.UserType,
+				UserID: ptrSharedUserID(804),
+			},
+		},
+		selfSyncRepo,
+		copyRepo,
+		&selfSyncAccountRepoFallbackStub{},
+		&selfSyncDeviceRepoFallbackStub{},
+		&selfSyncBroadcasterStub{},
+	)
+
+	out, err := uc.Complete(context.Background(), appShared.UseCaseInput[CompleteSelfSenderKeySyncInput]{
+		Base: syncMutationBaseContext(904, 804, requesterDeviceID),
+	})
+
+	require.ErrorIs(t, err, ErrSelfSenderKeySyncIncomplete)
+	assert.Nil(t, out)
+	assert.Equal(t, selfsenderkeysync.StatusUploaded, selfSyncRepo.current.Status)
+}
+
 func TestSelfSenderKeySyncMutationUseCaseFailReturnsFallbackSnapshotAfterMutationSuccess(t *testing.T) {
 	logger.Log = zap.NewNop()
 	requesterDeviceID := mustParseSyncTestDeviceID(t, "55555555-5555-4555-8555-555555555555")

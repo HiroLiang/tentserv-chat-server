@@ -17,8 +17,10 @@ type wsSenderKeyDistributionAvailablePayload struct {
 	RoomID           int64  `json:"room_id"`
 	DistributionID   int64  `json:"distribution_id"`
 	SenderMemberID   int64  `json:"sender_member_id"`
+	SenderUserID     int64  `json:"sender_user_id"`
 	SenderDeviceID   string `json:"sender_device_id"`
 	ReceiverMemberID int64  `json:"receiver_member_id"`
+	ReceiverUserID   int64  `json:"receiver_user_id"`
 	ReceiverDeviceID string `json:"receiver_device_id,omitempty"`
 	SenderKeyVersion int64  `json:"sender_key_version"`
 }
@@ -45,6 +47,14 @@ func notifySenderKeyDistributionAvailable(
 	if err != nil || receiverMember.IsDeleted {
 		return
 	}
+	senderMember, err := chatMemberRepo.FindByID(ctx, dist.SenderMemberID)
+	if err != nil || senderMember.IsDeleted {
+		return
+	}
+	senderParticipant, err := participantRepo.FindByID(ctx, senderMember.ParticipantID)
+	if err != nil || senderParticipant.UserID == nil {
+		return
+	}
 	receiverParticipant, err := participantRepo.FindByID(ctx, receiverMember.ParticipantID)
 	if err != nil || receiverParticipant.UserID == nil {
 		return
@@ -60,8 +70,10 @@ func notifySenderKeyDistributionAvailable(
 			RoomID:           roomID,
 			DistributionID:   int64(dist.ID),
 			SenderMemberID:   int64(dist.SenderMemberID),
+			SenderUserID:     int64(*senderParticipant.UserID),
 			SenderDeviceID:   dist.SenderDeviceID.String(),
 			ReceiverMemberID: int64(dist.ReceiverMemberID),
+			ReceiverUserID:   int64(*receiverParticipant.UserID),
 			ReceiverDeviceID: dist.ReceiverDeviceID.String(),
 			SenderKeyVersion: dist.SenderKeyVersion,
 		},

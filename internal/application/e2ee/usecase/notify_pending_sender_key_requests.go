@@ -11,6 +11,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 )
@@ -24,6 +25,7 @@ type NotifyPendingSenderKeyRequestsUseCase struct {
 	senderKeyRequestRepo senderkeyrequest.Repository
 	memberSenderKeyRepo  membersenderkey.Repository
 	distributionRepo     senderkeydistribution.Repository
+	receiptRepo          senderkeyreceipt.Repository
 	broadcaster          e2eePort.Broadcaster
 }
 
@@ -33,6 +35,7 @@ func NewNotifyPendingSenderKeyRequestsUseCase(
 	senderKeyRequestRepo senderkeyrequest.Repository,
 	memberSenderKeyRepo membersenderkey.Repository,
 	distributionRepo senderkeydistribution.Repository,
+	receiptRepo senderkeyreceipt.Repository,
 	broadcaster e2eePort.Broadcaster,
 ) *NotifyPendingSenderKeyRequestsUseCase {
 	return &NotifyPendingSenderKeyRequestsUseCase{
@@ -41,6 +44,7 @@ func NewNotifyPendingSenderKeyRequestsUseCase(
 		senderKeyRequestRepo: senderKeyRequestRepo,
 		memberSenderKeyRepo:  memberSenderKeyRepo,
 		distributionRepo:     distributionRepo,
+		receiptRepo:          receiptRepo,
 		broadcaster:          broadcaster,
 	}
 }
@@ -83,6 +87,10 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 	if err != nil || len(requests) == 0 {
 		return
 	}
+	providerParticipant, err := u.participantRepo.FindByID(ctx, providerMember.ParticipantID)
+	if err != nil || providerParticipant.UserID == nil {
+		return
+	}
 
 	for _, req := range requests {
 		requesterMember, err := u.chatMemberRepo.FindByID(ctx, req.RequesterMemberID)
@@ -105,7 +113,8 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) notifyForMember(
 			Type: "e2ee.sender_key_needed",
 			Payload: wsSenderKeyNeededPayload{
 				RoomID:            int64(requesterMember.RoomID),
-				ProviderMemberID:  int64(providerMember.ID),
+				SenderMemberID:    int64(providerMember.ID),
+				ProviderUserID:    int64(*providerParticipant.UserID),
 				ProviderDeviceID:  providerDeviceID.String(),
 				RequesterMemberID: int64(requesterMember.ID),
 				RequesterUserID:   int64(*requesterParticipant.UserID),
@@ -127,12 +136,17 @@ func (u *NotifyPendingSenderKeyRequestsUseCase) requestAlreadySatisfied(
 	requesterMemberID chatmember.ID,
 	requesterDeviceID shared.DeviceID,
 ) bool {
-	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMemberID, providerDeviceID)
+	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMemberID)
 	if err != nil {
 		return false
 	}
 
-	dist, err := u.distributionRepo.FindLatest(ctx, providerMemberID, providerDeviceID, requesterMemberID, requesterDeviceID)
+	receipt, err := u.receiptRepo.FindLatest(ctx, providerMemberID, requesterDeviceID)
+	if err == nil && receipt.SenderKeyVersion >= latestKey.SenderKeyVersion {
+		return true
+	}
+
+	dist, err := u.distributionRepo.FindLatestForReceiver(ctx, providerMemberID, requesterMemberID, requesterDeviceID)
 	if err != nil {
 		if errors.Is(err, senderkeydistribution.ErrNotFound) {
 			return false

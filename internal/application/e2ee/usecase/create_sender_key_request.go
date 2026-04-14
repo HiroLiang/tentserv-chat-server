@@ -23,8 +23,9 @@ import (
 
 type CreateSenderKeyRequestInput struct {
 	RoomID            int64
-	ProviderMemberID  int64
+	ProviderUserID    int64
 	ProviderDeviceID  string
+	SenderMemberID    int64
 	RequesterDeviceID string
 }
 
@@ -88,17 +89,6 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		return nil, ErrNotRoomMember
 	}
 
-	// Verify provider is also a member of the room.
-	providerMember, err := u.chatMemberRepo.FindByID(ctx, chatmember.ID(input.Data.ProviderMemberID))
-	if err != nil || providerMember.IsDeleted {
-		return nil, fmt.Errorf("%w: provider not found in room", ErrNotRoomMember)
-	}
-
-	// Verify provider belongs to the same room as the requester.
-	if providerMember.RoomID != chatroom.ID(input.Data.RoomID) {
-		return nil, fmt.Errorf("%w: provider member is not in the requested room", ErrNotRoomMember)
-	}
-
 	// If a latest distribution is already available for the caller, the request is unnecessary.
 	requesterDeviceID, err := resolveRequestedDeviceID(input.Data.RequesterDeviceID, input.Base.Request.DeviceID)
 	if err != nil {
@@ -110,12 +100,29 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		return nil, fmt.Errorf("%w: provider device id", ErrInvalidSignature)
 	}
 
-	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMember.ID, providerDeviceID)
+	providerParticipant, err := u.participantRepo.FindByUserID(ctx, shared.UserID(input.Data.ProviderUserID))
+	if err != nil || providerParticipant.UserID == nil {
+		return nil, fmt.Errorf("%w: provider participant not found", ErrNotRoomMember)
+	}
+
+	providerMember, err := u.chatMemberRepo.FindByRoomAndParticipant(
+		ctx,
+		chatroom.ID(input.Data.RoomID),
+		providerParticipant.ID,
+	)
+	if err != nil || providerMember.IsDeleted {
+		return nil, fmt.Errorf("%w: provider not found in room", ErrNotRoomMember)
+	}
+	if providerMember.ID != chatmember.ID(input.Data.SenderMemberID) {
+		return nil, fmt.Errorf("%w: sender member does not match provider user", ErrNotRoomMember)
+	}
+
+	latestKey, err := u.memberSenderKeyRepo.FindLatest(ctx, providerMember.ID)
 	if err != nil && !errors.Is(err, membersenderkey.ErrNotFound) {
 		return nil, fmt.Errorf("create sender key request: check latest sender key: %w", err)
 	}
 	if err == nil {
-		receipt, receiptErr := u.receiptRepo.FindLatest(ctx, providerMember.ID, providerDeviceID, callerMember.ID, requesterDeviceID)
+		receipt, receiptErr := u.receiptRepo.FindLatest(ctx, providerMember.ID, requesterDeviceID)
 		switch {
 		case receiptErr == nil && receipt.SenderKeyVersion >= latestKey.SenderKeyVersion:
 			if fulfillErr := u.senderKeyRequestRepo.MarkFulfilled(ctx, callerMember.ID, requesterDeviceID, providerMember.ID, providerDeviceID); fulfillErr != nil {
@@ -125,7 +132,7 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 		case receiptErr != nil && !errors.Is(receiptErr, senderkeyreceipt.ErrNotFound):
 			return nil, fmt.Errorf("create sender key request: check sender key receipt: %w", receiptErr)
 		}
-		dist, distErr := u.distributionRepo.FindLatest(ctx, providerMember.ID, providerDeviceID, callerMember.ID, requesterDeviceID)
+		dist, distErr := u.distributionRepo.FindLatestForReceiver(ctx, providerMember.ID, callerMember.ID, requesterDeviceID)
 		if distErr == nil &&
 			dist.SenderKeyVersion >= latestKey.SenderKeyVersion &&
 			(dist.Status == senderkeydistribution.StatusAvailable || dist.Status == senderkeydistribution.StatusConsumed) {
@@ -137,10 +144,6 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 	}
 
 	// Check for block relationship between the two participants.
-	providerParticipant, err := u.participantRepo.FindByID(ctx, providerMember.ParticipantID)
-	if err != nil || providerParticipant.UserID == nil {
-		return nil, fmt.Errorf("%w: provider participant not found", ErrNotRoomMember)
-	}
 	if callerParticipant.UserID != nil {
 		rows, err := u.friendshipRepo.FindBetweenUsers(ctx, *callerParticipant.UserID, shared.UserID(*providerParticipant.UserID))
 		if err == nil {
@@ -170,7 +173,8 @@ func (u *CreateSenderKeyRequestUseCase) Execute(
 
 type wsSenderKeyNeededPayload struct {
 	RoomID            int64  `json:"room_id"`
-	ProviderMemberID  int64  `json:"provider_member_id"`
+	SenderMemberID    int64  `json:"sender_member_id"`
+	ProviderUserID    int64  `json:"provider_user_id"`
 	ProviderDeviceID  string `json:"provider_device_id"`
 	RequesterMemberID int64  `json:"requester_member_id"`
 	RequesterUserID   int64  `json:"requester_user_id"`
@@ -202,7 +206,8 @@ func (u *CreateSenderKeyRequestUseCase) notifyProvider(
 		Type: "e2ee.sender_key_needed",
 		Payload: wsSenderKeyNeededPayload{
 			RoomID:            roomID,
-			ProviderMemberID:  int64(providerMember.ID),
+			SenderMemberID:    int64(providerMember.ID),
+			ProviderUserID:    int64(*providerParticipant.UserID),
 			ProviderDeviceID:  providerDeviceID.String(),
 			RequesterMemberID: int64(requesterMember.ID),
 			RequesterUserID:   int64(*requesterParticipant.UserID),

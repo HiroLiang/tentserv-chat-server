@@ -10,6 +10,7 @@ import (
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/membersenderkey"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/participant"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeydistribution"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyreceipt"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/senderkeyrequest"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	"github.com/stretchr/testify/assert"
@@ -94,21 +95,12 @@ type notifyPendingMemberSenderKeyRepoStub struct {
 	latestByMember map[chatmember.ID]*membersenderkey.MemberSenderKey
 }
 
-func (s *notifyPendingMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID, deviceID shared.DeviceID) (*membersenderkey.MemberSenderKey, error) {
+func (s *notifyPendingMemberSenderKeyRepoStub) FindLatest(_ context.Context, memberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
 	if latest, ok := s.latestByMember[memberID]; ok {
 		copied := *latest
-		copied.SenderDeviceID = deviceID
 		return &copied, nil
 	}
 	return nil, membersenderkey.ErrNotFound
-}
-
-func (s *notifyPendingMemberSenderKeyRepoStub) FindLatestForMember(_ context.Context, memberID chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
-	latest, err := s.FindLatest(context.Background(), memberID, senderKeyReqProviderDeviceID)
-	if err != nil {
-		return nil, err
-	}
-	return []*membersenderkey.MemberSenderKey{latest}, nil
 }
 
 func (s *notifyPendingMemberSenderKeyRepoStub) FindAllByMembers(context.Context, []chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
@@ -148,6 +140,10 @@ func (s *notifyPendingDistributionRepoStub) FindLatest(_ context.Context, sender
 	return nil, senderkeydistribution.ErrNotFound
 }
 
+func (s *notifyPendingDistributionRepoStub) FindLatestForReceiver(_ context.Context, senderMemberID chatmember.ID, receiverMemberID chatmember.ID, _ shared.DeviceID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return s.FindLatest(context.Background(), senderMemberID, senderKeyReqProviderDeviceID, receiverMemberID, senderKeyReqRequesterDeviceID)
+}
+
 func (s *notifyPendingDistributionRepoStub) FindAvailableByRoomAndReceiver(_ context.Context, roomID chatroom.ID, receiverMemberID chatmember.ID, _ shared.DeviceID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
 	rows := s.availableByRoomMember[[2]int64{int64(roomID), int64(receiverMemberID)}]
 	out := make([]*senderkeydistribution.SenderKeyDistribution, 0, len(rows))
@@ -167,6 +163,22 @@ func (s *notifyPendingDistributionRepoStub) MarkConsumed(context.Context, sender
 }
 
 func (s *notifyPendingDistributionRepoStub) MarkFailed(context.Context, senderkeydistribution.ID) error {
+	return nil
+}
+
+type notifyPendingReceiptRepoStub struct {
+	latestByMember map[chatmember.ID]*senderkeyreceipt.SenderKeyReceipt
+}
+
+func (s *notifyPendingReceiptRepoStub) FindLatest(_ context.Context, senderMemberID chatmember.ID, _ shared.DeviceID) (*senderkeyreceipt.SenderKeyReceipt, error) {
+	if latest, ok := s.latestByMember[senderMemberID]; ok {
+		copied := *latest
+		return &copied, nil
+	}
+	return nil, senderkeyreceipt.ErrNotFound
+}
+
+func (s *notifyPendingReceiptRepoStub) Upsert(context.Context, *senderkeyreceipt.SenderKeyReceipt) error {
 	return nil
 }
 
@@ -227,6 +239,7 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 		requestRepo,
 		memberSenderKeyRepo,
 		distributionRepo,
+		&notifyPendingReceiptRepoStub{},
 		broadcaster,
 	)
 
@@ -244,7 +257,8 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 		Type    string `json:"type"`
 		Payload struct {
 			RoomID            int64 `json:"room_id"`
-			ProviderMemberID  int64 `json:"provider_member_id"`
+			SenderMemberID    int64 `json:"sender_member_id"`
+			ProviderUserID    int64 `json:"provider_user_id"`
 			RequesterMemberID int64 `json:"requester_member_id"`
 			RequesterUserID   int64 `json:"requester_user_id"`
 		} `json:"payload"`
@@ -252,7 +266,8 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberReplaysPendingRequest(t *
 	require.NoError(t, json.Unmarshal(call.msg, &envelope))
 	assert.Equal(t, "e2ee.sender_key_needed", envelope.Type)
 	assert.Equal(t, int64(roomID), envelope.Payload.RoomID)
-	assert.Equal(t, int64(providerMemberID), envelope.Payload.ProviderMemberID)
+	assert.Equal(t, int64(providerMemberID), envelope.Payload.SenderMemberID)
+	assert.Equal(t, providerUserID, envelope.Payload.ProviderUserID)
 	assert.Equal(t, int64(requesterMemberID), envelope.Payload.RequesterMemberID)
 	assert.Equal(t, requesterUserID, envelope.Payload.RequesterUserID)
 }
@@ -328,6 +343,7 @@ func TestNotifyPendingSenderKeyRequests_NotifyForMemberMarksSatisfiedRequestFulf
 		requestRepo,
 		memberSenderKeyRepo,
 		distributionRepo,
+		&notifyPendingReceiptRepoStub{},
 		broadcaster,
 	)
 

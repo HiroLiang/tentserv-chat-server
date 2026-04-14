@@ -14,6 +14,7 @@ import (
 	domainaccount "github.com/HiroLiang/tentserv-chat-server/internal/domain/account"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/auth"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/role"
+	"github.com/HiroLiang/tentserv-chat-server/internal/domain/selfsenderkeysync"
 	"github.com/HiroLiang/tentserv-chat-server/internal/domain/shared"
 	infraSecurity "github.com/HiroLiang/tentserv-chat-server/internal/infrastructure/shared/security"
 	"github.com/cucumber/godog"
@@ -24,12 +25,13 @@ const verificationExpiryTolerance = 5 * time.Second
 type steps struct {
 	*bddsupport.APITestContext
 	deps             *Deps
+	selfSyncRepo     selfsenderkeysync.Repository
 	start            time.Time
 	rememberedTokens map[string]string
 }
 
-func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps) {
-	s := &steps{APITestContext: apiCtx, deps: deps, rememberedTokens: map[string]string{}}
+func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext, deps *Deps, selfSyncRepo selfsenderkeysync.Repository) {
+	s := &steps{APITestContext: apiCtx, deps: deps, selfSyncRepo: selfSyncRepo, rememberedTokens: map[string]string{}}
 
 	ctx.Step(`^account registration state is clean$`, s.accountRegistrationStateIsClean)
 	ctx.Step(`^the registration rate limit is exceeded$`, s.theRegistrationRateLimitIsExceeded)
@@ -64,15 +66,19 @@ func RegisterSteps(ctx *godog.ScenarioContext, apiCtx *bddsupport.APITestContext
 	ctx.Step(`^login state is clean$`, s.loginStateIsClean)
 	ctx.Step(`^a registered login device "([^"]*)" named "([^"]*)" exists$`, s.aRegisteredLoginDeviceExists)
 	ctx.Step(`^an? "([^"]*)" account exists for login with email "([^"]*)", account "([^"]*)", and password "([^"]*)"$`, s.anAccountExistsForLogin)
+	ctx.Step(`^the login account is already bound to device "([^"]*)" with status "([^"]*)"$`, s.theLoginAccountIsAlreadyBoundToDeviceWithStatus)
 	ctx.Step(`^the login account has an existing participant$`, s.theLoginAccountHasAnExistingParticipant)
 	ctx.Step(`^I login with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iLoginWithIdentifier)
 	ctx.Step(`^I login with an invalid payload$`, s.iLoginWithAnInvalidPayload)
 	ctx.Step(`^I attempt login (\d+) times with identifier "([^"]*)", password "([^"]*)", and device "([^"]*)"$`, s.iAttemptLoginTimesWithIdentifierPasswordAndDevice)
 	ctx.Step(`^login response should include a bearer token$`, s.loginResponseShouldIncludeABearerToken)
+	ctx.Step(`^login response should require device verification and include a verification token and expiry timestamp$`, s.loginResponseShouldRequireDeviceVerificationAndIncludeAVerificationTokenAndExpiryTimestamp)
+	ctx.Step(`^I verify the login device using the stored token$`, s.iVerifyTheLoginDeviceUsingTheStoredToken)
 	ctx.Step(`^I remember the login token as "([^"]*)"$`, s.iRememberTheLoginTokenAs)
 	ctx.Step(`^the raw auth header "([^"]*)" is remembered as "([^"]*)"$`, s.theRawAuthHeaderIsRememberedAs)
 	ctx.Step(`^login mutation should include session, device link, participant, and login event$`, s.loginMutationShouldIncludeSessionDeviceLinkParticipantAndLoginEvent)
 	ctx.Step(`^login mutation should reuse the existing participant$`, s.loginMutationShouldReuseTheExistingParticipant)
+	ctx.Step(`^verifying the login device should create a pending sync device binding and self sender key sync$`, s.verifyingTheLoginDeviceShouldCreateAPendingSyncDeviceBindingAndSelfSenderKeySync)
 	ctx.Step(`^login mutation should stop before session creation$`, s.loginMutationShouldStopBeforeSessionCreation)
 	ctx.Step(`^the login identifier "([^"]*)" should be locked$`, s.theLoginIdentifierShouldBeLocked)
 	ctx.Step(`^I request my auth profile using the login token and device "([^"]*)"$`, s.iRequestMyAuthProfileUsingTheLoginToken)
@@ -706,6 +712,58 @@ func (a *steps) anAccountExistsForLogin(statusText, email, accountName, password
 	return nil
 }
 
+func (a *steps) theLoginAccountIsAlreadyBoundToDeviceWithStatus(deviceID, statusText string) error {
+	a.start = time.Now()
+	fmt.Println("Given: the latest login account already trusts a device binding")
+	fmt.Printf("Input: device_id=%s status=%s\n", deviceID, statusText)
+	fmt.Println("Action: append or replace the seeded account device binding")
+
+	acc, ok := a.firstLoginAccount()
+	if !ok {
+		return fmt.Errorf("no login account seeded")
+	}
+	parsedDeviceID, err := shared.ParseDeviceID(deviceID)
+	if err != nil {
+		return err
+	}
+	status := domainaccount.DeviceStatus(statusText)
+	switch status {
+	case domainaccount.DeviceStatusPendingVerification, domainaccount.DeviceStatusPendingSync, domainaccount.DeviceStatusSyncing, domainaccount.DeviceStatusReady:
+	default:
+		return fmt.Errorf("unknown device status %q", statusText)
+	}
+
+	a.deps.accountRepo.mu.Lock()
+	defer a.deps.accountRepo.mu.Unlock()
+
+	accountData := a.deps.accountRepo.accountsByID[acc.ID]
+	if accountData == nil {
+		return fmt.Errorf("login account %d not found in repository", acc.ID)
+	}
+	replaced := false
+	for i := range accountData.Devices {
+		if accountData.Devices[i].DeviceID == parsedDeviceID {
+			accountData.Devices[i].Status = status
+			accountData.Devices[i].LastSeenAt = time.Now()
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		accountData.Devices = append(accountData.Devices, domainaccount.AccountDevice{
+			AccountID:  acc.ID,
+			DeviceID:   parsedDeviceID,
+			Status:     status,
+			LastSeenAt: time.Now(),
+		})
+	}
+
+	fmt.Printf("Output: device_bound=%t total_bound_devices=%d\n", true, len(accountData.Devices))
+	fmt.Printf("Mutation: account_devices=%d\n", len(accountData.Devices))
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
 func (a *steps) theLoginAccountHasAnExistingParticipant() error {
 	start := time.Now()
 	fmt.Println("Given: the latest login account should already have a user participant")
@@ -824,6 +882,60 @@ func (a *steps) loginResponseShouldIncludeABearerToken() error {
 	return nil
 }
 
+func (a *steps) loginResponseShouldRequireDeviceVerificationAndIncludeAVerificationTokenAndExpiryTimestamp() error {
+	start := time.Now()
+	fmt.Println("Given: login should defer authentication until the new device is verified")
+	fmt.Println("Input: expecting login_status=device_verification_required and verification session metadata")
+	fmt.Println("Action: decode login response body and compare with the verification store")
+
+	var body struct {
+		LoginStatus             string `json:"login_status"`
+		VerificationToken       string `json:"verification_token"`
+		VerificationExpiresAtMS int64  `json:"verification_expires_at_ms"`
+	}
+	if err := json.Unmarshal(a.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	hasToken, futureExpiry, ttlMatches, matchesStore := a.verificationMetadataStatus(body.VerificationToken, body.VerificationExpiresAtMS)
+	requiresVerification := a.Response.StatusCode == http.StatusAccepted && body.LoginStatus == "device_verification_required"
+
+	fmt.Printf("Output: requires_verification=%t has_token=%t future_expiry=%t ttl_matches=%t matches_store=%t\n",
+		requiresVerification, hasToken, futureExpiry, ttlMatches, matchesStore)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !(requiresVerification && hasToken && futureExpiry && ttlMatches && matchesStore) {
+		return fmt.Errorf("expected login response to require device verification, got body=%s", string(a.ResponseBody))
+	}
+	return nil
+}
+
+func (a *steps) iVerifyTheLoginDeviceUsingTheStoredToken() error {
+	a.start = time.Now()
+	token := a.deps.store.lastStoredToken
+	if token == "" {
+		return fmt.Errorf("no login device verification token was stored")
+	}
+
+	fmt.Println("Given: a pending login device verification session exists")
+	fmt.Printf("Input: verification_token_present=%t device_id=%s\n", token != "", a.deps.store.lastStoredSession.DeviceID)
+	fmt.Println("Action: POST /api/auth/verify-login-device")
+
+	payload := map[string]string{
+		"token": token,
+		"code":  a.deps.store.lastStoredSession.Code,
+	}
+	if err := a.DoJSONRequest(http.MethodPost, "/api/auth/verify-login-device", payload); err != nil {
+		return err
+	}
+
+	fmt.Printf("Output: status=%d body=%s auth_header_present=%t\n", a.Response.StatusCode, string(a.ResponseBody), a.Response.Header.Get("Authorization") != "")
+	fmt.Printf("Mutation: verification_sessions_remaining=%d session_create_calls=%d\n", len(a.deps.store.sessions), a.deps.sessionManager.createCalls)
+	fmt.Printf("Duration: %s\n", time.Since(a.start))
+	return nil
+}
+
 func (a *steps) iRememberTheLoginTokenAs(label string) error {
 	start := time.Now()
 	fmt.Println("Given: the last login response returned an Authorization header")
@@ -897,6 +1009,61 @@ func (a *steps) loginMutationShouldReuseTheExistingParticipant() error {
 
 	if !reused || !sessionCreated {
 		return fmt.Errorf("expected existing participant to be reused")
+	}
+	return nil
+}
+
+func (a *steps) verifyingTheLoginDeviceShouldCreateAPendingSyncDeviceBindingAndSelfSenderKeySync() error {
+	start := time.Now()
+	fmt.Println("Given: a verified secondary device should join the account in pending sync state")
+	fmt.Println("Input: expecting pending_sync binding and pending_provider self sender key sync")
+	fmt.Println("Action: inspect account device bindings, participant state, and self sync repository")
+
+	accountData, ok := a.firstLoginAccount()
+	if !ok {
+		return fmt.Errorf("no login account seeded")
+	}
+	currentDeviceID := a.deps.LastSessionDeviceID()
+	currentUserID := a.deps.LastSessionUserID()
+	if currentUserID == 0 {
+		return fmt.Errorf("no verified login user recorded")
+	}
+
+	accountBinding := accountData.GetDevice(currentDeviceID)
+	if accountBinding == nil && a.deps.accountRepo.lastRegisteredDevice != nil && a.deps.accountRepo.lastRegisteredDevice.DeviceID == currentDeviceID {
+		accountBinding = a.deps.accountRepo.lastRegisteredDevice
+	}
+	if accountBinding == nil {
+		return fmt.Errorf("expected verified device %s to be bound to account %d", currentDeviceID, accountData.ID)
+	}
+
+	participantData, err := a.deps.participantRepo.FindByUserID(context.Background(), currentUserID)
+	if err != nil {
+		return err
+	}
+	if a.selfSyncRepo == nil {
+		return fmt.Errorf("self sender key sync repository is not configured for login verification checks")
+	}
+	syncState, err := a.selfSyncRepo.FindByParticipantID(context.Background(), participantData.ID)
+	if err != nil {
+		return err
+	}
+
+	devicePendingSync := accountBinding.Status == domainaccount.DeviceStatusPendingSync
+	selfSyncPendingProvider := syncState.Status == "pending_provider" && syncState.RequesterDeviceID == currentDeviceID
+
+	fmt.Printf("Output: participant_id=%d device_status=%s self_sync_status=%s requester_device_matches=%t\n",
+		participantData.ID, accountBinding.Status, syncState.Status, syncState.RequesterDeviceID == currentDeviceID)
+	fmt.Println("Mutation: none")
+	fmt.Printf("Duration: %s\n", time.Since(start))
+
+	if !devicePendingSync || !selfSyncPendingProvider {
+		return fmt.Errorf(
+			"expected verified device binding pending_sync and self sync pending_provider, got device_status=%s self_sync_status=%s requester_device=%s",
+			accountBinding.Status,
+			syncState.Status,
+			syncState.RequesterDeviceID.String(),
+		)
 	}
 	return nil
 }

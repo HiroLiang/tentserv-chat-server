@@ -40,15 +40,11 @@ func NewSenderKeyReceiptRepository(db *sqlx.DB) *SenderKeyReceiptRepository {
 func (r *SenderKeyReceiptRepository) FindLatest(
 	ctx context.Context,
 	senderMemberID chatmember.ID,
-	senderDeviceID shared.DeviceID,
-	receiverMemberID chatmember.ID,
 	receiverDeviceID shared.DeviceID,
 ) (*senderkeyreceipt.SenderKeyReceipt, error) {
 	query, args, err := senderKeyReceiptTable.Select(senderKeyReceiptTable.Columns...).
 		Where(squirrel.Eq{
 			"sender_member_id":   int64(senderMemberID),
-			"sender_device_id":   senderDeviceID.String(),
-			"receiver_member_id": int64(receiverMemberID),
 			"receiver_device_id": receiverDeviceID.String(),
 		}).
 		OrderBy("sender_key_version DESC", "updated_at DESC", "id DESC").
@@ -76,8 +72,16 @@ func (r *SenderKeyReceiptRepository) Upsert(
 INSERT INTO public.sender_key_receipts
     (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id, sender_key_version, source, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
-ON CONFLICT (sender_member_id, sender_device_id, receiver_member_id, receiver_device_id)
+ON CONFLICT (sender_member_id, receiver_device_id)
 DO UPDATE SET sender_key_version = GREATEST(EXCLUDED.sender_key_version, sender_key_receipts.sender_key_version),
+              sender_device_id = CASE
+                  WHEN EXCLUDED.sender_key_version >= sender_key_receipts.sender_key_version THEN EXCLUDED.sender_device_id
+                  ELSE sender_key_receipts.sender_device_id
+              END,
+              receiver_member_id = CASE
+                  WHEN EXCLUDED.sender_key_version >= sender_key_receipts.sender_key_version THEN EXCLUDED.receiver_member_id
+                  ELSE sender_key_receipts.receiver_member_id
+              END,
               source = CASE
                   WHEN EXCLUDED.sender_key_version >= sender_key_receipts.sender_key_version THEN EXCLUDED.source
                   ELSE sender_key_receipts.source

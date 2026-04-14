@@ -191,19 +191,11 @@ type senderKeyReqMSKRepoStub struct {
 	findLatestErr error
 }
 
-func (s *senderKeyReqMSKRepoStub) FindLatest(_ context.Context, memberID chatmember.ID, deviceID sharedDomain.DeviceID) (*membersenderkey.MemberSenderKey, error) {
+func (s *senderKeyReqMSKRepoStub) FindLatest(_ context.Context, memberID chatmember.ID) (*membersenderkey.MemberSenderKey, error) {
 	if s.findLatestErr != nil {
 		return nil, s.findLatestErr
 	}
-	return &membersenderkey.MemberSenderKey{ChatMemberID: memberID, SenderDeviceID: deviceID}, nil
-}
-
-func (s *senderKeyReqMSKRepoStub) FindLatestForMember(_ context.Context, memberID chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
-	key, err := s.FindLatest(context.Background(), memberID, senderKeyReqProviderDeviceID)
-	if err != nil {
-		return nil, err
-	}
-	return []*membersenderkey.MemberSenderKey{key}, nil
+	return &membersenderkey.MemberSenderKey{ChatMemberID: memberID, SenderDeviceID: senderKeyReqProviderDeviceID}, nil
 }
 
 func (s *senderKeyReqMSKRepoStub) FindAllByMembers(context.Context, []chatmember.ID) ([]*membersenderkey.MemberSenderKey, error) {
@@ -245,6 +237,10 @@ func (s *senderKeyReqDistributionRepoStub) FindLatest(_ context.Context, senderM
 	return dist, nil
 }
 
+func (s *senderKeyReqDistributionRepoStub) FindLatestForReceiver(_ context.Context, senderMemberID chatmember.ID, receiverMemberID chatmember.ID, _ sharedDomain.DeviceID) (*senderkeydistribution.SenderKeyDistribution, error) {
+	return s.FindLatest(context.Background(), senderMemberID, senderKeyReqProviderDeviceID, receiverMemberID, senderKeyReqRequesterDeviceID)
+}
+
 func (s *senderKeyReqDistributionRepoStub) FindAvailableByRoomAndReceiver(context.Context, chatroom.ID, chatmember.ID, sharedDomain.DeviceID) ([]*senderkeydistribution.SenderKeyDistribution, error) {
 	return nil, nil
 }
@@ -273,13 +269,11 @@ func (s *senderKeyReqReceiptRepoStub) FindLatest(
 	_ context.Context,
 	senderMemberID chatmember.ID,
 	_ sharedDomain.DeviceID,
-	receiverMemberID chatmember.ID,
-	_ sharedDomain.DeviceID,
 ) (*senderkeyreceipt.SenderKeyReceipt, error) {
 	if s.latest == nil {
 		return nil, senderkeyreceipt.ErrNotFound
 	}
-	receipt, ok := s.latest[fmt.Sprintf("%d:%d", senderMemberID, receiverMemberID)]
+	receipt, ok := s.latest[fmt.Sprintf("%d", senderMemberID)]
 	if !ok {
 		return nil, senderkeyreceipt.ErrNotFound
 	}
@@ -442,15 +436,16 @@ func (s *senderKeyReqBroadcasterStub) snapshotCalls() []senderKeyReqBroadcastCal
 
 var _ e2eePort.Broadcaster = (*senderKeyReqBroadcasterStub)(nil)
 
-func makeCreateSKRInput(callerUserID int64, roomID, providerMemberID int64) appShared.UseCaseInput[CreateSenderKeyRequestInput] {
+func makeCreateSKRInput(callerUserID, providerUserID int64, roomID, senderMemberID int64) appShared.UseCaseInput[CreateSenderKeyRequestInput] {
 	uid := sharedDomain.UserID(callerUserID)
 	auth := appShared.AuthContext{UserID: uid}
 	return appShared.UseCaseInput[CreateSenderKeyRequestInput]{
 		Base: appShared.BaseContext{Auth: &auth, Request: appShared.RequestContext{DeviceID: senderKeyReqRequesterDeviceID}},
 		Data: CreateSenderKeyRequestInput{
 			RoomID:           roomID,
-			ProviderMemberID: providerMemberID,
+			ProviderUserID:   providerUserID,
 			ProviderDeviceID: senderKeyReqProviderDeviceID.String(),
+			SenderMemberID:   senderMemberID,
 		},
 	}
 }
@@ -477,16 +472,23 @@ func makeChatMemberStub(roomID chatroom.ID, callerUID, providerUID int64, provid
 	providerMemberID := chatmember.ID(100 + providerUID)
 	callerPID := participant.ID(callerUID)
 	providerPID := participant.ID(providerUID)
+	callerMember := &chatmember.ChatMember{ID: callerMemberID, RoomID: roomID, ParticipantID: callerPID}
+	providerMember := &chatmember.ChatMember{ID: providerMemberID, RoomID: providerMemberRoomID, ParticipantID: providerPID}
+	byRoomAndParticipant := map[chatroom.ID]map[participant.ID]*chatmember.ChatMember{
+		roomID: {
+			callerPID: callerMember,
+		},
+	}
+	if _, ok := byRoomAndParticipant[providerMemberRoomID]; !ok {
+		byRoomAndParticipant[providerMemberRoomID] = map[participant.ID]*chatmember.ChatMember{}
+	}
+	byRoomAndParticipant[providerMemberRoomID][providerPID] = providerMember
 	stub := &senderKeyReqChatMemberStub{
 		byID: map[chatmember.ID]*chatmember.ChatMember{
-			callerMemberID:   {ID: callerMemberID, RoomID: roomID, ParticipantID: callerPID},
-			providerMemberID: {ID: providerMemberID, RoomID: providerMemberRoomID, ParticipantID: providerPID},
+			callerMemberID:   callerMember,
+			providerMemberID: providerMember,
 		},
-		byRoomAndParticipant: map[chatroom.ID]map[participant.ID]*chatmember.ChatMember{
-			roomID: {
-				callerPID: {ID: callerMemberID, RoomID: roomID, ParticipantID: callerPID},
-			},
-		},
+		byRoomAndParticipant: byRoomAndParticipant,
 	}
 	return stub, callerMemberID, providerMemberID
 }
@@ -515,7 +517,7 @@ func TestCreateSenderKeyRequest_ProviderInDifferentRoom(t *testing.T) {
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
@@ -548,7 +550,7 @@ func TestCreateSenderKeyRequest_CallerNotInRoom(t *testing.T) {
 		&senderKeyReqBroadcasterStub{},
 	)
 
-	_, err := uc.Execute(context.Background(), makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID)))
+	_, err := uc.Execute(context.Background(), makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID)))
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotRoomMember), "expected ErrNotRoomMember, got %v", err)
@@ -587,7 +589,7 @@ func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailable(t *testing.T)
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
@@ -629,7 +631,7 @@ func TestCreateSenderKeyRequest_LatestDistributionAlreadyAvailableMarksPendingRe
 		&senderKeyReqFriendshipStub{},
 		&senderKeyReqBroadcasterStub{},
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
@@ -669,7 +671,7 @@ func TestCreateSenderKeyRequest_BlockedRelationship(t *testing.T) {
 		fsStub,
 		&senderKeyReqBroadcasterStub{},
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
@@ -702,7 +704,7 @@ func TestCreateSenderKeyRequest_Success(t *testing.T) {
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		broadcaster,
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 
@@ -723,18 +725,24 @@ func TestCreateSenderKeyRequest_Success(t *testing.T) {
 	var msg struct {
 		Type    string `json:"type"`
 		Payload struct {
-			RoomID            int64 `json:"room_id"`
-			ProviderMemberID  int64 `json:"provider_member_id"`
-			RequesterMemberID int64 `json:"requester_member_id"`
-			RequesterUserID   int64 `json:"requester_user_id"`
+			RoomID            int64  `json:"room_id"`
+			SenderMemberID    int64  `json:"sender_member_id"`
+			ProviderUserID    int64  `json:"provider_user_id"`
+			ProviderDeviceID  string `json:"provider_device_id"`
+			RequesterMemberID int64  `json:"requester_member_id"`
+			RequesterUserID   int64  `json:"requester_user_id"`
+			RequesterDeviceID string `json:"requester_device_id"`
 		} `json:"payload"`
 	}
 	require.NoError(t, json.Unmarshal(call.msg, &msg))
 	assert.Equal(t, "e2ee.sender_key_needed", msg.Type)
 	assert.Equal(t, int64(roomID), msg.Payload.RoomID)
-	assert.Equal(t, int64(providerMemberID), msg.Payload.ProviderMemberID)
+	assert.Equal(t, int64(providerMemberID), msg.Payload.SenderMemberID)
+	assert.Equal(t, providerUID, msg.Payload.ProviderUserID)
+	assert.Equal(t, senderKeyReqProviderDeviceID.String(), msg.Payload.ProviderDeviceID)
 	assert.Equal(t, int64(callerMemberID), msg.Payload.RequesterMemberID)
 	assert.Equal(t, callerUID, msg.Payload.RequesterUserID)
+	assert.Equal(t, senderKeyReqRequesterDeviceID.String(), msg.Payload.RequesterDeviceID)
 }
 
 func TestCreateSenderKeyRequest_RepeatedRequestsUseUpsertContract(t *testing.T) {
@@ -760,7 +768,7 @@ func TestCreateSenderKeyRequest_RepeatedRequestsUseUpsertContract(t *testing.T) 
 		&senderKeyReqFriendshipStub{err: friendship.ErrFriendshipNotFound},
 		&senderKeyReqBroadcasterStub{},
 	)
-	input := makeCreateSKRInput(callerUID, int64(roomID), int64(providerMemberID))
+	input := makeCreateSKRInput(callerUID, providerUID, int64(roomID), int64(providerMemberID))
 
 	_, err := uc.Execute(context.Background(), input)
 	require.NoError(t, err)

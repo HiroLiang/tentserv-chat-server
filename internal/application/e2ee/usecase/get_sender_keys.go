@@ -19,7 +19,7 @@ type GetSenderKeysInput struct {
 
 type SenderKeyItem struct {
 	ChatMemberID     int64
-	SenderDeviceID   string
+	ProviderDeviceID string
 	SenderKeyVersion int64
 }
 
@@ -82,7 +82,7 @@ func (u *GetSenderKeysUseCase) Execute(
 	for _, sk := range senderKeys {
 		items = append(items, SenderKeyItem{
 			ChatMemberID:     int64(sk.ChatMemberID),
-			SenderDeviceID:   sk.SenderDeviceID.String(),
+			ProviderDeviceID: sk.SenderDeviceID.String(),
 			SenderKeyVersion: sk.SenderKeyVersion,
 		})
 	}

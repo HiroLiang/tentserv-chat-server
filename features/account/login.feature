@@ -34,7 +34,7 @@ Feature: Login session
     And login response should include a bearer token
     And login mutation should reuse the existing participant
 
-  Scenario: Login allows the same account on multiple devices simultaneously
+  Scenario: Login allows the same account on multiple devices after verifying the second device
     Given login state is clean
     And a registered login device "11111111-1111-1111-1111-111111111111" named "Hiro's Mac" exists
     And a registered login device "22222222-2222-2222-2222-222222222222" named "Hiro's iPhone" exists
@@ -43,6 +43,9 @@ Feature: Login session
     Then the response status should be 200
     And I remember the login token as "device-a"
     When I login with identifier "login@example.com", password "redacted-password", and device "22222222-2222-2222-2222-222222222222"
+    Then the response status should be 202
+    And login response should require device verification and include a verification token and expiry timestamp
+    When I verify the login device using the stored token
     Then the response status should be 200
     And I remember the login token as "device-b"
     When I request my auth profile using remembered login token "device-a" and device "11111111-1111-1111-1111-111111111111"

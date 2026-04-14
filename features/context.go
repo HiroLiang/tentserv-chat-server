@@ -27,7 +27,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	})
 
 	bddsupport.RegisterCommonSteps(ctx, apiCtx)
-	accountfeatures.RegisterSteps(ctx, apiCtx, accountBDD)
+	accountfeatures.RegisterSteps(ctx, apiCtx, accountBDD, e2eeBDD.SKR.SelfSyncRepository())
 	chatfeatures.RegisterSteps(ctx, apiCtx, chatBDD, accountBDD)
 	devicefeatures.RegisterSteps(ctx, apiCtx, deviceBDD)
 	e2eefeatures.RegisterSteps(ctx, apiCtx, e2eeBDD, accountBDD)
